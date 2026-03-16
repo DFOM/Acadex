@@ -31,13 +31,17 @@ def landing_page():
             schedule_type='future'
         ).order_by(Schedule.year.desc()).all()
         
+    # NEW: Fetch all available datasets to show on the landing page
+    available_tables = get_course_data_tables()
+        
     return render_template('Student/index.html',
                            about_us=about_us.value if about_us else "Welcome to our dynamic scheduling platform.",
                            creator_message=creator_message.value if creator_message else "",
                            current_year=current_year.value if current_year else "2025",
                            current_semester=current_semester.value if current_semester else "Spring",
                            announcements=announcements,
-                           guest_schedules=guest_schedules)
+                           guest_schedules=guest_schedules,
+                           available_tables=available_tables)
 
 @student_bp.route('/courses/search')
 def search_courses():
@@ -66,7 +70,7 @@ def search_courses():
         print(f"Search error: {e}")
         return jsonify([])
 
-# --- NEW: Premium Dashboard Logic ---
+# --- Premium Dashboard Logic ---
 @student_bp.route('/dashboard')
 @login_required
 def user_dashboard():
