@@ -29,7 +29,6 @@ def login():
         else:
             flash("Invalid username or password.", "error")
 
-    # FIXED: Pointing to the 'Student' folder instead of 'Auth'
     return render_template('Student/login.html')
 
 @auth_bp.route('/register', methods=['GET', 'POST'])
@@ -39,12 +38,21 @@ def register():
         password = request.form.get('password')
         confirm_password = request.form.get('confirm_password')
         
+        # FIXED: Capture the demographic data from the form
+        gender = request.form.get('gender')
+        expected_graduation_str = request.form.get('expected_graduation')
+        
+        # Safely convert the year string into an integer for the database
+        expected_graduation = None
+        if expected_graduation_str and expected_graduation_str.isdigit():
+            expected_graduation = int(expected_graduation_str)
+        
         # Secret code logic to create an admin
         secret_code = request.form.get('secret_code')
         role = 'admin' if secret_code == 'admin123' else 'student'
 
         if not username or not password or not confirm_password:
-            flash("Please fill out all fields.", "error")
+            flash("Please fill out all required fields.", "error")
             return redirect(url_for('auth.register'))
 
         if password != confirm_password:
@@ -60,15 +68,20 @@ def register():
         # Encrypt the password before saving
         hashed_password = generate_password_hash(password, method='pbkdf2:sha256')
 
-        # Create and save the new user using SQLAlchemy
-        new_user = User(username=username, password=hashed_password, role=role)
+        # FIXED: Create and save the new user including their demographic data
+        new_user = User(
+            username=username, 
+            password=hashed_password, 
+            role=role,
+            gender=gender,
+            expected_graduation=expected_graduation
+        )
         db.session.add(new_user)
         db.session.commit()
 
         flash("Registration successful! Please log in.", "success")
         return redirect(url_for('auth.login'))
 
-    # FIXED: Pointing to the 'Student' folder instead of 'Auth'
     return render_template('Student/register.html')
 
 @auth_bp.route('/logout')
@@ -81,5 +94,4 @@ def logout():
 @auth_bp.route('/choose_schedule_type')
 @login_required
 def choose_schedule_type():
-    # FIXED: Pointing to the 'Student' folder instead of 'Auth'
     return render_template('Student/schedule_type.html')

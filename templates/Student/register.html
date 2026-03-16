@@ -12,11 +12,19 @@
                         <label class="form-label text-muted fw-bold">Username</label>
                         <input type="text" name="username" class="form-control bg-light" required>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label text-muted fw-bold">Password</label>
-                        <input type="password" name="password" class="form-control bg-light" required>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label text-muted fw-bold">Password</label>
+                            <input type="password" name="password" class="form-control bg-light" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label text-muted fw-bold">Confirm Password</label>
+                            <input type="password" name="confirm_password" class="form-control bg-light" required>
+                        </div>
                     </div>
-                    <div class="row mt-4">
+
+                    <div class="row mt-2">
                         <div class="col-md-6 mb-3">
                             <label class="form-label text-muted fw-bold">Gender</label>
                             <select name="gender" class="form-select bg-light">
@@ -25,17 +33,26 @@
                                 <option value="Prefer not to say" selected>Prefer not to say</option>
                             </select>
                         </div>
-                        <div class="col-md-6 mb-4">
-                            <label class="form-label text-muted fw-bold">Year of Study</label>
-                            <select name="year_of_study" class="form-select bg-light">
-                                <option value="Freshman">Freshman</option>
-                                <option value="Sophomore">Sophomore</option>
-                                <option value="Junior">Junior</option>
-                                <option value="Senior">Senior</option>
-                                <option value="Prefer not to say" selected>Prefer not to say</option>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label text-muted fw-bold">Expected Graduation</label>
+                            <select name="expected_graduation" class="form-select bg-light">
+                                <option value="" selected>Select Year</option>
+                                <option value="2026">2026</option>
+                                <option value="2027">2027</option>
+                                <option value="2028">2028</option>
+                                <option value="2029">2029</option>
+                                <option value="2030">2030</option>
+                                <option value="2031">2031</option>
                             </select>
                         </div>
                     </div>
+
+                    <div class="mb-4">
+                        <label class="form-label text-muted fw-bold">Secret Code (Optional)</label>
+                        <input type="password" name="secret_code" class="form-control bg-light" placeholder="Only for system admins">
+                    </div>
+
                     <button type="submit" class="btn btn-success btn-lg w-100 shadow-sm">Create Account</button>
                 </form>
                 <div class="mt-4 text-center">

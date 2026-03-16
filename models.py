@@ -12,9 +12,10 @@ class User(db.Model, UserMixin):
     password = db.Column(db.String(150), nullable=False)
     role = db.Column(db.String(50), default='student')
     
-    # NEW: Added demographic columns required for the Admin Analytics panel
+    # Demographics
     gender = db.Column(db.String(50), nullable=True)
-    year_of_study = db.Column(db.Integer, nullable=True)
+    # FIXED: Replaced year_of_study with a concrete Expected Graduation Year
+    expected_graduation = db.Column(db.Integer, nullable=True)
     
     # Relationship: If a user is deleted, all their schedules are automatically deleted
     schedules = db.relationship('Schedule', backref='student', lazy=True, cascade="all, delete-orphan")
