@@ -1,0 +1,17 @@
+{% extends "Layouts/student_base.html" %}
+{% block title %}Welcome to University Scheduler{% endblock %}
+
+{% block content %}
+<div class="p-5 mb-4 bg-light rounded-3 text-center shadow-sm mt-4">
+    <div class="container-fluid py-5">
+        <h1 class="display-5 fw-bold text-primary mb-3">Plan Your Academic Future</h1>
+        <p class="col-md-8 mx-auto fs-5 text-muted mb-4">
+            Easily track your graduation requirements, calculate your GPA, and build your perfect class schedule semester by semester.
+        </p>
+        <div class="mt-4">
+            <a href="{{ url_for('auth.register') }}" class="btn btn-primary btn-lg px-4 me-3 shadow-sm">Get Started</a>
+            <a href="{{ url_for('auth.login') }}" class="btn btn-outline-secondary btn-lg px-4 shadow-sm">Login</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

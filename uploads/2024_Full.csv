@@ -1,0 +1,197 @@
+﻿Day and Period,Course Number,Course Title,Credits,Semester,Year Offered,Prerequisites,Course Instructor,Year Available,Subject Area
+Mon1 Wed1,FNDN100,Academic Reading Across Disciplines,3,Fall Semester 2024,Every Year,English for Academic Excellence (EFAE) : B * This course is a mandatory course open to all First-Year Students except those who have cleared the entrance test for FNDN 103 Expository Research Writing.,DUA Kanupriya,1Year,Foundation Courses
+Tue3 Thu3,ARTS100,Art Appreciation,3,Fall Semester 2024,Every Year,None,STOCKER Sam,1Year,Interdisciplinary Arts - Arts
+Tue2 Thu2,MUSC315,Audio Engineering,3,Fall Semester 2024,Every Year,MUSC/ARTS 260 Sound Art OR Music Technology AND Fund of Sound AND Music,BLOW Michael,2Year,Interdisciplinary Arts - Music
+Mon1 Wed1,ARTS/JPNA111,Calligraphy and Kanji Culture,3,Fall Semester 2024,Every Year,None,REED William,1Year,Interdisciplinary Arts - Arts
+Mon5 Mon6,DATA160,Coding Bootcamp: Python,1,Fall Semester 2024,Every Year,Introduction to Python Programming (can be taken concurrently),PARIDA Abhishek,1Year,Data Science
+Mon2 Wed2,QREA102,College Algebra,3,Fall Semester 2024,Every Year,None,JHINGAN Sanjay,1Year,Quantitative Reasoning and Natural Sciences
+Tue2 Thu2,FNDN101,Composition 1 Sec 1,3,Fall Semester 2024,Every Year,"EFAE020 English for Academic Excellence (EFAE) : B OR equivalent, AND Placement test * This is a foundation course, mandatory for all Liberal Arts Students except those who have cleared the entrance test for FNDN103 Expository Research Writing",DUA Kanupriya,1Year,Foundation Courses
+Tue3 Thu3,FNDN101,Composition 1 Sec 2,3,Fall Semester 2024,Every Year,"EFAE020 English for Academic Excellence (EFAE) : B OR equivalent, AND Placement test * This is a foundation course, mandatory for all Liberal Arts Students except those who have cleared the entrance test for FNDN103 Expository Research Writing",DUA Kanupriya,1Year,Foundation Courses
+Tue2 Thu2,FNDN102,Composition 2 Sec 1,3,Fall Semester 2024,Every Year,Composition 1,KNUDSEN David,1Year,Foundation Courses
+Tue3 Thu3,FNDN102,Composition 2 Sec 2,3,Fall Semester 2024,Every Year,Composition 1,KNUDSEN David,1Year,Foundation Courses
+Thu6,FNDN050,Composition Lab,1,Fall Semester 2024,Every Year,"EFAE020 English for Academic Excellence (EFAE) : B OR equivalent, AND Placement test * Must be taken along side of Composition 1 if entry test is not passed",KAWAKAMI Sumie,1Year,Foundation Courses
+Tue1 Thu1,PSYC/ECON/DATA348,Consumer Psychology,3,Fall Semester 2024,Every Year,1) Social Psychology OR Social Psychology OR 2) Introduction to Psychology AND Marketing,Law Wai him crystal,3Year,Psychology
+Mon6 Wed6,PSCI/ECON235,Contemporary Issues of Political Economy,3,Fall Semester 2024,Every Year,Introduction to Political Science AND Microeconomics,RAJAONARISON Haja,2Year,Political Science
+Tue2 Thu2,LANG331,Creative Nonfiction,3,Fall Semester 2024,Every Year,LANG 220 Rhetorical Analysis AND Composition OR LANG/JPNA 240 Contemporary Japanese Literature OR LANG/JPNA 235 Japan: Lost in Adaptation AND Representation,SUGIYAMA Kazutaka,2Year,Interdisciplinary Arts - Language Arts
+Tue6 Thu6,PSYC/DATA311,Cyberpsychology,3,Fall Semester 2024,Every Year,Social Psychology OR Social Psychology OR Cognitive Psychology,FONG Chun Yuen,3Year,Psychology
+Tue1 Thu1,DATA240,Data Visualization Techniques in Python,3,Fall Semester 2024,Every Year,Introduction to Python Programming AND Statistics,PARIDA Abhishek,2Year,Data Science
+Mon1 Wed1,ECON315,Derivatives,3,Fall Semester 2024,Every Year,Financial Management,LIU Ming,3Year,Global Business and Economics
+Mon4 Wed4,PSYC240,Developmental Psychology,3,Fall Semester 2024,Every Year,Introduction to Psychobiology,Law Wai him crystal,2Year,Psychology
+Tue5 Thu5,LANG/JPNA245,Early Modern Japanese Literature,3,Fall Semester 2024,Every Year,None,LEE I-Zhuen Clarence,2Year,Interdisciplinary Arts - Language Arts
+Mon5 Wed5,SCNS110,Earth Science,3,Fall Semester 2024,Every Year,None,JHINGAN Sanjay,1Year,Quantitative Reasoning and Natural Sciences
+Mon1,EFAE010,English for Academic Excellence (EAE): A Sec 1,15,Fall Semester 2024,Every Year,None,TOMA Masahiro,1Year,English for Academic Excellence
+Mon1,EFAE010,English for Academic Excellence (EAE): A Sec 2,15,Fall Semester 2024,Every Year,None,TOMA Masahiro,1Year,English for Academic Excellence
+Mon1 Mon2 Mon3 Mon4 Tue1 Tue5 Wed1 Wed4 Thu3 Thu5,EFAE020,English for Academic Excellence (EAE): B Sec 1,15,Fall Semester 2024,Every Year,English for Academic Excellence (EFAE) : A OR equivalent,TOMA Masahiro,1Year,English for Academic Excellence
+Mon2 Mon3 Mon4 Tue2 Tue4 Wed2 Wed4 Wed5 Thu4 Thu5,EFAE020,English for Academic Excellence (EAE): B Sec 2,15,Fall Semester 2024,Every Year,English for Academic Excellence (EFAE) : A OR equivalent,TOMA Masahiro,1Year,English for Academic Excellence
+Mon2 Wed2,FNDN103,Expository Research Writing Sec 1,3,Fall Semester 2024,Every Year,"EFAE020 English for Academic Excellence (EFAE) : B OR equivalent, AND Placement test",KNUDSEN David,1Year,Foundation Courses
+Mon4 Wed4,FNDN103,Expository Research Writing Sec 2,3,Fall Semester 2024,Every Year,"EFAE020 English for Academic Excellence (EFAE) : B OR equivalent, AND Placement test",KNUDSEN David,1Year,Foundation Courses
+Tue5 Thu5,ECON140,Financial Management,3,Fall Semester 2024,Every Year,Accounting,LIU Ming,1Year,Global Business and Economics
+Fri4 Fri5,SOCI/PART/JPNA330,Folklore and Archeology of Yamanashi,3,Fall Semester 2024,Every Year,Introduction to Anthropology OR The Anthropology of Japan,ASHMORE Darren,3Year,Sociology
+Mon3 Wed3,FNDN116,Foundation for College Success,1,Fall Semester 2024,Every Year,None,FONG Chun Yuen,1Year,Foundation Courses
+,FNDN499,Graduation Research Project,2,Fall Semester 2024,Every Year,1. Completed the Seminar OR has received the necessary approval of Advisor AND the committee to take the Seminar concurrently 2. Last semester at iCLA before graduation 3. Completed Study Abroad AND its credit transfer process (if applicable) 4. Attended relevant information session(s),RAJAONARISON Haja,4Year,Foundation Courses
+Mon4 Wed4,ARTS310,Graphic Design Studio,3,Fall Semester 2024,Even Years,Art Appreciation AND Workshop: Graphic Design 1 AND Workshop: Graphic Design 2 OR Workshop: Graphic Design 2,STOCKER Sam,3Year,Interdisciplinary Arts - Arts
+Tue2 Thu2,JPNA/SPRT183,Health & Physical Education 1 (Karate),1,Fall Semester 2024,Every Year,None,TANAKA Go,1Year,Health and Physical Education
+Tue4 Thu4,JPNA/SPRT180,Health & Physical Education 1 (Nanba),1,Fall Semester 2024,Every Year,None,REED William,1Year,Health and Physical Education
+Tue1 Thu1,JPNA/SPRT282,Health & Physical Education 2 (Judo),1,Fall Semester 2024,Every Year,Health & Physical Education 1 (Judo),Nishida Takahiro,1Year,Health and Physical Education
+Tue3 Thu3,PSYC260,Health Psychology,3,Fall Semester 2024,Every Year,Introduction to Psychology OR Introduction to Psychobiology,Law Wai him crystal,2Year,Psychology
+Mon2 Wed2,HIST/JPNA360,History of Science and Medicine in Japan,3,Fall Semester 2024,Every Year,Bodies AND Cultures in Modern Japanese History,LEE I-Zhuen Clarence,3Year,Japan Studies - History
+Tue2 Thu2,ECON202,Intermediate Macroeconomics,3,Fall Semester 2024,Every Year,Macroeconomics,SHENG Dachen,2Year,Global Business and Economics
+Mon4 Wed4,ECON201,Intermediate Microeconomics,3,Fall Semester 2024,Every Year,101 Microeconomics,Nan Zheng,1Year,Global Business and Economics
+Tue6 Thu6,ECON325,International Finance,3,Fall Semester 2024,Every Year,Microeconomics AND Macroeconomics,SHENG Dachen,3Year,Global Business and Economics
+Mon2 Wed2,PSCI/ECON275,International Political Economy,3,Fall Semester 2024,Every Year,Microeconomics OR Macroeconomics AND International Relations,RAJAONARISON Haja,2Year,Political Science
+Mon6 Wed6,PSCI230,International Relations,3,Fall Semester 2024,Every Year,Introduction to Political Science,HARAGUCHI Koji,1Year,Political Science
+,FNDN285,Internship,1,Fall Semester 2024,Every Year,None,JHINGAN Sanjay,2Year,Foundation Courses
+Tue6,FNDN/DATA090,Introduction to Data Science,1,Fall Semester 2024,Every Year,None,JHINGAN Sanjay,1Year,Foundation Courses
+Mon6 Wed6,ECON/DATA370,Introduction to Fintech: Reshaping the Financial World,3,Fall Semester 2024,Every Year,None,Nan Zheng,3Year,Global Business and Economics
+Mon4 Wed4,LANG100,Introduction to Language Concepts,3,Fall Semester 2024,Every Year,None,RAFIEYAN Vahid,1Year,Interdisciplinary Arts - Language Arts
+Mon2 Wed2,PSCI100,Introduction to Political Science,3,Fall Semester 2024,Every Year,None,LARATTA Rosario,1Year,Political Science
+Mon5 Wed5,PSYC150,Introduction to Psychobiology,3,Fall Semester 2024,Every Year,None,FONG Chun Yuen,1Year,Psychology
+Tue5 Thu5,PSCI240,Introduction to Public Administration,3,Fall Semester 2024,Every Year,Introduction to Political Science,LARATTA Rosario,1Year,Political Science
+Mon1 Wed1,DATA150,Introduction to Python Programming,3,Fall Semester 2024,Every Year,None,PARIDA Abhishek,1Year,Data Science
+Mon2 Wed2,LANG/JPNA235,Japan: Lost in Adaptation and Representation,3,Fall Semester 2024,Even Years,Literature Appreciation OR Rhetorical Analysis AND Composition,SUGIYAMA Kazutaka,2Year,Interdisciplinary Arts - Language Arts
+Tue3 Thu3,ECON/JPNA230,Japanese Economy & Business,3,Fall Semester 2024,Every Year,None,LIU Ming,1Year,Global Business and Economics
+Tue1 Thu1 Fri1,JPNL111,Japanese Language 1 Sec 1,3,Fall Semester 2024,Every Year,Placement Test,TOMA Masahiro,1Year,Japan Studies - Japanese Language
+Tue2 Thu2 Fri2,JPNL111,Japanese Language 1 Sec 2,3,Fall Semester 2024,Every Year,Placement Test,TOMA Masahiro,1Year,Japan Studies - Japanese Language
+Tue3 Thu3 Fri3,JPNL111,Japanese Language 1 Sec 3,3,Fall Semester 2024,Every Year,Placement Test,TOMA Masahiro,1Year,Japan Studies - Japanese Language
+Tue1 Thu1 Fri1,JPNL112,Japanese Language 2 Sec 1,3,Fall Semester 2024,Every Year,Elementary Japanese 1 OR Japanese Language 1 OR equivalent,OKABE Mariko,1Year,Japan Studies - Japanese Language
+Tue2 Thu2 Fri2,JPNL112,Japanese Language 2 Sec 2,3,Fall Semester 2024,Every Year,Elementary Japanese 1 OR Japanese Language 1 OR equivalent,OKABE Mariko,1Year,Japan Studies - Japanese Language
+Tue3 Thu3 Fri3,JPNL113,Japanese Language 3,3,Fall Semester 2024,Every Year,Elementary Japanese 2 OR Japanese Language 2 OR equivalent,OKABE Mariko,1Year,Japan Studies - Japanese Language
+Tue1 Thu1 Fri1,JPNL114,Japanese Language 4,3,Fall Semester 2024,Every Year,Japanese Language 3 OR equivalent,INAGAKI Midori,1Year,Japan Studies - Japanese Language
+Tue2 Thu2 Fri2,JPNL115,Japanese Language 5,3,Fall Semester 2024,Every Year,Elementary Japanese 3 OR Japanese Language 4 OR equivalent,INAGAKI Midori,1Year,Japan Studies - Japanese Language
+Tue1 Thu1 Fri1,JPNL116,Japanese Language 6,3,Fall Semester 2024,Every Year,Intermediate Japanese 1 OR Japanese Language 5 OR equivalent,IMAKI Jun,1Year,Japan Studies - Japanese Language
+Tue2 Thu2 Fri2,JPNL117,Japanese Language 7,3,Fall Semester 2024,Every Year,Intermediate Japanese 2 OR Japanese Language 6 OR equivalent,IMAKI Jun,1Year,Japan Studies - Japanese Language
+Mon1 Wed1,JPNA/PSCI355,Japanese Politics and Diplomacy,3,Fall Semester 2024,Every Year,International Relations OR Comparative Politics,HARAGUCHI Koji,2Year,Political Science
+Mon4 Wed4,JPNA/PART351,Japanese Traditional Theater,3,Fall Semester 2024,Even Years,Japanese Society AND Culture OR Japan: Case Studies in Society ＆Culture OR Japanese Film ＆Theater OR The Anthropology of Japan,ASHMORE Darren,2Year,Interdisciplinary Arts - Performing Arts
+Tue5 Thu5,JPNL001,Konnichiwa Japanese,1,Fall Semester 2024,Every Year,None,IMAKI Jun,1Year,Japan Studies - Japanese Language
+Tue4 Thu4,FNDN030,Liberal Arts Preparation (Japanese),3,Fall Semester 2024,Every Year,"Japanese Native OR N2 proficiency, AND Placement test",KAWAKAMI Sumie,1Year,Foundation Courses
+Tue6 Thu6,LANG150,Literature Appreciation,3,Fall Semester 2024,Every Year,None,SUGIYAMA Kazutaka,1Year,Interdisciplinary Arts - Language Arts
+Tue3 Thu3,DATA350,Machine Learning,3,Fall Semester 2024,Every Year,Coding Bootcamp: Python AND Data Visualization techniques in Python AND Mathematics for Data Science,PARIDA Abhishek,3Year,Data Science
+Fri3 Fri4,ECON260,Marketing,3,Fall Semester 2024,Every Year,None,SUGA Hitoshi,2Year,Global Business and Economics
+Tue4 Thu4,ECON101,Microeconomics,3,Fall Semester 2024,Every Year,None,Nan Zheng,1Year,Global Business and Economics
+Mon6 Wed6,FNDN145,Modern World History,3,Fall Semester 2024,Every Year,None,LEE I-Zhuen Clarence,1Year,Foundation Courses
+Mon2 Wed2,MUSC251,Music Technology,3,Fall Semester 2024,Every Year,None,BLOW Michael,2Year,Interdisciplinary Arts - Music
+Mon5 Wed5,MUSC240,Music of the 20th Century,3,Fall Semester 2024,Even Years,None,BLOW Michael,2Year,Interdisciplinary Arts - Music
+Tue2 Thu2,PSCI/SOCI370,Nonprofit/Social Enterprise Management,3,Fall Semester 2024,Every Year,Introduction to Public Administration,LARATTA Rosario,3Year,Political Science
+Tue4 Thu4,PSCI/ECON/DATA366,Political Economy of Development,3,Fall Semester 2024,Every Year,Microeconomics OR Macroeconomics AND Comparative Politics,RAJAONARISON Haja,3Year,Political Science
+Tue5 Thu5,JPNL370,Preparation for the N1 level of the Japanese Language Proficiency Test,1,Fall Semester 2024,Every Year,Advanced Japanese OR Japanese Language 7 OR equivalent,INAGAKI Midori,1Year,Japan Studies - Japanese Language
+Tue4 Thu4,JPNL250,Professional Writing in Japanese,3,Fall Semester 2024,Every Year,Japanese Native OR Advanced Japanese OR Japanese Language 7,INAGAKI Midori,1Year,Japan Studies - Japanese Language
+Mon5 Wed5,ECON/DATA331,Risk Management,3,Fall Semester 2024,Every Year,Financial Management,SHENG Dachen,3Year,Global Business and Economics
+Mon5 Wed5,JPNA/PART253,Samurai Code and Culture,3,Fall Semester 2024,Every Year,None,REED William,2Year,Interdisciplinary Arts - Performing Arts
+Mon1 Wed1,LANG210,Semantics,3,Fall Semester 2024,Every Year,None,RAFIEYAN Vahid,1Year,Interdisciplinary Arts - Language Arts
+Mon3,ECON498,Seminar (Global Business & Economics),1,Fall Semester 2024,Every Year,UNIPA,LIU Ming,4Year,Global Business and Economics
+Mon3,INTA499,Seminar (Interdisciplinary Arts),1,Fall Semester 2024,Every Year,UNIPA,RAFIEYAN Vahid,4Year,Interdisciplinary Arts - Interdisciplinary Arts
+Mon3,DATA499,Seminar (Interdisciplinary Data Science),1,Fall Semester 2024,Every Year,UNIPA,PARIDA Abhishek,4Year,Data Science
+Mon3,JPNA499,Seminar (Japan Studies),1,Fall Semester 2024,Every Year,UNIPA,LEE I-Zhuen Clarence,4Year,Japan Studies - Japan Studies
+Mon3,PSCI499,Seminar (Political Science),1,Fall Semester 2024,Every Year,UNIPA,LARATTA Rosario,4Year,Political Science
+Mon3,PSYC499,Seminar (Psychology),1,Fall Semester 2024,Every Year,UNIPA,FONG Chun Yuen,4Year,Psychology
+Tue4 Thu4,PSYC201,Social Psychology,3,Fall Semester 2024,Every Year,Introduction to Psychology OR Introduction to Psychobiology,FONG Chun Yuen,2Year,Psychology
+Mon6 Wed6,SOCI/JPNA160,The Anthropology of Japan,3,Fall Semester 2024,Every Year,None,ASHMORE Darren,1Year,Sociology
+Mon3 Mon4,DATA/SOCI/QREA340,The Art & Science of Decision Making in an Era of Accelerating Change: Transformation/Big Data/AI,3,Fall Semester 2024,Every Year,None,Ricketts John,3Year,Data Science
+Tue3 Tue4,PART280,Workshop: Acting 2,1,Fall Semester 2024,Every Year,None,Berwanger Paula,2Year,Interdisciplinary Arts - Performing Arts
+Tue4 Thu4,LANG/SOCI215,Workshop: Archeolinguistics,1,Fall Semester 2024,Every Year,None,ASHMORE Darren,2Year,Interdisciplinary Arts - Language Arts
+Thu3 Thu4,ARTS280,Workshop: Drawing II,1,Fall Semester 2024,Every Year,None,TOZAWA Kayoko,1Year,Interdisciplinary Arts - Arts
+,JPNL279,Workshop: Experiencing Teaching Japanese,1,Fall Semester 2024,Every Year,Japanese Native OR Advanced Japanese OR Japanese Language 7,IMAKI Jun,2Year,Japan Studies - Japanese Language
+Thu5 Thu6,ARTS187,Workshop: Graphic Design I,1,Fall Semester 2024,Every Year,None,STOCKER Sam,1Year,Interdisciplinary Arts - Arts
+Tue5 Tue6,MUSC/PART130,Workshop: Guitar,1,Fall Semester 2024,Every Year,None,BLOW Michael,1Year,Interdisciplinary Arts - Music
+Fri3 Fri4,JPNA/MUSC187,Workshop: Japanese Koto,1,Fall Semester 2024,Every Year,None,MURASAWA Joji,1Year,Interdisciplinary Arts - Music
+Tue5 Tue6,ARTS288,Workshop: Painting and Sculpting 2,1,Fall Semester 2024,Every Year,None,STOCKER Sam,2Year,Interdisciplinary Arts - Arts
+Tue1 Thu1,LANG300,World Englishes,3,Fall Semester 2024,Every Year,Introduction to Language Concepts,RAFIEYAN Vahid,3Year,Interdisciplinary Arts - Language Arts
+Mon1 Wed1,FNDN100,Academic Reading Across Disciplines,3,Spring Semester 2024,Every Year,English for Academic Excellence (EFAE) : B * This course is a mandatory course open to all First-Year Students except those who have cleared the entrance test for FNDN 103 Expository Research Writing.,DUA Kanupriya,1Year,Foundation Courses
+Tue4 Thu4,ECON120,Accounting,3,Spring Semester 2024,Every Year,None,SHENG Dachen,1Year,Global Business and Economics
+Mon2 Wed2,ARTS420,Art Portfolio,3,Spring Semester 2024,Every Year,1) 1 Art Course from: Art Appreciation History of Art Japanese Art AND Aesthetics Interdisciplinary Art AND 2) 1 Art Course from: OR Art Studio Graphic Design Studio AND 3) 2 Art Workshops from: Workshop: Drawing 1 OR Workshop: Drawing 2 Workshop: Graphic Design 1 OR Workshop: Graphic Design 2 Workshop: Painting AND Sculpting 1 OR OR Workshop: Painting AND Sculpting 2 (OR equivalent),STOCKER Sam,4Year,Interdisciplinary Arts - Arts
+Mon2 Wed2,HIST/JPNA260,Bodies and Cultures in Modern Japanese History,3,Spring Semester 2024,Every Year,Introduction to Japanese History,LEE I-Zhuen Clarence,2Year,Japan Studies - History
+Mon1 Wed1,ARTS/JPNA111,Calligraphy and Kanji Culture,3,Spring Semester 2024,Every Year,None,REED William,1Year,Interdisciplinary Arts - Arts
+Tue5 Tue6,DATA160,Coding Bootcamp: Python,1,Spring Semester 2024,Every Year,Introduction to Python Programming (can be taken concurrently),PARIDA Abhishek,1Year,Data Science
+Tue4 Thu4,PSYC210,Cognitive Psychology,3,Spring Semester 2024,Every Year,Introduction to Psychology OR Introduction to Psychobiology,FONG Chun Yuen,2Year,Psychology
+Tue1 Thu1,JPNA/LANG450,Comparative Literature Studies,3,Spring Semester 2024,Every Year,LANG/JPNA 310 Modern Japanese Society AND Culture Through Literature OR LANG 331 Creative Nonfiction OR LANG 345 Contemporary Literature Politics AND Economy OR LANG 346 Contemporary Literature Politics AND Economy OR Contemporary Science Fiction,SUGIYAMA Kazutaka,3Year,Interdisciplinary Arts - Language Arts
+Mon1 Wed1,PSCI220,Comparative Politics,3,Spring Semester 2024,Every Year,Introduction to Political Science,RAJAONARISON Haja,1Year,Political Science
+Tue2 Thu2,FNDN101,Composition 1 Sec 1,3,Spring Semester 2024,Every Year,"EFAE020 English for Academic Excellence (EFAE) : B OR equivalent, AND Placement test * This is a foundation course, mandatory for all Liberal Arts Students except those who have cleared the entrance test for FNDN103 Expository Research Writing.",DUA Kanupriya,1Year,Foundation Courses
+Tue3 Thu3,FNDN101,Composition 1 Sec 2,3,Spring Semester 2024,Every Year,"EFAE020 English for Academic Excellence (EFAE) : B OR equivalent, AND Placement test * This is a foundation course, mandatory for all Liberal Arts Students except those who have cleared the entrance test for FNDN103 Expository Research Writing.",DUA Kanupriya,1Year,Foundation Courses
+Tue2 Thu2,FNDN102,Composition 2 Sec 1,3,Spring Semester 2024,Every Year,Composition 1,KNUDSEN David,1Year,Foundation Courses
+Tue3 Thu3,FNDN102,Composition 2 Sec 2,3,Spring Semester 2024,Every Year,Composition 1,KNUDSEN David,1Year,Foundation Courses
+Tue6,FNDN050,Composition Lab,1,Spring Semester 2024,Every Year,"EFAE020 English for Academic Excellence (EFAE) : B OR equivalent, AND Placement test * Must be taken alongside of Composition １ if entry test is not passed",DUA Kanupriya,1Year,Foundation Courses
+Mon2 Wed2,LANG370,Contemporary Science Fiction,3,Spring Semester 2024,Even Years,Rhetorical Analysis AND Composition OR Contemporary Japanese Literature OR Japan: Lost in Adaptation AND Representation,SUGIYAMA Kazutaka,3Year,Interdisciplinary Arts - Language Arts
+Mon3 Wed3,JPNA225,Cultural Exchange in Japanese,3,Spring Semester 2024,Every Year,Intermediate Japanese 1 OR Japanese Language 5 OR equivalent,Hara Momotoshi,1Year,Japan Studies - Japan Studies
+Tue6 Thu6,LANG/JPNA305,East Asian Tales of the Supernatural,3,Spring Semester 2024,Every Year,Early Modern Japanese Literature OR Bodies AND Cultures in Modern Japanese History,LEE I-Zhuen Clarence,3Year,Interdisciplinary Arts - Language Arts
+Mon4 Wed4,ECON/DATA291,Econometrics,3,Spring Semester 2024,Every Year,Statistics,Nan Zheng,2Year,Global Business and Economics
+Tue2 Thu2,PSYC/ECON/DATA352,Economic Psychology,3,Spring Semester 2024,Every Year,Social Psychology OR Social Psychology,FONG Chun Yuen,3Year,Psychology
+Mon2 Wed2,ECON385,Economics of Sustainable Development,3,Spring Semester 2024,Every Year,None,LIU Ming,3Year,Global Business and Economics
+Mon1,EFAE010,English for Academic Excellence (EAE): A Sec 1,15,Spring Semester 2024,Every Year,None,TOMA Masahiro,1Year,English for Academic Excellence
+Mon1 Mon2 Mon5 Tue1 Tue3 Tue5 Wed1 Wed2 Thu1 Thu3,EFAE010,English for Academic Excellence (EAE): A Sec 2,15,Spring Semester 2024,Every Year,None,TOMA Masahiro,1Year,English for Academic Excellence
+Mon2 Mon3 Mon4 Tue2 Tue4 Tue5 Wed2 Wed4 Thu2 Thu5,EFAE020,English for Academic Excellence (EAE): B Sec 1,15,Spring Semester 2024,Every Year,English for Academic Excellence (EFAE) : A OR equivalent,TOMA Masahiro,1Year,English for Academic Excellence
+Mon3 Mon4 Mon5 Tue4 Wed1 Wed2 Wed4 Thu3 Thu4 Thu5,EFAE020,English for Academic Excellence (EAE): B Sec 2,15,Spring Semester 2024,Every Year,English for Academic Excellence (EFAE) : A OR equivalent,TOMA Masahiro,1Year,English for Academic Excellence
+Mon4 Wed4,LANG110,English for Specific Purposes,3,Spring Semester 2024,Every Year,None,RAFIEYAN Vahid,1Year,Interdisciplinary Arts - Language Arts
+Fri3 Fri4,ECON350,Entrepreneurship,3,Spring Semester 2024,Every Year,None,SUGA Hitoshi,2Year,Global Business and Economics
+Tue6,PSYC301,Experimental Psychology,1,Spring Semester 2024,Every Year,Research Design,FONG Chun Yuen,3Year,Psychology
+Mon4 Wed4,FNDN103,Expository Research Writing,3,Spring Semester 2024,Every Year,"EFAE020 English for Academic Excellence (EFAE) : B OR equivalent, AND Placement test",DUA Kanupriya,1Year,Foundation Courses
+Mon4 Wed4,PART/JPNA320,Film and Animation Studio,3,Spring Semester 2024,Every Year,Introduction to Filmmaking,ASHMORE Darren,3Year,Interdisciplinary Arts - Performing Arts
+Mon3 Wed3,FNDN116,Foundation for College Success,1,Spring Semester 2024,Every Year,None,FONG Chun Yuen,1Year,Foundation Courses
+Tue2 Thu2,MUSC120,Fundamentals of Sound and Music,3,Spring Semester 2024,Every Year,None,BLOW Michael,1Year,Interdisciplinary Arts - Music
+Tue3 Thu3,PSCI/ECON265,Geographical Political Economy,3,Spring Semester 2024,Every Year,Microeconomics OR Comparative Politics,RAJAONARISON Haja,2Year,Political Science
+,FNDN499,Graduation Research Project,2,Spring Semester 2024,Every Year,1. Completed the Seminar OR has received the necessary approval of Advisor AND the committee to take the Seminar concurrently 2. Last semester at iCLA before graduation 3. Completed Study Abroad AND its credit transfer process (if applicable) 4. Attended relevant information session(s),RAJAONARISON Haja,4Year,Foundation Courses
+Tue4 Thu4,JPNA/SPRT181,Health & Physical Education 1 (Aikido),1,Spring Semester 2024,Every Year,None,REED William,1Year,Health and Physical Education
+Tue1 Thu1,JPNA/SPRT182,Health & Physical Education 1 (Judo),1,Spring Semester 2024,Every Year,None,Nishida Takahiro,1Year,Health and Physical Education
+Wed3 Wed4,JPNA/SPRT190,Health & Physical Education 1 (Shugendo),1,Spring Semester 2024,Every Year,None,HASEGAWA Satoshi,1Year,Health and Physical Education
+Tue2 Thu2,JPNA/SPRT283,Health & Physical Education 2 (Karate),1,Spring Semester 2024,Every Year,Health & Physical Education 1 (Karate),TANAKA Go,1Year,Health and Physical Education
+Mon5 Wed5,ARTS210,History of Art,3,Spring Semester 2024,Every Year,None,STOCKER Sam,1Year,Interdisciplinary Arts - Arts
+Tue3 Thu3,PSYC330,Individual Differences,3,Spring Semester 2024,Every Year,Research Design ※Can take concurrently to satisfy prerequisite ONLY in 2024,FONG Chun Yuen,3Year,Psychology
+Tue5 Thu5,ARTS/MUSC110,Interdisciplinary Arts,3,Spring Semester 2024,Even Years,None,BLOW Michael,1Year,Interdisciplinary Arts - Music
+Mon6 Wed6,PSCI311,International Relations in the Asian Pacific Region,3,Spring Semester 2024,Every Year,International Relations,HARAGUCHI Koji,2Year,Political Science
+Mon2 Wed2,PSCI320,International Security,3,Spring Semester 2024,Even Years,International Relations,HARAGUCHI Koji,2Year,Political Science
+Mon6 Wed6,ECON320,International Trade & Economics of Globalization,3,Spring Semester 2024,Every Year,Microeconomics OR Macroeconomics,Nan Zheng,2Year,Global Business and Economics
+,FNDN285,Internship,1,Spring Semester 2024,Every Year,None,JHINGAN Sanjay,2Year,Foundation Courses
+Tue1 Thu1,DATA100,Introduction to Computer Science,3,Spring Semester 2024,Every Year,None,PARIDA Abhishek,1Year,Data Science
+Thu6,FNDN/DATA090,Introduction to Data Science,1,Spring Semester 2024,Every Year,None,PARIDA Abhishek,1Year,Foundation Courses
+Mon6 Wed6,PART120,Introduction to Filmmaking,3,Spring Semester 2024,Every Year,None,ASHMORE Darren,1Year,Interdisciplinary Arts - Performing Arts
+Tue3 Thu3,HIST/JPNA170,Introduction to Japanese History,3,Spring Semester 2024,Every Year,None,LEE I-Zhuen Clarence,1Year,Japan Studies - History
+Mon2 Wed2,PSCI100,Introduction to Political Science,3,Spring Semester 2024,Every Year,None,LARATTA Rosario,1Year,Political Science
+Mon5 Wed5,PSYC100,Introduction to Psychology,3,Spring Semester 2024,Every Year,None,FONG Chun Yuen,1Year,Psychology
+Mon6 Wed6,DATA150,Introduction to Python Programming,3,Spring Semester 2024,Every Year,None,PARIDA Abhishek,1Year,Data Science
+Mon5 Wed5,ECON/DATA246,Investment,3,Spring Semester 2024,Every Year,Financial Management,LIU Ming,2Year,Global Business and Economics
+Fri5 Fri6,SOCI/JPNA270,Japan: Case Studies in Society & Culture,3,Spring Semester 2024,Even Years,Introduction to Anthropology OR The Anthropology of Japan,ASHMORE Darren,2Year,Sociology
+Tue1 Thu1 Fri1,JPNL111,Japanese Language 1 Sec 1,3,Spring Semester 2024,Every Year,Placement Test,TOMA Masahiro,1Year,Japan Studies - Japanese Language
+Tue2 Thu2 Fri2,JPNL111,Japanese Language 1 Sec 2,3,Spring Semester 2024,Every Year,Placement Test,TOMA Masahiro,1Year,Japan Studies - Japanese Language
+Tue1 Thu1 Fri1,JPNL112,Japanese Language 2 Sec 1,3,Spring Semester 2024,Every Year,Elementary Japanese 1 OR Japanese Language 1 OR equivalent,OKABE Mariko,1Year,Japan Studies - Japanese Language
+Tue2 Thu2 Fri2,JPNL112,Japanese Language 2 Sec 2,3,Spring Semester 2024,Every Year,Elementary Japanese 1 OR Japanese Language 1 OR equivalent,OKABE Mariko,1Year,Japan Studies - Japanese Language
+Tue3 Thu3 Fri3,JPNL113,Japanese Language 3,3,Spring Semester 2024,Every Year,Elementary Japanese 2 OR Japanese Language 2 OR equivalent,OKABE Mariko,1Year,Japan Studies - Japanese Language
+Tue1 Thu1 Fri1,JPNL114,Japanese Language 4,3,Spring Semester 2024,Every Year,Japanese Language 3 OR equivalent,INAGAKI Midori,1Year,Japan Studies - Japanese Language
+Tue2 Thu2 Fri2,JPNL115,Japanese Language 5,3,Spring Semester 2024,Every Year,Elementary Japanese 3 OR Japanese Language 4 OR equivalent,INAGAKI Midori,1Year,Japan Studies - Japanese Language
+Tue1 Thu1 Fri1,JPNL116,Japanese Language 6,3,Spring Semester 2024,Every Year,Intermediate Japanese 1 OR Japanese Language 5 OR equivalent,IMAKI Jun,1Year,Japan Studies - Japanese Language
+Tue2 Thu2 Fri2,JPNL117,Japanese Language 7,3,Spring Semester 2024,Every Year,Intermediate Japanese 2 OR Japanese Language 6 OR equivalent,IMAKI Jun,1Year,Japan Studies - Japanese Language
+Fri3 Fri4,JPNA/MUSC210,Japanese Traditional Music,3,Spring Semester 2024,Every Year,None,MURASAWA Joji,2Year,Interdisciplinary Arts - Music
+Tue5 Thu5,JPNL001,Konnichiwa Japanese,1,Spring Semester 2024,Every Year,None,IMAKI Jun,1Year,Japan Studies - Japanese Language
+Tue4 Thu4,FNDN030,Liberal Arts Preparation (Japanese),3,Spring Semester 2024,Every Year,"Japanese Native OR N2 proficiency, AND Placement test",KAWAKAMI Sumie,1Year,Foundation Courses
+Tue6 Thu6,ECON102,Macroeconomics,3,Spring Semester 2024,Every Year,None,SHENG Dachen,1Year,Global Business and Economics
+Mon2 Wed2,QREA101,Math for Liberal Arts,3,Spring Semester 2024,Every Year,None,JHINGAN Sanjay,1Year,Quantitative Reasoning and Natural Sciences
+Mon4 Wed4,DATA250,Mathematics for Data Science,3,Spring Semester 2024,Every Year,Introduction to Python Programming AND College Algebra,PARIDA Abhishek,2Year,Data Science
+Tue2 Thu2,PSCI/ECON/SOCI210,Methods of Social Research,3,Spring Semester 2024,Every Year,None,LARATTA Rosario,1Year,Political Science
+Tue1 Thu1,ECON101,Microeconomics,3,Spring Semester 2024,Every Year,None,Nan Zheng,1Year,Global Business and Economics
+Tue5 Thu5,ECON270,"Money, Banking, and Financial Markets",3,Spring Semester 2024,Every Year,Financial Management,LIU Ming,2Year,Global Business and Economics
+Mon6 Wed6,MUSC320,Performance Strategies,3,Spring Semester 2024,Even Years,Sound Art OR Music of the 20th Century AND Fund of Sound AND Music,BLOW Michael,3Year,Interdisciplinary Arts - Music
+Mon5 Wed5,PSCI/ECON/DATA376,Political Economy of Trade and Industrial Policy,3,Spring Semester 2024,Every Year,Geographical Political Economy OR International Political Economy,RAJAONARISON Haja,3Year,Political Science
+Mon1 Wed1,ECON/DATA364,Portfolio Management,3,Spring Semester 2024,Every Year,Financial Management,SHENG Dachen,3Year,Global Business and Economics
+Tue5 Thu5,JPNL270,Preparation for the N2 level of the Japanese Language Proficiency Test,1,Spring Semester 2024,Every Year,Intermediate Japanese 1 OR Japanese Language 5 OR equivalent,INAGAKI Midori,1Year,Japan Studies - Japanese Language
+Tue4 Thu4,JPNL250,Professional Writing in Japanese,3,Spring Semester 2024,Every Year,Japanese Native OR Advanced Japanese OR Japanese Language 7,INAGAKI Midori,1Year,Japan Studies - Japanese Language
+Tue5 Thu5,PSYC250,Psychopathology,3,Spring Semester 2024,Every Year,Introduction to Psychobiology,Law Wai him crystal,2Year,Psychology
+Tue4 Thu4,PSCI/SOCI255,Public Policy and Service,3,Spring Semester 2024,Every Year,Introduction to Public Administration,LARATTA Rosario,2Year,Political Science
+Mon1 Wed1,PSYC/DATA190,Research Design,3,Spring Semester 2024,Every Year,None,Law Wai him crystal,1Year,Psychology
+Mon6 Wed6,LANG220,Rhetorical Analysis and Composition,3,Spring Semester 2024,Every Year,Composition 2 OR Expository Research Writing,SUGIYAMA Kazutaka,1Year,Interdisciplinary Arts - Language Arts
+Mon5 Wed5,JPNA/PART253,Samurai Code and Culture,3,Spring Semester 2024,Every Year,None,REED William,2Year,Interdisciplinary Arts - Performing Arts
+Mon3 Mon4,DATA/SOCI/QREA 265,"Science, Society & Self",3,Spring Semester 2024,Every Year,None,Ricketts John,2Year,Data Science
+Mon1 Wed1,LANG360,Second Language Acquisition,3,Spring Semester 2024,Every Year,None,RAFIEYAN Vahid,3Year,Interdisciplinary Arts - Language Arts
+Mon3,ECON498,Seminar (Global Business & Economics),1,Spring Semester 2024,Every Year,UNIPA,LIU Ming,4Year,Global Business and Economics
+Mon3,INTA499,Seminar (Interdisciplinary Arts),1,Spring Semester 2024,Every Year,UNIPA,RAFIEYAN Vahid,4Year,Interdisciplinary Arts - Interdisciplinary Arts
+Mon3,DATA499,Seminar (Interdisciplinary Data Science),1,Spring Semester 2024,Every Year,UNIPA,PARIDA Abhishek,4Year,Data Science
+Mon3,JPNA499,Seminar (Japan Studies),1,Spring Semester 2024,Every Year,UNIPA,ASHMORE Darren,4Year,Japan Studies - Japan Studies
+Mon3,PSCI499,Seminar (Political Science),1,Spring Semester 2024,Every Year,UNIPA,LARATTA Rosario,4Year,Political Science
+Mon3,PSYC499,Seminar (Psychology),1,Spring Semester 2024,Every Year,UNIPA,FONG Chun Yuen,4Year,Psychology
+Tue3 Thu3,JPNL320,Socio-Cultural Communication in Japanese,1,Spring Semester 2024,Every Year,Intermediate Japanese 2 OR Japanese Language 6 OR equivalent,IMAKI Jun,1Year,Japan Studies - Japanese Language
+Tue4 Thu4,LANG200,Sociolinguistics,3,Spring Semester 2024,Every Year,Introduction to Language Concepts,RAFIEYAN Vahid,1Year,Interdisciplinary Arts - Language Arts
+Mon5 Wed5,ECON/PSCI/QREA203,Statistics,3,Spring Semester 2024,Every Year,None,JHINGAN Sanjay,2Year,Quantitative Reasoning and Natural Sciences
+Tue5 Tue6,PART180,Workshop: Acting 1,1,Spring Semester 2024,Every Year,None,Berwanger Paula,1Year,Interdisciplinary Arts - Performing Arts
+Tue3 Tue4,PART185,Workshop: Directing,1,Spring Semester 2024,Every Year,None,Berwanger Paula,1Year,Interdisciplinary Arts - Performing Arts
+Thu3 Thu4,ARTS180,Workshop: Drawing 1,1,Spring Semester 2024,Every Year,None,TOZAWA Kayoko,1Year,Interdisciplinary Arts - Arts
+,JPNL279,Workshop: Experiencing Teaching Japanese,1,Spring Semester 2024,Every Year,Japanese Native OR Advanced Japanese OR Japanese Language 7,INAGAKI Midori,2Year,Japan Studies - Japanese Language
+,JPNA/SOCI186,Workshop: Fuji Culture,1,Spring Semester 2024,Every Year,None,Hara Momotoshi,1Year,Sociology
+Thu5 Thu6,ARTS289,Workshop: Graphic Design 2,1,Spring Semester 2024,Every Year,None,STOCKER Sam,2Year,Interdisciplinary Arts - Arts
+Tue5 Tue6,ARTS186,Workshop: Painting and Sculpting 1,1,Spring Semester 2024,Every Year,None,STOCKER Sam,1Year,Interdisciplinary Arts - Arts

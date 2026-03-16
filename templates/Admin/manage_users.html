@@ -1,0 +1,78 @@
+{% extends "Layouts/admin_base.html" %}
+{% block title %}Manage Users{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Manage Users</h2>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <table class="table table-striped table-hover">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Gender</th>
+                    <th>Year of Study</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td>{{ user.id }}</td>
+                    <td>{{ user.gender }}</td>
+                    <td>{{ user.year_of_study }}</td>
+                    <td>
+                        <button class="btn btn-sm btn-primary edit-user-btn" 
+                                data-id="{{ user.id }}" 
+                                data-gender="{{ user.gender }}" 
+                                data-year="{{ user.year_of_study }}">Edit</button>
+                        <button class="btn btn-sm btn-danger delete-user-btn" data-id="{{ user.id }}">Delete</button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" class="text-center">No users found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div id="editUserModal" class="modal" tabindex="-1" style="display: none; background: rgba(0,0,0,0.5); position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1050;">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form id="editUserForm">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit User Demographics</h5>
+                    <button type="button" class="btn-close close-modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="edit_user_id">
+                    <div class="mb-3">
+                        <label>Gender</label>
+                        <select id="edit_user_gender" class="form-select">
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                            <option value="Prefer not to say">Prefer not to say</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label>Year of Study</label>
+                        <select id="edit_user_year" class="form-select">
+                            <option value="Freshman">Freshman</option>
+                            <option value="Sophomore">Sophomore</option>
+                            <option value="Junior">Junior</option>
+                            <option value="Senior">Senior</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary modal-cancel-btn">Cancel</button>
+                    <button type="submit" class="btn btn-success">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

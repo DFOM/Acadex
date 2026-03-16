@@ -1,0 +1,70 @@
+:root {
+    --primary-color: #0d9488;
+    --primary-color-light: #ccfbf1;
+    --primary-color-dark: #115e59;
+    --accent-conflict: #ef4444;
+    --accent-conflict-light: #fee2e2;
+    --accent-prereq: #f97316;
+    --accent-prereq-light: #ffedd5;
+    --accent-good: #22c55e;
+    --accent-good-light: #dcfce7;
+}
+a.text-blue-600 { color: var(--primary-color); }
+a.text-blue-600:hover { color: var(--primary-color-dark); }
+.conflict-cell { background-color: var(--accent-conflict-light) !important; }
+.course-item {
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1.2;
+    overflow: hidden;
+    cursor: pointer;
+    margin-bottom: 2px;
+    border-left: 4px solid;
+}
+.course-item.good {
+    background-color: var(--accent-good-light);
+    border-left-color: var(--accent-good);
+}
+.course-item.prereq-skipped {
+    background-color: var(--accent-prereq-light);
+    border-left-color: var(--accent-prereq);
+}
+.course-item.conflict {
+    background-color: var(--accent-conflict-light);
+    border-left-color: var(--accent-conflict);
+}
+#section-modal > div { max-width: 42rem; }
+#section-modal .modal-content-wrapper { padding: 1.25rem; }
+.section-select-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 0.75rem;
+}
+.btn-section-select {
+    display: flex; flex-direction: column; justify-content: center;
+    height: 100%; text-align: left; padding: 0.75rem;
+    border: 1px solid #e5e7eb; border-radius: 0.5rem;
+    transition: all 0.2s ease-in-out;
+}
+.btn-section-select:hover {
+    border-color: var(--primary-color);
+    background-color: var(--primary-color-light);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+}
+.modal-actions-container {
+    display: flex; flex-wrap: wrap;
+    justify-content: flex-end; gap: 0.75rem;
+}
+.btn-modal-action {
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 600; padding: 0.5rem 1rem; border-radius: 0.375rem;
+    width: 6rem; transition: background-color 0.2s;
+}
+.btn-modal-confirm { background-color: var(--primary-color); color: white; }
+.btn-modal-confirm:hover { background-color: var(--primary-color-dark); }
+.btn-modal-skip { background-color: var(--accent-prereq); color: white; }
+.btn-modal-skip:hover { background-color: #ea580c; }
+.btn-modal-cancel { background-color: #e5e7eb; color: #374151; }
+.btn-modal-cancel:hover { background-color: #d1d5db; }

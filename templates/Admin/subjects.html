@@ -1,0 +1,46 @@
+{% extends "Layouts/admin_base.html" %}
+{% block title %}Manage Subject Areas{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Subject Areas & Benchmarks</h2>
+<p class="text-muted">Set the minimum credits required for graduation in each specific subject area.</p>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <table class="table table-hover table-striped">
+            <thead>
+                <tr>
+                    <th>Subject ID</th>
+                    <th>Subject Area Name</th>
+                    <th>Credits Required (Benchmark)</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for subject in subjects %}
+                <tr>
+                    <td class="align-middle">{{ subject.id }}</td>
+                    <td class="align-middle fw-bold">{{ subject.name }}</td>
+                    <td class="align-middle">
+                        <form method="POST" action="{{ url_for('admin.manage_subjects') }}" class="d-flex align-items-center">
+                            <input type="hidden" name="subject_id" value="{{ subject.id }}">
+                            <input type="number" name="min_depth_credits" class="form-control form-control-sm me-2" style="width: 80px;" value="{{ subject.min_depth_credits or 0 }}">
+                            <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                        </form>
+                    </td>
+                    <td class="align-middle">
+                        {% if subject.is_major %}
+                            <span class="badge bg-success">Major</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Elective / Core</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="4" class="text-center">No subjects found. Upload a dataset to auto-populate this list.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,88 @@
+/* Project/static/css/admin.css */
+:root {
+    --admin-bg-color: #f9fafb;
+    --admin-card-bg: #ffffff;
+    --admin-border-color: #e5e7eb;
+    --admin-primary: #2563eb;
+    --admin-primary-dark: #1d4ed8;
+    --admin-text-main: #111827;
+    --admin-text-muted: #6b7280;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--admin-bg-color);
+    color: var(--admin-text-main);
+}
+
+/* DataTables Integration */
+.dataTables_wrapper .dataTables_filter input,
+.dataTables_wrapper .dataTables_length select {
+    border: 1px solid var(--admin-border-color);
+    border-radius: 0.5rem;
+    padding: 0.4rem 0.8rem;
+    background-color: var(--admin-card-bg);
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.dataTables_wrapper .dataTables_filter input:focus {
+    border-color: var(--admin-primary);
+}
+
+/* Custom Table Styling */
+.admin-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+}
+
+.admin-table thead th {
+    background-color: #f8fafc;
+    color: var(--admin-text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    padding: 1rem;
+    border-bottom: 2px solid var(--admin-border-color);
+}
+
+.admin-table tbody td {
+    padding: 1rem;
+    border-bottom: 1px solid var(--admin-border-color);
+    background-color: var(--admin-card-bg);
+}
+
+.admin-table tbody tr:hover td {
+    background-color: #f3f4f6;
+}
+
+/* Form Controls */
+.admin-input {
+    width: 100%;
+    padding: 0.625rem;
+    background-color: #f9fafb;
+    border: 1px solid var(--admin-border-color);
+    border-radius: 0.5rem;
+    transition: all 0.2s;
+}
+
+.admin-input:focus {
+    background-color: #fff;
+    border-color: var(--admin-primary);
+    ring: 2px var(--admin-primary);
+}
+
+.admin-btn-primary {
+    background-color: var(--admin-primary);
+    color: white;
+    padding: 0.625rem 1.25rem;
+    border-radius: 0.5rem;
+    font-weight: 600;
+    transition: background-color 0.2s;
+}
+
+.admin-btn-primary:hover {
+    background-color: var(--admin-primary-dark);
+}

@@ -1,0 +1,81 @@
+{% extends "Layouts/admin_base.html" %}
+{% block title %}Manage Period Times{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-0">Class Period Timings</h2>
+        <p class="text-muted">Adjusting these times will automatically update the student timetable grid and the Lunch Break calculation.</p>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-body">
+        <table class="table table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Period Number</th>
+                    <th>Start Time</th>
+                    <th>End Time</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for period in periods %}
+                <tr>
+                    <td class="fw-bold fs-5 text-primary">Period {{ period.name }}</td>
+                    <td>
+                        <input type="time" id="start_{{ period.id }}" class="form-control" value="{{ period.start_time }}">
+                    </td>
+                    <td>
+                        <input type="time" id="end_{{ period.id }}" class="form-control" value="{{ period.end_time }}">
+                    </td>
+                    <td>
+                        <button class="btn btn-success update-period-btn shadow-sm" data-id="{{ period.id }}">
+                            Save Times
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.update-period-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.currentTarget.getAttribute('data-id');
+            const startTime = document.getElementById(`start_${id}`).value;
+            const endTime = document.getElementById(`end_${id}`).value;
+
+            // Simple visual feedback
+            const originalText = e.currentTarget.innerText;
+            e.currentTarget.innerText = "Saving...";
+            e.currentTarget.classList.replace('btn-success', 'btn-secondary');
+
+            try {
+                const response = await fetch('/admin/api/update_period', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id: id, start_time: startTime, end_time: endTime })
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    e.currentTarget.innerText = "Saved!";
+                    e.currentTarget.classList.replace('btn-secondary', 'btn-success');
+                    setTimeout(() => e.currentTarget.innerText = originalText, 2000);
+                } else {
+                    alert("Update failed: " + result.message);
+                }
+            } catch (err) {
+                console.error(err);
+                alert("Network error.");
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

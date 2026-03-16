@@ -1,0 +1,59 @@
+{% extends "Layouts/admin_base.html" %}
+{% block title %}Manage Instructors{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">Manage Instructors</h2>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <table class="table table-striped table-hover">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for instructor in instructors %}
+                <tr>
+                    <td>{{ instructor.id }}</td>
+                    <td>{{ instructor.name }}</td>
+                    <td>
+                        <button class="btn btn-sm btn-primary edit-instructor-btn" 
+                                data-id="{{ instructor.id }}" 
+                                data-name="{{ instructor.name }}">Edit Name</button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="3" class="text-center">No instructors found. Upload a dataset to populate this table.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div id="editInstructorModal" class="modal" tabindex="-1" style="display: none; background: rgba(0,0,0,0.5); position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1050;">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form id="editInstructorForm">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Instructor</h5>
+                    <button type="button" class="btn-close close-modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="edit_instructor_id">
+                    <div class="mb-3">
+                        <label>Instructor Name</label>
+                        <input type="text" id="edit_instructor_name" class="form-control" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary modal-cancel-btn">Cancel</button>
+                    <button type="submit" class="btn btn-success">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

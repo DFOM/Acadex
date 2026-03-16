@@ -1,0 +1,56 @@
+{% extends "Layouts/student_base.html" %}
+{% block title %}Choose Plan Type{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="text-center mb-5">
+        <h1 class="display-5 fw-bold text-dark mb-3">What are we building today?</h1>
+        <p class="text-muted fs-5">Choose whether you are logging past progress or planning for the future.</p>
+    </div>
+
+    <div class="row justify-content-center g-4">
+        <div class="col-md-5">
+            <a href="{{ url_for('student.create_schedule') }}" class="text-decoration-none">
+                <div class="card h-100 shadow-sm border-0 transition-hover text-center p-4">
+                    <div class="card-body">
+                        <div class="bg-primary bg-opacity-10 text-primary rounded-circle d-inline-flex align-items-center justify-content-center mb-4" style="width: 80px; height: 80px;">
+                            <svg class="w-50 h-50" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width: 40px; height: 40px;">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                            </svg>
+                        </div>
+                        <h3 class="card-title fw-bold text-dark mb-3">Future Plan</h3>
+                        <p class="card-text text-muted">Build a schedule for the upcoming semester, search for courses, and prepare for registration.</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+
+        <div class="col-md-5">
+            <a href="{{ url_for('student.create_schedule', type='past') }}" class="text-decoration-none">
+                <div class="card h-100 shadow-sm border-0 transition-hover text-center p-4">
+                    <div class="card-body">
+                        <div class="bg-success bg-opacity-10 text-success rounded-circle d-inline-flex align-items-center justify-content-center mb-4" style="width: 80px; height: 80px;">
+                            <svg class="w-50 h-50" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="width: 40px; height: 40px;">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path>
+                            </svg>
+                        </div>
+                        <h3 class="card-title fw-bold text-dark mb-3">Past Records</h3>
+                        <p class="card-text text-muted">Log your completed courses and grades to automatically calculate your GPA and update your Knowledge Map.</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+    </div>
+
+    <div class="text-center mt-5">
+        <a href="{{ url_for('schedule.user_dashboard') }}" class="btn btn-outline-secondary px-4 py-2">
+            &larr; Back to Dashboard
+        </a>
+    </div>
+</div>
+
+<style>
+    .transition-hover { transition: transform 0.3s ease, box-shadow 0.3s ease; }
+    .transition-hover:hover { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.1) !important; border: 2px solid #0d6efd !important;}
+</style>
+{% endblock %}

@@ -1,0 +1,106 @@
+{% extends "Layouts/student_base.html" %}
+{% block title %}Create New Plan{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center align-items-center mt-5">
+    <div class="col-md-6 col-lg-5">
+        <div class="card shadow-lg border-0 rounded-4 overflow-hidden">
+            <div class="card-header bg-primary text-white text-center py-4 border-0">
+                <h4 class="mb-0 fw-bold">
+                    <i class="bi {{ 'bi-clock-history' if schedule_type == 'past' else 'bi-calendar-plus' }}"></i> 
+                    Create {{ schedule_type | capitalize }} Plan
+                </h4>
+                <p class="mb-0 small opacity-75">
+                    {% if schedule_type == 'past' %}
+                    Record a semester you have already completed.
+                    {% else %}
+                    Plan a schedule for an upcoming semester.
+                    {% endif %}
+                </p>
+            </div>
+            
+            <div class="card-body p-4 bg-light">
+                <form method="POST" action="{{ url_for('student.create_schedule') }}">
+                    <input type="hidden" name="schedule_type" value="{{ schedule_type }}">
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold text-muted small text-uppercase">Academic Year</label>
+                            <select class="form-select form-select-lg shadow-sm border-0" name="year" id="yearSelect" required>
+                                <option value="" disabled selected>Year...</option>
+                                {% set current = current_year | int %}
+                                {% set count = namespace(value=0) %}
+                                
+                                {% for year in available_years %}
+                                    {% set y = year | int %}
+                                    {% if schedule_type == 'past' and y < current %}
+                                        <option value="{{ y }}">{{ y }}</option>
+                                        {% set count.value = count.value + 1 %}
+                                    {% elif schedule_type != 'past' and y >= current %}
+                                        <option value="{{ y }}">{{ y }}</option>
+                                        {% set count.value = count.value + 1 %}
+                                    {% endif %}
+                                {% endfor %}
+
+                                {% if count.value == 0 %}
+                                    <option value="" disabled>No datasets available</option>
+                                {% endif %}
+                            </select>
+                        </div>
+                        <div class="col-md-6 mt-3 mt-md-0">
+                            <label class="form-label fw-bold text-muted small text-uppercase">Semester</label>
+                            <select class="form-select form-select-lg shadow-sm border-0" name="semester" id="semesterSelect" required>
+                                <option value="" disabled selected>Semester...</option>
+                                <option value="Spring">Spring</option>
+                                <option value="Fall">Fall</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-bold text-muted small text-uppercase">Plan Name</label>
+                        <input type="text" class="form-control form-control-lg shadow-sm border-0 fw-bold text-primary" 
+                               name="schedule_name" id="scheduleNameInput" 
+                               placeholder="e.g. 2025 Spring Plan" required>
+                        <small class="text-muted d-block mt-2">
+                            <i class="bi bi-magic text-warning"></i> Auto-generated, but feel free to edit!
+                        </small>
+                    </div>
+
+                    <div class="d-grid gap-2 mt-4">
+                        <button type="submit" class="btn btn-primary btn-lg fw-bold shadow-sm rounded-pill" {% if count.value == 0 %}disabled{% endif %}>
+                            Create & Continue &rarr;
+                        </button>
+                        <a href="{{ url_for('schedule.user_dashboard') }}" class="btn btn-link text-muted fw-bold text-decoration-none mt-2">
+                            Cancel
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const yearSelect = document.getElementById('yearSelect');
+    const semesterSelect = document.getElementById('semesterSelect');
+    const nameInput = document.getElementById('scheduleNameInput');
+
+    const userName = "{{ current_user.username | default('Plan', true) }}".trim();
+
+    function autoFillName() {
+        const year = yearSelect.value;
+        const semester = semesterSelect.value;
+        
+        if (year && semester) {
+            const cleanName = userName.charAt(0).toUpperCase() + userName.slice(1);
+            nameInput.value = `${year} ${semester} ${cleanName}`;
+        }
+    }
+
+    yearSelect.addEventListener('change', autoFillName);
+    semesterSelect.addEventListener('change', autoFillName);
+});
+</script>
+{% endblock %}

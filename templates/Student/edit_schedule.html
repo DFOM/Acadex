@@ -1,0 +1,262 @@
+{% extends "Layouts/student_base.html" %}
+{% block title %}Edit Plan - {{ schedule.schedule_name }}{% endblock %}
+
+{% block content %}
+<style>
+    .custom-scroll::-webkit-scrollbar { width: 6px; }
+    .custom-scroll::-webkit-scrollbar-thumb { background-color: #dee2e6; border-radius: 10px; }
+    .left-panel-container { height: 800px; display: flex; flex-direction: column; }
+    .filters-section { flex: 0 0 auto; max-height: 45%; overflow-y: auto; padding-right: 5px; }
+    .results-section { flex: 1 1 auto; overflow-y: auto; padding-right: 5px; background-color: #f8f9fa; }
+    .filter-pill { cursor: pointer; border-radius: 20px; font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; margin-right: 5px; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-4 mt-3 pb-3 border-bottom">
+    <div>
+        <h2 class="mb-0">Editing Plan: <span class="text-primary fw-bold">{{ schedule.schedule_name }}</span></h2>
+        <small class="text-muted fw-bold">{{ schedule.semester }} {{ schedule.year }} <span class="badge {{ 'bg-secondary' if schedule.schedule_type == 'past' else 'bg-warning text-dark' }} rounded-pill ms-2">{{ schedule.schedule_type | upper }}</span></small>
+    </div>
+    <a href="{{ url_for('schedule.user_dashboard') }}" class="btn btn-success btn-lg shadow-sm fw-bold px-4">
+        ✅ Finish & Save Plan
+    </a>
+</div>
+
+<div class="row">
+    <div class="col-lg-4 col-md-5 mb-4">
+        <div class="card shadow-sm border-0 rounded-4 w-100 left-panel-container overflow-hidden">
+            
+            <div class="card-body bg-white border-bottom p-3 filters-section custom-scroll">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="fw-bold text-dark mb-0"><i class="bi bi-funnel-fill text-primary"></i> Search & Filter</h6>
+                </div>
+                
+                <input type="text" id="courseSearchInput" class="form-control form-control-sm bg-light border-0 py-2 mb-3 fw-bold" placeholder="Search Title or Code...">
+
+                <label class="small fw-bold text-muted mb-1">Area of Study</label>
+                <input class="form-control form-control-sm mb-3 bg-light border-0" list="subjectList" id="filterSubject" placeholder="Type or select Area...">
+                <datalist id="subjectList"></datalist>
+
+                <label class="small fw-bold text-muted mb-1">Faculty / Instructor</label>
+                <input class="form-control form-control-sm mb-3 bg-light border-0" list="instructorList" id="filterInstructor" placeholder="Type or select Faculty...">
+                <datalist id="instructorList"></datalist>
+
+                <label class="small fw-bold text-muted mb-1">Credits</label>
+                <div id="creditsCheckboxContainer" class="d-flex flex-wrap mb-2">
+                    <span class="text-muted small">Loading...</span>
+                </div>
+
+                <label class="small fw-bold text-muted mb-1 mt-1">Period</label>
+                <div id="periodCheckboxContainer" class="d-flex flex-wrap mb-2">
+                    <span class="text-muted small">Loading...</span>
+                </div>
+            </div>
+
+            <div class="bg-primary text-white py-2 px-3 d-flex justify-content-between align-items-center shadow-sm z-1">
+                <span class="fw-bold small text-uppercase tracking-widest">Matching Courses</span>
+                <span class="badge bg-light text-primary rounded-pill shadow-sm" id="resultCountBadge">0</span>
+            </div>
+            
+            <div class="p-2 results-section custom-scroll" id="searchResults">
+                <div class="text-center text-muted mt-5 small">
+                    <div class="spinner-border spinner-border-sm text-primary mb-2" role="status"></div>
+                    <p>Loading course catalog...</p>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="col-lg-8 col-md-7 mb-4">
+        <div class="card shadow-sm border-0 h-100 rounded-4 overflow-hidden">
+            <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                <ul class="nav nav-pills" id="scheduleTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active fw-bold px-3 py-1" id="grid-tab" data-bs-toggle="pill" data-bs-target="#grid-view" type="button" role="tab">📅 Grid</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link fw-bold px-3 py-1 ms-2" id="list-tab" data-bs-toggle="pill" data-bs-target="#list-view" type="button" role="tab">📝 List</button>
+                    </li>
+                </ul>
+                <span class="badge bg-success rounded-pill px-3 py-2 fs-6 shadow-sm">Total Credits: {{ current_courses|sum(attribute='Credits') }}</span>
+            </div>
+            
+            <div class="card-body p-0">
+                <div class="tab-content h-100" id="scheduleTabsContent">
+                    
+                    <div class="tab-pane fade show active p-2 bg-light h-100" id="grid-view" role="tabpanel">
+                        <div class="table-responsive bg-white shadow-sm rounded-3 border h-100">
+                            <table class="table table-bordered mb-0 text-center" style="table-layout: fixed; min-width: 500px;">
+                                <thead class="table-dark">
+                                    <tr>
+                                        <th style="width: 12%;">Time</th>
+                                        <th style="width: 17.6%;">Mon</th>
+                                        <th style="width: 17.6%;">Tue</th>
+                                        <th style="width: 17.6%;">Wed</th>
+                                        <th style="width: 17.6%;">Thu</th>
+                                        <th style="width: 17.6%;">Fri</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for period in periods %}
+                                    <tr style="height: 100px;">
+                                        <th class="align-middle bg-light text-muted border-end-0 py-1">
+                                            <div class="fw-bold text-dark" style="font-size: 0.8rem; line-height: 1;">{{ period.start_time }}</div>
+                                            <div class="text-muted" style="font-size: 0.7rem; line-height: 1.5;">{{ period.end_time }}</div>
+                                        </th>
+                                        <td id="cell-Mon{{ period.name }}" class="schedule-cell align-middle p-1"></td>
+                                        <td id="cell-Tue{{ period.name }}" class="schedule-cell align-middle p-1"></td>
+                                        <td id="cell-Wed{{ period.name }}" class="schedule-cell align-middle p-1"></td>
+                                        <td id="cell-Thu{{ period.name }}" class="schedule-cell align-middle p-1"></td>
+                                        <td id="cell-Fri{{ period.name }}" class="schedule-cell align-middle p-1"></td>
+                                    </tr>
+                                    
+                                    {% if loop.index == 2 and periods|length > 2 %}
+                                    <tr class="table-secondary" style="height: 20px;">
+                                        <th class="align-middle text-muted border-end-0 py-0"><small style="font-size: 0.6rem;">{{ periods[1].end_time }}</small></th>
+                                        <td colspan="5" class="align-middle text-center py-0" style="background-color: #f8f9fa;">
+                                            <span class="text-muted text-uppercase tracking-widest fw-bold" style="font-size: 0.65rem;">Lunch Break</span>
+                                        </td>
+                                    </tr>
+                                    {% endif %}
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade h-100" id="list-view" role="tabpanel">
+                        <div class="table-responsive h-100">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th class="ps-3">Code</th>
+                                        <th>Title</th>
+                                        <th>CR</th>
+                                        <th>Schedule</th>
+                                        <th>Grade</th>
+                                        <th class="text-end pe-3">Drop</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for course in current_courses %}
+                                    <tr>
+                                        <td class="ps-3 fw-bold text-muted small format-code" data-raw="{{ course.Course_Number }}">{{ course.Course_Number }}</td>
+                                        <td class="fw-bold small">{{ course.Course_Title }}</td>
+                                        <td class="small">{{ course.Credits }}</td>
+                                        <td><span class="badge bg-info text-dark" style="font-size: 0.65rem;">{{ course.Day_and_Period or 'TBA' }}</span></td>
+                                        <td>
+                                            <select class="form-select form-select-sm border-0 bg-light shadow-sm grade-select" data-entry-id="{{ course.entry_id }}" style="width: 75px; font-size: 0.75rem; font-weight: bold;">
+                                                <option value="" {% if not course.grade %}selected{% endif %}>--</option>
+                                                <option value="A" {% if course.grade == 'A' %}selected{% endif %}>A</option>
+                                                <option value="B" {% if course.grade == 'B' %}selected{% endif %}>B</option>
+                                                <option value="C" {% if course.grade == 'C' %}selected{% endif %}>C</option>
+                                                <option value="D" {% if course.grade == 'D' %}selected{% endif %}>D</option>
+                                                <option value="F" {% if course.grade == 'F' %}selected{% endif %}>F</option>
+                                            </select>
+                                        </td>
+                                        <td class="text-end pe-3">
+                                            <button class="btn btn-sm btn-outline-danger remove-course-btn drop-no-confirm py-0 px-2 shadow-sm fw-bold" data-entry-id="{{ course.entry_id }}">✖</button>
+                                        </td>
+                                    </tr>
+                                    {% else %}
+                                    <tr>
+                                        <td colspan="6" class="text-center py-5 text-muted bg-light small">Empty Schedule. Add courses from the left panel.</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<input type="hidden" id="current_schedule_id" value="{{ schedule.id }}">
+
+<div class="modal fade" id="sectionModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+      <div class="modal-header bg-primary text-white border-0 py-3">
+        <div>
+            <span class="badge bg-light text-primary mb-1">Select a Section</span>
+            <h5 class="modal-title fw-bold mb-0" id="sectionModalTitle">Course Title</h5>
+        </div>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body bg-light p-0">
+        <div class="list-group list-group-flush" id="sectionModalBody"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script id="currentCoursesData" type="application/json">
+    {{ current_courses | tojson | safe }}
+</script>
+<script id="obtainedCoursesData" type="application/json">
+    {{ obtained_courses | tojson | safe }}
+</script>
+
+<script>
+window.addEventListener('load', function() {
+    setTimeout(() => {
+        // 1. Format the codes in the List View immediately
+        document.querySelectorAll('.format-code').forEach(el => {
+            const rawCode = el.getAttribute('data-raw');
+            el.innerText = rawCode.replace(/-S(\d+)-(Sp|Fa).*/i, ' Section $1').replace(/-V\d+/i, '');
+        });
+
+        // 2. Inject blocks into the Calendar Grid
+        const dataEl = document.getElementById('currentCoursesData');
+        if (!dataEl) return;
+        
+        try {
+            const currentCourses = JSON.parse(dataEl.textContent);
+            const colors = ['#0d6efd', '#198754', '#6f42c1', '#d63384', '#fd7e14', '#20c997', '#0dcaf0'];
+            
+            currentCourses.forEach((course, index) => {
+                const timeStr = course.Day_and_Period;
+                if (!timeStr || timeStr === 'TBA') return;
+
+                const displayCode = course.Course_Number.replace(/-S(\d+)-(Sp|Fa).*/i, ' Sec $1').replace(/-V\d+/i, '');
+                const blocks = timeStr.trim().split(/[\s,]+/);
+                const color = colors[index % colors.length];
+
+                let currentDay = "";
+                let cleanBlocks = [];
+
+                blocks.forEach(b => {
+                    const dayMatch = b.match(/(Mon|Tue|Wed|Thu|Fri)/i);
+                    const numMatch = b.match(/\d+/);
+                    
+                    if (dayMatch) { currentDay = dayMatch[0].substring(0, 3); }
+                    if (currentDay && numMatch) { cleanBlocks.push(currentDay + numMatch[0]); }
+                });
+
+                cleanBlocks.forEach(cleanB => {
+                    const normalizedId = cleanB.charAt(0).toUpperCase() + cleanB.slice(1).toLowerCase();
+                    const cell = document.getElementById('cell-' + normalizedId);
+                    
+                    if (cell && !cell.innerHTML.includes(course.entry_id)) {
+                        cell.innerHTML += `
+                            <div class="card border-0 shadow-sm mb-1 text-white text-start position-relative w-100" style="background-color: ${color}; border-radius: 6px; min-height: 75px;">
+                                <div class="card-body p-2 d-flex flex-column justify-content-center pe-4">
+                                    <strong class="d-block lh-sm mb-1" style="font-size: 0.75rem; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;" title="${course.Course_Title}">${course.Course_Title}</strong>
+                                    <span class="d-block text-truncate" style="font-size: 0.65rem; opacity: 0.85;" title="${displayCode}">${displayCode}</span>
+                                </div>
+                                <button class="btn btn-sm btn-link text-white position-absolute top-0 end-0 p-0 m-1 remove-course-btn drop-no-confirm" 
+                                        data-entry-id="${course.entry_id}" 
+                                        style="opacity: 0.8; font-size: 0.8rem; text-decoration: none; z-index: 10;">✖</button>
+                            </div>
+                        `;
+                    }
+                });
+            });
+        } catch (e) { console.error("Grid injection error:", e); }
+    }, 100);
+});
+</script>
+{% endblock %}
