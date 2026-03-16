@@ -1,80 +1,81 @@
 # utils.py
-import sqlite3
-
-def get_db_connection():
-    conn = sqlite3.connect('database.db')
-    conn.row_factory = sqlite3.Row
-    return conn
+from sqlalchemy import inspect
+from models import db, Setting
 
 def get_course_data_tables():
-    conn = get_db_connection()
-    # Pulls all tables except the core system tables
-    tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('users', 'schedules', 'schedule_courses', 'subject_areas', 'instructors', 'periods', 'settings')").fetchall()
-    conn.close()
-    return [t['name'] for t in tables if not t['name'].startswith('sqlite_')]
+    """Dynamically finds all uploaded CSV tables, ignoring the core system tables."""
+    try:
+        inspector = inspect(db.engine)
+        all_tables = inspector.get_table_names()
+        # Core system tables to ignore when looking for CSV datasets
+        core_tables = [
+            'users', 'schedules', 'schedule_courses', 'subject_areas', 
+            'instructors', 'periods', 'settings', 'alembic_version'
+        ]
+        
+        return [t for t in all_tables if t not in core_tables and not t.startswith('sqlite_')]
+    except Exception as e:
+        print(f"Error inspecting tables: {e}")
+        return []
 
-def get_app_setting(key):
-    conn = get_db_connection()
-    conn.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)')
-    setting = conn.execute('SELECT value FROM settings WHERE key = ?', (key,)).fetchone()
-    conn.close()
-    return setting['value'] if setting else None
+def get_app_setting(key, default=""):
+    """Fetches a setting from the database using SQLAlchemy ORM."""
+    try:
+        setting = Setting.query.get(key)
+        return setting.value if setting else default
+    except Exception:
+        return default
 
 def update_app_setting(key, value):
-    conn = get_db_connection()
-    conn.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)')
-    conn.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, value))
-    conn.commit()
-    conn.close()
+    """Updates or creates a setting using SQLAlchemy ORM."""
+    setting = Setting.query.get(key)
+    if not setting:
+        setting = Setting(key=key, value=value)
+        db.session.add(setting)
+    else:
+        setting.value = value
+    db.session.commit()
 
 def get_best_course_table(year, semester):
+    """Finds the most relevant dataset for a given year/semester."""
     tables = get_course_data_tables()
     if not tables:
         return None, False
     
-    # Try to find a table that matches the year string
+    year_str = str(year)
+    sem_str = str(semester).lower()
+
+    # 1. Look for a perfect match (Year AND Semester)
     for t in tables:
-        if str(year) in t:
-            return t, True
+        if year_str in t and sem_str in t.lower():
+            return t, False # Return False for needs_filter because it's already specific
+
+    # 2. Fallback: Look for just the Year
+    for t in tables:
+        if year_str in t:
+            return t, True # Return True to tell the route to filter by semester
             
-    # Fallback to the latest uploaded table
+    # 3. Last Resort: Latest uploaded table
     return tables[-1], True
 
-def populate_master_tables():
-    # Placeholder for syncing distinct instructors/subjects if needed
-    pass
-
 def calculate_gpa(courses):
+    """Calculates GPA based on the standard 4.0 scale."""
     if not courses:
         return 0.0
 
-    # Standard 4.0 Scale restricted strictly to A, B, C, D, F
-    grade_points = {
-        'A': 4.0,
-        'B': 3.0,
-        'C': 2.0,
-        'D': 1.0,
-        'F': 0.0
-    }
-
+    grade_points = {'A': 4.0, 'B': 3.0, 'C': 2.0, 'D': 1.0, 'F': 0.0}
     total_points = 0.0
     total_credits = 0.0
 
     for course in courses:
-        # The 'or ""' perfectly fixes the NoneType crash you experienced earlier!
         grade = (course.get('grade') or '').strip().upper()
-        
         try:
             credits = float(course.get('Credits') or 0)
         except (ValueError, TypeError):
             credits = 0.0
 
-        # Only calculate if the grade is one of the valid 5 letters, and credits are valid
         if grade in grade_points and credits > 0:
             total_points += grade_points[grade] * credits
             total_credits += credits
 
-    if total_credits == 0:
-        return 0.0
-
-    return total_points / total_credits
+    return total_points / total_credits if total_credits > 0 else 0.0

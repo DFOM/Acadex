@@ -1,84 +1,82 @@
-# auth_routes.py
+# Routes/auth_routes.py
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_user, logout_user, login_required, current_user
-from models import User
-from utils import get_db_connection
+from werkzeug.security import generate_password_hash, check_password_hash
+from models import db, User
 
 auth_bp = Blueprint('auth', __name__)
 
-@auth_bp.route('/')
-def home():
+@auth_bp.route('/', methods=['GET', 'POST'])
+def login():
     if current_user.is_authenticated:
+        if current_user.role == 'admin':
+            return redirect(url_for('admin.dashboard'))
         return redirect(url_for('schedule.user_dashboard'))
-    return render_template('Student/index.html')
 
-@auth_bp.route('/schedule-type')
-@login_required
-def choose_schedule_type():
-    return render_template('Student/schedule_type.html')
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+
+        # NEW: SQLAlchemy ORM Query
+        user = User.query.filter_by(username=username).first()
+
+        # NEW: Using check_password_hash for secure logins
+        if user and check_password_hash(user.password, password):
+            login_user(user)
+            if user.role == 'admin':
+                return redirect(url_for('admin.dashboard'))
+            return redirect(url_for('schedule.user_dashboard'))
+        else:
+            flash("Invalid username or password.", "error")
+
+    return render_template('Auth/login.html')
 
 @auth_bp.route('/register', methods=['GET', 'POST'])
 def register():
-    if current_user.is_authenticated:
-        return redirect(url_for('schedule.user_dashboard'))
-    
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-        gender = request.form.get('gender', 'Prefer not to say')
-        year_of_study = request.form.get('year_of_study', 'Prefer not to say')
+        confirm_password = request.form.get('confirm_password')
+        
+        # Secret code logic to create an admin
+        secret_code = request.form.get('secret_code')
+        role = 'admin' if secret_code == 'admin123' else 'student'
 
-        if not username or not password:
-            flash('Username and password are required.', 'error')
+        if not username or not password or not confirm_password:
+            flash("Please fill out all fields.", "error")
             return redirect(url_for('auth.register'))
 
-        conn = get_db_connection()
-        existing_user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
-        
+        if password != confirm_password:
+            flash("Passwords do not match.", "error")
+            return redirect(url_for('auth.register'))
+
+        # NEW: SQLAlchemy ORM Query to check if user exists
+        existing_user = User.query.filter_by(username=username).first()
         if existing_user:
-            flash('Username already exists.', 'error')
-            conn.close()
+            flash("Username already exists. Please choose another one.", "error")
             return redirect(url_for('auth.register'))
 
-        new_user = User(id=None, username=username, password_hash=None)
-        new_user.set_password(password)
-        
-        try:
-            conn.execute(
-                'INSERT INTO users (username, password_hash, gender, year_of_study) VALUES (?, ?, ?, ?)',
-                (username, new_user.password_hash, gender, year_of_study)
-            )
-            conn.commit()
-            flash('Registration successful! Please log in.', 'success')
-            return redirect(url_for('auth.login'))
-        except Exception as e:
-            conn.rollback()
-            flash(f'Error: {e}', 'error')
-        finally:
-            conn.close()
-            
-    return render_template('Student/register.html')
+        # NEW: Encrypt the password before saving!
+        hashed_password = generate_password_hash(password, method='pbkdf2:sha256')
 
-@auth_bp.route('/login', methods=['GET', 'POST'])
-def login():
-    if current_user.is_authenticated:
-        return redirect(url_for('schedule.user_dashboard'))
-        
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        user = User.get_by_username(username)
-        
-        if user and user.check_password(password):
-            login_user(user, remember=True)
-            return redirect(url_for('schedule.user_dashboard'))
-        else:
-            flash('Invalid credentials.', 'error')
-            
-    return render_template('Student/login.html')
+        # NEW: Create and save the new user using SQLAlchemy
+        new_user = User(username=username, password=hashed_password, role=role)
+        db.session.add(new_user)
+        db.session.commit()
+
+        flash("Registration successful! Please log in.", "success")
+        return redirect(url_for('auth.login'))
+
+    return render_template('Auth/register.html')
 
 @auth_bp.route('/logout')
 @login_required
 def logout():
     logout_user()
-    return redirect(url_for('auth.home'))
+    flash("You have been logged out.", "success")
+    return redirect(url_for('auth.login'))
+
+@auth_bp.route('/choose_schedule_type')
+@login_required
+def choose_schedule_type():
+    return render_template('Auth/choose_schedule_type.html')

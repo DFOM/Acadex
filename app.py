@@ -2,52 +2,50 @@
 from flask import Flask
 from flask_login import LoginManager
 import os
+from models import db, User
+from flask_migrate import Migrate
 
-from config import SECRET_KEY, UPLOAD_FOLDER
+# Import Blueprints
+from Routes.auth_routes import auth_bp
 from Routes.admin_routes import admin_bp
 from Routes.student_routes import student_bp
-from Routes.auth_routes import auth_bp
 from Routes.schedule_routes import schedule_bp
-from models import User
-from utils import populate_master_tables
 
 app = Flask(__name__)
-app.secret_key = SECRET_KEY
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+# --- NEW: Environment Variables for Security ---
+# This looks for a live SECRET_KEY, but falls back to a default on your laptop
+app.secret_key = os.environ.get('SECRET_KEY', 'jcxa%rUdH+Z+{WDaHc.w+5h-qB&zxw!K')
+
+# --- NEW: Dynamic Database Selection ---
+# Look for a live PostgreSQL URL. If none exists, use the local SQLite file.
+database_url = os.environ.get('DATABASE_URL', 'postgresql://university_db_jt42_user:JpymFt7bc734Y07JPiFUrt78dNzz6rsW@dpg-d6s1c9a4d50c73bevgpg-a/university_db_jt42')
+
+# SQLAlchemy requires 'postgresql://' but Render gives us 'postgres://'. This fixes that!
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialize the database and migration tools with the app
+db.init_app(app)
+migrate = Migrate(app, db)
+
+# --- Login Manager Setup ---
 login_manager = LoginManager()
-login_manager.init_app(app)
 login_manager.login_view = 'auth.login'
+login_manager.init_app(app)
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.get(user_id)
+    return User.query.get(int(user_id))
 
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
-
-def init_db():
-    from utils import get_db_connection
-    conn = get_db_connection()
-    # Create tables if they don't exist (FIXED: Added missing tables)
-    conn.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, password_hash TEXT, gender TEXT, year_of_study TEXT)')
-    conn.execute('CREATE TABLE IF NOT EXISTS schedules (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, schedule_name TEXT, year INTEGER, semester TEXT, schedule_type TEXT)')
-    conn.execute('CREATE TABLE IF NOT EXISTS schedule_courses (id INTEGER PRIMARY KEY AUTOINCREMENT, schedule_id INTEGER, course_number TEXT, grade TEXT)')
-    conn.execute('CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT)')
-    conn.execute('CREATE TABLE IF NOT EXISTS subject_areas (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, is_major BOOLEAN DEFAULT 0, min_depth_credits INTEGER DEFAULT 0)')
-    conn.execute('CREATE TABLE IF NOT EXISTS instructors (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)')
-    conn.execute('CREATE TABLE IF NOT EXISTS periods (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, start_time TEXT, end_time TEXT)')
-    conn.commit()
-    conn.close()
-    
-    # Sync unique data from uploaded datasets
-    populate_master_tables()
-
+# --- Register Blueprints ---
 app.register_blueprint(auth_bp)
-app.register_blueprint(admin_bp)
+app.register_blueprint(admin_bp, url_prefix='/admin')
 app.register_blueprint(student_bp)
 app.register_blueprint(schedule_bp)
 
 if __name__ == '__main__':
-    init_db()
     app.run(debug=True)

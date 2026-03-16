@@ -1,10 +1,16 @@
 # Routes/student_routes.py
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
 from flask_login import login_required, current_user
-from utils import get_db_connection, get_course_data_tables, get_best_course_table, get_app_setting
+from sqlalchemy import text
+from models import db, Schedule, ScheduleCourse, Period, Setting
+from utils import get_course_data_tables, get_best_course_table
 import re
 
 student_bp = Blueprint('student', __name__, url_prefix='/student')
+
+def get_app_setting_local(key, default=""):
+    setting = Setting.query.get(key)
+    return setting.value if setting else default
 
 @student_bp.route('/schedule/create', methods=['GET', 'POST'])
 @login_required
@@ -19,30 +25,31 @@ def create_schedule():
             flash("Please fill out all fields.", "error")
             return redirect(url_for('auth.choose_schedule_type'))
 
-        conn = get_db_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO schedules (user_id, schedule_name, year, semester, schedule_type)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (current_user.id, schedule_name, year, semester, schedule_type))
-            conn.commit()
-            new_schedule_id = cursor.lastrowid
+            # Using SQLAlchemy ORM to create the schedule
+            new_schedule = Schedule(
+                user_id=current_user.id,
+                schedule_name=schedule_name,
+                year=int(year),
+                semester=semester,
+                schedule_type=schedule_type
+            )
+            db.session.add(new_schedule)
+            db.session.commit()
+            
             flash(f"Schedule '{schedule_name}' created successfully!", "success")
-            return redirect(url_for('student.edit_schedule', schedule_id=new_schedule_id))
+            return redirect(url_for('student.edit_schedule', schedule_id=new_schedule.id))
         except Exception as e:
-            conn.rollback()
+            db.session.rollback()
             flash(f"Database error: {e}", "error")
             return redirect(url_for('auth.choose_schedule_type'))
-        finally:
-            conn.close()
 
     schedule_type = request.args.get('type', 'future')
     
-    # 1. Fetch current year from settings
-    current_year = int(get_app_setting('current_year') or 2025)
+    # Fetch current year from settings using ORM
+    current_year = int(get_app_setting_local('current_year', '2025'))
     
-    # 2. Extract available years from dataset names
+    # Extract available years from dataset names
     tables = get_course_data_tables()
     available_years = set()
     for t in tables:
@@ -64,55 +71,54 @@ def create_schedule():
 @student_bp.route('/schedule/edit/<int:schedule_id>')
 @login_required
 def edit_schedule(schedule_id):
-    conn = get_db_connection()
-    schedule = conn.execute('SELECT * FROM schedules WHERE id = ? AND user_id = ?',
-                            (schedule_id, current_user.id)).fetchone()
+    # Fetch schedule using ORM
+    schedule = Schedule.query.filter_by(id=schedule_id, user_id=current_user.id).first()
 
     if not schedule:
-        conn.close()
         flash("Plan not found or you do not have permission to view it.", "error")
         return redirect(url_for('schedule.user_dashboard'))
 
-    target_table, needs_filter = get_best_course_table(schedule['year'], schedule['semester'])
+    target_table, needs_filter = get_best_course_table(schedule.year, schedule.semester)
 
     current_courses = []
     if target_table:
+        # Dynamic query mapped to text() for safety
         sql = f'''
             SELECT sc.id as entry_id, sc.grade, c.*
             FROM schedule_courses sc
             JOIN "{target_table}" c ON sc.course_number = c.Course_Number
-            WHERE sc.schedule_id = ?
+            WHERE sc.schedule_id = :sched_id
         '''
-        params = [schedule_id]
+        params = {'sched_id': schedule.id}
 
         if needs_filter:
-            sql += " AND c.Semester LIKE ?"
-            params.append(f"%{schedule['semester']}%")
+            sql += " AND c.Semester LIKE :sem"
+            params['sem'] = f"%{schedule.semester}%"
 
         try:
-            rows = conn.execute(sql, params).fetchall()
-            current_courses = [dict(row) for row in rows]
+            rows = db.session.execute(text(sql), params).fetchall()
+            current_courses = [dict(row._mapping) for row in rows]
         except Exception as e:
             print(f"Error fetching current courses: {e}")
 
     obtained_courses = []
     try:
-        past_courses = conn.execute('''
-            SELECT sc.course_number
-            FROM schedule_courses sc
-            JOIN schedules s ON sc.schedule_id = s.id
-            WHERE s.user_id = ? AND s.schedule_type = 'past'
-              AND sc.grade IS NOT NULL AND sc.grade != '' AND sc.grade != 'F'
-        ''', (current_user.id,)).fetchall()
+        # ORM Join query to find past courses and filter out Fails
+        past_courses = ScheduleCourse.query.join(Schedule).filter(
+            Schedule.user_id == current_user.id,
+            Schedule.schedule_type == 'past',
+            ScheduleCourse.grade.isnot(None),
+            ScheduleCourse.grade != '',
+            ScheduleCourse.grade != 'F'
+        ).all()
 
-        for row in past_courses:
-            base_code = re.sub(r'-S\d+-.*', '', row['course_number']).strip()
+        for course in past_courses:
+            base_code = re.sub(r'-S\d+-.*', '', course.course_number).strip()
             obtained_courses.append(base_code)
     except Exception as e:
         print(f"Error fetching obtained courses: {e}")
 
-    periods = conn.execute("SELECT * FROM periods ORDER BY name ASC").fetchall()
-    conn.close()
+    periods = Period.query.order_by(Period.name.asc()).all()
 
     return render_template('Student/edit_schedule.html',
                            schedule=schedule,
@@ -126,15 +132,12 @@ def search_courses():
     query = request.args.get('query', '').strip()
     schedule_id = request.args.get('schedule_id', type=int)
 
-    conn = get_db_connection()
-    schedule = conn.execute('SELECT year, semester FROM schedules WHERE id = ? AND user_id = ?',
-                            (schedule_id, current_user.id)).fetchone()
+    schedule = Schedule.query.filter_by(id=schedule_id, user_id=current_user.id).first()
 
     if not schedule:
-        conn.close()
         return jsonify([])
 
-    target_table, needs_filter = get_best_course_table(schedule['year'], schedule['semester'])
+    target_table, needs_filter = get_best_course_table(schedule.year, schedule.semester)
 
     courses = []
     if target_table:
@@ -143,25 +146,25 @@ def search_courses():
             FROM "{target_table}" c
             WHERE 1=1
         '''
-        params = []
+        params = {}
 
         if query:
-            sql += " AND (c.Course_Title LIKE ? OR c.Course_Number LIKE ?)"
-            params.extend([f'%{query}%', f'%{query}%'])
+            # FIXED: Wrapped in LOWER() for PostgreSQL universal case-insensitive search
+            sql += " AND (LOWER(c.Course_Title) LIKE LOWER(:q) OR LOWER(c.Course_Number) LIKE LOWER(:q))"
+            params['q'] = f'%{query}%'
 
         if needs_filter:
-            sql += " AND c.Semester LIKE ?"
-            params.append(f"%{schedule['semester']}%")
+            sql += " AND c.Semester LIKE :sem"
+            params['sem'] = f"%{schedule.semester}%"
 
         sql += " LIMIT 250"
 
         try:
-            rows = conn.execute(sql, params).fetchall()
-            courses = [dict(row) for row in rows]
+            rows = db.session.execute(text(sql), params).fetchall()
+            courses = [dict(row._mapping) for row in rows]
         except Exception as e:
             print(f"Search Error: {e}")
 
-    conn.close()
     return jsonify(courses)
 
 @student_bp.route('/api/add_course', methods=['POST'])
@@ -174,54 +177,45 @@ def api_add_course():
     if not schedule_id or not course_number:
         return jsonify({'success': False, 'message': 'Missing data.'}), 400
 
-    conn = get_db_connection()
     try:
-        schedule = conn.execute('SELECT id FROM schedules WHERE id = ? AND user_id = ?',
-                                (schedule_id, current_user.id)).fetchone()
+        schedule = Schedule.query.filter_by(id=schedule_id, user_id=current_user.id).first()
         if not schedule:
             return jsonify({'success': False, 'message': 'Unauthorized access.'}), 403
 
-        existing = conn.execute('SELECT id FROM schedule_courses WHERE schedule_id = ? AND course_number = ?',
-                                (schedule_id, course_number)).fetchone()
+        existing = ScheduleCourse.query.filter_by(schedule_id=schedule_id, course_number=course_number).first()
         if existing:
             return jsonify({'success': False, 'message': 'Course is already in your plan.'}), 400
 
-        conn.execute('INSERT INTO schedule_courses (schedule_id, course_number) VALUES (?, ?)',
-                     (schedule_id, course_number))
-        conn.commit()
+        new_course = ScheduleCourse(schedule_id=schedule_id, course_number=course_number)
+        db.session.add(new_course)
+        db.session.commit()
+        
         return jsonify({'success': True})
 
     except Exception as e:
-        conn.rollback()
+        db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        conn.close()
 
 @student_bp.route('/api/remove_course/<int:entry_id>', methods=['POST'])
 @login_required
 def api_remove_course(entry_id):
-    conn = get_db_connection()
     try:
-        entry = conn.execute('''
-            SELECT sc.id
-            FROM schedule_courses sc
-            JOIN schedules s ON sc.schedule_id = s.id
-            WHERE sc.id = ? AND s.user_id = ?
-        ''', (entry_id, current_user.id)).fetchone()
+        # Securely find the course ensuring it belongs to a schedule owned by the current user
+        entry = ScheduleCourse.query.join(Schedule).filter(
+            ScheduleCourse.id == entry_id, 
+            Schedule.user_id == current_user.id
+        ).first()
 
         if not entry:
             return jsonify({'success': False, 'message': 'Unauthorized or course not found.'}), 403
 
-        conn.execute('DELETE FROM schedule_courses WHERE id = ?', (entry_id,))
-        conn.commit()
+        db.session.delete(entry)
+        db.session.commit()
         return jsonify({'success': True})
     except Exception as e:
-        conn.rollback()
+        db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        conn.close()
 
-# NEW: API to save grades when the student selects them from the dropdown!
 @student_bp.route('/api/update_grade', methods=['POST'])
 @login_required
 def api_update_grade():
@@ -229,22 +223,18 @@ def api_update_grade():
     entry_id = data.get('entry_id')
     grade = data.get('grade')
 
-    conn = get_db_connection()
     try:
-        entry = conn.execute('''
-            SELECT sc.id FROM schedule_courses sc
-            JOIN schedules s ON sc.schedule_id = s.id
-            WHERE sc.id = ? AND s.user_id = ?
-        ''', (entry_id, current_user.id)).fetchone()
+        entry = ScheduleCourse.query.join(Schedule).filter(
+            ScheduleCourse.id == entry_id, 
+            Schedule.user_id == current_user.id
+        ).first()
 
         if not entry:
             return jsonify({'success': False, 'message': 'Unauthorized access.'}), 403
 
-        conn.execute('UPDATE schedule_courses SET grade = ? WHERE id = ?', (grade, entry_id))
-        conn.commit()
+        entry.grade = grade
+        db.session.commit()
         return jsonify({'success': True})
     except Exception as e:
-        conn.rollback()
+        db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        conn.close()

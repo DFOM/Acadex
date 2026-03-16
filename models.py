@@ -1,65 +1,57 @@
-# Project/models.py
+# models.py
+from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
-from werkzeug.security import generate_password_hash, check_password_hash
-from utils import get_db_connection
 
-class User(UserMixin):
-    def __init__(self, id, username, password_hash, gender=None, year_of_study=None):
-        self.id = id
-        self.username = username
-        self.password_hash = password_hash
-        self.gender = gender
-        self.year_of_study = year_of_study
+# Initialize the SQLAlchemy object
+db = SQLAlchemy()
 
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
+class User(db.Model, UserMixin):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.String(150), nullable=False)
+    role = db.Column(db.String(50), default='student')
+    
+    # NEW: Added demographic columns required for the Admin Analytics panel
+    gender = db.Column(db.String(50), nullable=True)
+    year_of_study = db.Column(db.Integer, nullable=True)
+    
+    # Relationship: If a user is deleted, all their schedules are automatically deleted
+    schedules = db.relationship('Schedule', backref='student', lazy=True, cascade="all, delete-orphan")
 
-    def check_password(self, password):
-        if not self.password_hash:
-            return False
-        return check_password_hash(self.password_hash, password)
+class Schedule(db.Model):
+    __tablename__ = 'schedules'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    schedule_name = db.Column(db.String(150), nullable=False)
+    year = db.Column(db.Integer, nullable=False)
+    semester = db.Column(db.String(50), nullable=False)
+    schedule_type = db.Column(db.String(50), default='future') # past or future
+    
+    # Relationship: If a schedule is deleted, all its courses are automatically deleted
+    courses = db.relationship('ScheduleCourse', backref='schedule', lazy=True, cascade="all, delete-orphan")
 
-    def get_id(self):
-        # Flask-Login needs this to be a string
-        return str(self.id)
+class ScheduleCourse(db.Model):
+    __tablename__ = 'schedule_courses'
+    id = db.Column(db.Integer, primary_key=True)
+    schedule_id = db.Column(db.Integer, db.ForeignKey('schedules.id'), nullable=False)
+    course_number = db.Column(db.String(100), nullable=False)
+    grade = db.Column(db.String(5))
 
-    @staticmethod
-    def get(user_id):
-        if user_id is None:
-            return None
-        conn = get_db_connection()
-        try:
-            user_row = conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
-            if user_row:
-                # Use standard dictionary access to avoid sqlite3.Row errors
-                return User(
-                    id=user_row['id'], 
-                    username=user_row['username'], 
-                    password_hash=user_row['password_hash'],
-                    gender=user_row['gender'] if 'gender' in user_row.keys() else None,
-                    year_of_study=user_row['year_of_study'] if 'year_of_study' in user_row.keys() else None
-                )
-        except Exception as e:
-            print(f"Database Error in User.get: {e}")
-        finally:
-            conn.close()
-        return None
+class SubjectArea(db.Model):
+    __tablename__ = 'subject_areas'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), unique=True, nullable=False)
+    min_depth_credits = db.Column(db.Float, default=0.0)
 
-    @staticmethod
-    def get_by_username(username):
-        conn = get_db_connection()
-        try:
-            user_row = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
-            if user_row:
-                return User(
-                    id=user_row['id'], 
-                    username=user_row['username'], 
-                    password_hash=user_row['password_hash'],
-                    gender=user_row['gender'] if 'gender' in user_row.keys() else None,
-                    year_of_study=user_row['year_of_study'] if 'year_of_study' in user_row.keys() else None
-                )
-        except Exception as e:
-            print(f"Database Error in User.get_by_username: {e}")
-        finally:
-            conn.close()
-        return None
+class Period(db.Model):
+    __tablename__ = 'periods'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)
+    start_time = db.Column(db.String(50))
+    end_time = db.Column(db.String(50))
+
+class Setting(db.Model):
+    __tablename__ = 'settings'
+    key = db.Column(db.String(100), primary_key=True)
+    value = db.Column(db.String(255))

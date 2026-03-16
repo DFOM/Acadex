@@ -1,72 +1,85 @@
 # Routes/admin_routes.py
-from flask import Blueprint, render_template, request, redirect, url_for, flash, session, jsonify
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
+from flask_login import login_required, current_user
 import os
 import csv
-import sqlite3
 import re
+import pandas as pd
 from functools import wraps
 from werkzeug.utils import secure_filename
-from config import ADMIN_USERNAME, ADMIN_PASSWORD
-from utils import get_db_connection, get_course_data_tables, get_app_setting, update_app_setting, calculate_gpa
+from sqlalchemy import inspect, text
+from models import db, User, Schedule, SubjectArea, Period, Setting
+from utils import get_course_data_tables, calculate_gpa
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
+# --- SECURITY WRAPPER ---
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'admin_logged_in' not in session:
-            return redirect(url_for('admin.login', next=request.url))
+        if not current_user.is_authenticated or current_user.role != 'admin':
+            flash("Unauthorized access. Admin privileges required.", "error")
+            return redirect(url_for('auth.login', next=request.url))
         return f(*args, **kwargs)
     return decorated_function
 
+# --- HELPER FUNCTIONS ---
+def get_app_setting(key, default=""):
+    setting = Setting.query.get(key)
+    return setting.value if setting else default
+
+def update_app_setting(key, value):
+    setting = Setting.query.get(key)
+    if not setting:
+        setting = Setting(key=key, value=value)
+        db.session.add(setting)
+    else:
+        setting.value = value
+    db.session.commit()
+
+# Redirect old login to the new unified Auth login
 @admin_bp.route('/login', methods=['GET', 'POST'])
 def login():
-    if request.method == 'POST':
-        if request.form.get('username') == ADMIN_USERNAME and request.form.get('password') == ADMIN_PASSWORD:
-            session['admin_logged_in'] = True
-            flash('Login successful!', 'success')
-            return redirect(url_for('admin.index'))
-        else:
-            flash('Invalid credentials.', 'error')
-    return render_template('Admin/admin_login.html')
+    return redirect(url_for('auth.login'))
 
 @admin_bp.route('/logout')
 def logout():
-    session.pop('admin_logged_in', None)
-    return redirect(url_for('admin.login'))
+    return redirect(url_for('auth.logout'))
 
 @admin_bp.route('/')
+@login_required
 @admin_required
 def index():
-    conn = get_db_connection()
-    user_count = conn.execute('SELECT COUNT(id) FROM users').fetchone()[0]
-    schedule_count = conn.execute('SELECT COUNT(id) FROM schedules').fetchone()[0]
+    user_count = User.query.count()
+    schedule_count = Schedule.query.count()
     course_tables = get_course_data_tables()
     
-    all_schedules = conn.execute('''
+    # SQLAlchemy Core execution for complex joins
+    all_schedules = db.session.execute(text('''
         SELECT s.schedule_name, s.year, s.semester, s.schedule_type, u.username
         FROM schedules s
         JOIN users u ON s.user_id = u.id
         ORDER BY s.id DESC
-    ''').fetchall()
+    ''')).fetchall()
     
-    conn.close()
     return render_template('Admin/admin_dashboard.html', 
                            user_count=user_count, 
                            schedule_count=schedule_count,
                            course_tables=course_tables,
-                           all_schedules=[dict(row) for row in all_schedules],
-                           current_year_setting=get_app_setting('current_year'), 
-                           current_semester_setting=get_app_setting('current_semester'),
-                           graduation_credits_setting=get_app_setting('graduation_credits'))
+                           all_schedules=[dict(row._mapping) for row in all_schedules],
+                           current_year_setting=get_app_setting('current_year', '2025'), 
+                           current_semester_setting=get_app_setting('current_semester', 'Spring'),
+                           graduation_credits_setting=get_app_setting('graduation_credits', '124'))
 
 @admin_bp.route('/datasets')
+@login_required
 @admin_required
 def manage_datasets():
     tables = get_course_data_tables()
     return render_template('Admin/manage_datasets.html', tables=tables)
 
 @admin_bp.route('/datasets/upload', methods=['POST'])
+@login_required
 @admin_required
 def upload_dataset():
     if 'file' not in request.files:
@@ -85,33 +98,17 @@ def upload_dataset():
     if not os.path.exists('uploads'): os.makedirs('uploads')
     file.save(upload_path)
 
-    conn = get_db_connection()
     try:
-        # FIXED: Added Prerequisite to the schema!
-        conn.execute(f'''
-            CREATE TABLE IF NOT EXISTS "{table_name}" (
-                "Course_Number" TEXT PRIMARY KEY, 
-                "Course_Title" TEXT, 
-                "Credits" INTEGER,
-                "Instructor" TEXT, 
-                "Day_and_Period" TEXT, 
-                "Area_of_Study" TEXT,
-                "Year_Available" TEXT,
-                "Prerequisite" TEXT,
-                "subject_area_id" INTEGER, 
-                "Semester" TEXT
-            )
-        ''')
-        
+        # 1. Read the CSV purely in Python to apply your custom logic
+        processed_rows = []
+        seen_course_nums = set()
+
         with open(upload_path, mode='r', encoding='utf-8-sig', errors='replace') as f:
             reader = csv.reader(f)
             raw_headers = next(reader)
             
             def clean_header(h): return re.sub(r'[^a-z0-9]', '', str(h).lower())
             headers = [clean_header(h) for h in raw_headers]
-            
-            inserted_count = 0
-            seen_course_nums = set()
             
             for row in reader:
                 if not row or not any(row): continue 
@@ -125,8 +122,6 @@ def upload_dataset():
                 semester = row_dict.get('semester', row_dict.get('term', '')).strip()
                 area_of_study = row_dict.get('areaofstudy', row_dict.get('subjectarea', row_dict.get('faculty', row_dict.get('subject', '')))).strip()
                 year_available = row_dict.get('yearavailable', row_dict.get('targetyear', row_dict.get('year', ''))).strip()
-                
-                # FIXED: Fuzzy match for Prerequisite
                 prerequisite = row_dict.get('prerequisite', row_dict.get('prereq', row_dict.get('prerequisites', ''))).strip()
                 
                 if course_num:
@@ -142,33 +137,46 @@ def upload_dataset():
                         counter += 1
                     seen_course_nums.add(unique_course_num)
 
-                    conn.execute(f'INSERT OR REPLACE INTO "{table_name}" VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', 
-                        (unique_course_num, title, credits, instructor, day_period, area_of_study, year_available, prerequisite, None, semester))
-                    inserted_count += 1
-        conn.commit()
+                    processed_rows.append({
+                        "Course_Number": unique_course_num,
+                        "Course_Title": title,
+                        "Credits": credits,
+                        "Instructor": instructor,
+                        "Day_and_Period": day_period,
+                        "Area_of_Study": area_of_study,
+                        "Year_Available": year_available,
+                        "Prerequisite": prerequisite,
+                        "subject_area_id": None,
+                        "Semester": semester
+                    })
+
+        # 2. Convert to DataFrame and push to PostgreSQL/SQLite safely using SQLAlchemy
+        df = pd.DataFrame(processed_rows)
+        df.to_sql(table_name, con=db.engine, if_exists='replace', index=False)
+        
+        flash(f'Dataset "{table_name}" uploaded and parsed successfully!', 'success')
     except Exception as e:
         flash(f'Upload failed: {e}', 'error')
-    finally:
-        conn.close()
+
     return redirect(url_for('admin.manage_datasets'))
 
 @admin_bp.route('/datasets/delete/<table_name>', methods=['POST'])
+@login_required
 @admin_required
 def delete_dataset(table_name):
-    conn = get_db_connection()
     try:
-        conn.execute(f'DROP TABLE "{table_name}"')
-        conn.commit()
+        db.session.execute(text(f'DROP TABLE "{table_name}"'))
+        db.session.commit()
         flash(f'Dataset "{table_name}" deleted.', 'success')
     except Exception as e:
+        db.session.rollback()
         flash(f'Error: {e}', 'error')
-    finally:
-        conn.close()
     return redirect(url_for('admin.manage_datasets'))
 
 @admin_bp.route('/update_app_settings', methods=['POST'])
+@login_required
 @admin_required
-def update_app_settings():
+def update_app_settings_route():
     update_app_setting('current_year', request.form.get('current_year_setting'))
     update_app_setting('current_semester', request.form.get('current_semester_setting'))
     update_app_setting('graduation_credits', request.form.get('graduation_credits_setting'))
@@ -176,172 +184,182 @@ def update_app_settings():
     return redirect(url_for('admin.index'))
 
 @admin_bp.route('/periods')
+@login_required
 @admin_required
 def manage_periods():
-    conn = get_db_connection()
-    periods = conn.execute("SELECT * FROM periods ORDER BY name ASC").fetchall()
-    conn.close()
+    periods = Period.query.order_by(Period.name.asc()).all()
     return render_template('Admin/periods.html', periods=periods)
 
 @admin_bp.route('/users')
+@login_required
 @admin_required
 def manage_users():
-    conn = get_db_connection()
-    users = conn.execute('SELECT id, gender, year_of_study FROM users ORDER BY id ASC').fetchall()
-    conn.close()
-    return render_template('Admin/manage_users.html', users=users)
+    users = db.session.execute(text('SELECT id, gender, year_of_study, username FROM users ORDER BY id ASC')).fetchall()
+    return render_template('Admin/manage_users.html', users=[dict(row._mapping) for row in users])
 
 @admin_bp.route('/api/update_user_demographics', methods=['POST'])
+@login_required
 @admin_required
 def update_user_demographics():
     data = request.get_json()
-    conn = get_db_connection()
     try:
-        conn.execute('UPDATE users SET gender = ?, year_of_study = ? WHERE id = ?', 
-                     (data.get('gender'), data.get('year_of_study'), data.get('id')))
-        conn.commit()
+        db.session.execute(text('UPDATE users SET gender = :g, year_of_study = :y WHERE id = :id'), 
+                     {'g': data.get('gender'), 'y': data.get('year_of_study'), 'id': data.get('id')})
+        db.session.commit()
         return jsonify({'success': True})
-    except sqlite3.Error as e:
+    except Exception as e:
+        db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        conn.close()
 
 @admin_bp.route('/api/delete_user/<int:user_id>', methods=['POST'])
+@login_required
 @admin_required
 def delete_user(user_id):
-    conn = get_db_connection()
     try:
-        schedules = conn.execute('SELECT id FROM schedules WHERE user_id = ?', (user_id,)).fetchall()
-        for s in schedules:
-            conn.execute('DELETE FROM schedule_courses WHERE schedule_id = ?', (s['id'],))
-        conn.execute('DELETE FROM schedules WHERE user_id = ?', (user_id,))
-        conn.execute('DELETE FROM users WHERE id = ?', (user_id,))
-        conn.commit()
-        return jsonify({'success': True})
-    except sqlite3.Error as e:
-        conn.rollback()
+        user = User.query.get(user_id)
+        if user:
+            db.session.delete(user)
+            db.session.commit()
+            return jsonify({'success': True})
+        return jsonify({'success': False, 'message': 'User not found'}), 404
+    except Exception as e:
+        db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        conn.close()
 
 @admin_bp.route('/subjects', methods=['GET', 'POST'])
+@login_required
 @admin_required
 def manage_subjects():
-    conn = get_db_connection()
     if request.method == 'POST':
         subject_id = request.form.get('subject_id')
         new_benchmark = request.form.get('min_depth_credits')
-        conn.execute('UPDATE subject_areas SET min_depth_credits = ? WHERE id = ?', (new_benchmark, subject_id))
-        conn.commit()
-        flash('Subject benchmark updated.', 'success')
-    subjects = conn.execute("SELECT id, name, is_major, min_depth_credits FROM subject_areas ORDER BY name").fetchall()
-    conn.close()
+        try:
+            db.session.execute(text('UPDATE subject_areas SET min_depth_credits = :val WHERE id = :id'), 
+                               {'val': new_benchmark, 'id': subject_id})
+            db.session.commit()
+            flash('Subject benchmark updated.', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error updating benchmark: {e}', 'error')
+            
+    subjects = SubjectArea.query.order_by(SubjectArea.name).all()
     return render_template('Admin/subjects.html', subjects=subjects)
 
 @admin_bp.route('/instructors')
+@login_required
 @admin_required
 def manage_instructors():
-    conn = get_db_connection()
-    instructors = conn.execute("SELECT id, name FROM instructors ORDER BY name").fetchall()
-    conn.close()
-    return render_template('Admin/instructors.html', instructors=instructors)
+    try:
+        instructors = db.session.execute(text("SELECT id, name FROM instructors ORDER BY name")).fetchall()
+        return render_template('Admin/instructors.html', instructors=[dict(row._mapping) for row in instructors])
+    except:
+        return render_template('Admin/instructors.html', instructors=[])
 
 @admin_bp.route('/api/update_instructor/<int:instructor_id>', methods=['POST'])
+@login_required
 @admin_required
 def api_update_instructor(instructor_id):
     data = request.get_json()
-    conn = get_db_connection()
     try:
-        conn.execute("UPDATE instructors SET name = ? WHERE id = ?", (data.get('name'), instructor_id))
-        conn.commit()
+        db.session.execute(text("UPDATE instructors SET name = :name WHERE id = :id"), 
+                           {'name': data.get('name'), 'id': instructor_id})
+        db.session.commit()
         return jsonify({'success': True})
     except Exception as e:
+        db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        conn.close()
 
 @admin_bp.route('/courses')
+@login_required
 @admin_required
 def manage_courses():
-    conn = get_db_connection()
     course_tables = get_course_data_tables()
     if not course_tables:
-        conn.close()
         return render_template('Admin/courses.html', courses=[])
-    union_parts = [f'SELECT \'{t}\' as source_table, rowid as _rowid, "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Prerequisite" FROM "{t}"' for t in course_tables]
+    
+    # FIXED: Replaced SQLite-only 'rowid' with universally unique 'Course_Number' as _rowid
+    union_parts = [f'SELECT \'{t}\' as source_table, "Course_Number" as _rowid, "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Prerequisite" FROM "{t}"' for t in course_tables]
     full_query = " UNION ALL ".join(union_parts)
-    courses = conn.execute(f"SELECT * FROM ({full_query})").fetchall()
-    conn.close()
-    return render_template('Admin/courses.html', courses=courses)
+    
+    courses = db.session.execute(text(f"SELECT * FROM ({full_query})")).fetchall()
+    return render_template('Admin/courses.html', courses=[dict(row._mapping) for row in courses])
 
 @admin_bp.route('/api/update_course', methods=['POST'])
+@login_required
 @admin_required
 def api_update_course():
     data = request.get_json()
-    conn = get_db_connection()
     try:
-        conn.execute(f'UPDATE "{data.get("source_table")}" SET Course_Title = ?, Credits = ? WHERE rowid = ?', 
-                     (data.get('Course_Title'), data.get('Credits'), data.get('_rowid')))
-        conn.commit()
-        return jsonify({'success': True})
+        table = data.get("source_table")
+        if table in get_course_data_tables():
+            # FIXED: Updating based on Course_Number instead of rowid
+            db.session.execute(text(f'UPDATE "{table}" SET "Course_Title" = :title, "Credits" = :creds WHERE "Course_Number" = :rid'), 
+                        {'title': data.get('Course_Title'), 'creds': data.get('Credits'), 'rid': data.get('_rowid')})
+            db.session.commit()
+            return jsonify({'success': True})
+        return jsonify({'success': False, 'message': 'Invalid table'})
     except Exception as e:
+        db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        conn.close()
 
 @admin_bp.route('/api/update_period', methods=['POST'])
+@login_required
 @admin_required
 def update_period():
     data = request.get_json()
-    conn = get_db_connection()
     try:
-        conn.execute('UPDATE periods SET start_time = ?, end_time = ? WHERE id = ?',
-                     (data['start_time'], data['end_time'], data['id']))
-        conn.commit()
-        return jsonify({'success': True})
+        period = Period.query.get(data['id'])
+        if period:
+            period.start_time = data['start_time']
+            period.end_time = data['end_time']
+            db.session.commit()
+            return jsonify({'success': True})
+        return jsonify({'success': False, 'message': 'Period not found'})
     except Exception as e:
+        db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
-    finally:
-        conn.close()
 
 # ==========================================
 # DEEP DATA ANALYTICS & COMPARISON TOOL
 # ==========================================
 @admin_bp.route('/analytics')
+@login_required
 @admin_required
 def analytics():
-    conn = get_db_connection()
     tables = get_course_data_tables()
     
-    total_users = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
-    total_schedules = conn.execute('SELECT COUNT(*) FROM schedules').fetchone()[0]
+    total_users = User.query.count()
+    total_schedules = Schedule.query.count()
 
-    user_data = conn.execute('SELECT id, gender, year_of_study FROM users').fetchall()
+    user_data = db.session.execute(text('SELECT id, gender, year_of_study FROM users')).fetchall()
     gpa_by_gender = {"Male": [], "Female": [], "Other/Prefer not to say": []}
     gpa_by_year = {"1": [], "2": [], "3": [], "4": []}
     overall_gpas = []
 
     for user in user_data:
         try:
-            courses = conn.execute('''
-                SELECT sc.grade, c.Credits 
-                FROM schedule_courses sc 
-                JOIN (SELECT Course_Number, Credits FROM "2024_All_Courses" UNION SELECT Course_Number, Credits FROM "2025_All_Courses") c 
-                ON sc.course_number = c.Course_Number 
-                WHERE sc.grade IS NOT NULL AND sc.grade != "" 
-                AND sc.schedule_id IN (SELECT id FROM schedules WHERE user_id = ?)
-            ''', (user['id'],)).fetchall()
-            
-            if courses:
-                gpa = calculate_gpa([dict(row) for row in courses])
-                overall_gpas.append(gpa)
+            if tables:
+                c_union = " UNION ".join([f'SELECT Course_Number, Credits FROM "{t}"' for t in tables])
+                courses = db.session.execute(text(f'''
+                    SELECT sc.grade, c.Credits 
+                    FROM schedule_courses sc 
+                    JOIN ({c_union}) c 
+                    ON sc.course_number = c.Course_Number 
+                    WHERE sc.grade IS NOT NULL AND sc.grade != "" 
+                    AND sc.schedule_id IN (SELECT id FROM schedules WHERE user_id = :uid)
+                '''), {'uid': user.id}).fetchall()
                 
-                gen = user['gender'] if user['gender'] in gpa_by_gender else "Other/Prefer not to say"
-                gpa_by_gender[gen].append(gpa)
-                
-                yr = str(user['year_of_study'])
-                if yr in gpa_by_year: gpa_by_year[yr].append(gpa)
-        except Exception:
+                if courses:
+                    gpa = calculate_gpa([dict(row._mapping) for row in courses])
+                    overall_gpas.append(gpa)
+                    
+                    gen = user.gender if getattr(user, 'gender', None) in gpa_by_gender else "Other/Prefer not to say"
+                    gpa_by_gender[gen].append(gpa)
+                    
+                    yr = str(getattr(user, 'year_of_study', ''))
+                    if yr in gpa_by_year: gpa_by_year[yr].append(gpa)
+        except Exception as e:
+            print(f"Analytics error for user {user.id}: {e}")
             pass 
 
     avg_gpa_overall = sum(overall_gpas)/len(overall_gpas) if overall_gpas else 0
@@ -357,37 +375,37 @@ def analytics():
     if tables:
         table_union = " UNION ".join([f'SELECT Course_Number, Course_Title, Area_of_Study, Instructor, Day_and_Period FROM "{t}"' for t in tables])
         
-        top_courses = conn.execute(f'''
+        top_courses = db.session.execute(text(f'''
             SELECT m.Course_Title, COUNT(sc.id) as count 
             FROM schedule_courses sc
             JOIN ({table_union}) m ON sc.course_number = m.Course_Number
             GROUP BY m.Course_Title ORDER BY count DESC LIMIT 10
-        ''').fetchall()
+        ''')).fetchall()
 
-        top_areas = conn.execute(f'''
+        top_areas = db.session.execute(text(f'''
             SELECT m.Area_of_Study, COUNT(sc.id) as count 
             FROM schedule_courses sc
             JOIN ({table_union}) m ON sc.course_number = m.Course_Number
             WHERE m.Area_of_Study != "" AND m.Area_of_Study IS NOT NULL
             GROUP BY m.Area_of_Study ORDER BY count DESC LIMIT 10
-        ''').fetchall()
+        ''')).fetchall()
 
-        top_faculty = conn.execute(f'''
+        top_faculty = db.session.execute(text(f'''
             SELECT m.Instructor, COUNT(sc.id) as count 
             FROM schedule_courses sc
             JOIN ({table_union}) m ON sc.course_number = m.Course_Number
             WHERE m.Instructor != "" AND m.Instructor IS NOT NULL
             GROUP BY m.Instructor ORDER BY count DESC LIMIT 10
-        ''').fetchall()
+        ''')).fetchall()
 
-        all_time_slots = conn.execute(f'''
+        all_time_slots = db.session.execute(text(f'''
             SELECT m.Day_and_Period 
             FROM schedule_courses sc
             JOIN ({table_union}) m ON sc.course_number = m.Course_Number
-        ''').fetchall()
+        ''')).fetchall()
 
         for row in all_time_slots:
-            ts = row['Day_and_Period']
+            ts = row.Day_and_Period
             if ts:
                 for day in day_counts.keys():
                     if day in ts: day_counts[day] += 1
@@ -395,15 +413,14 @@ def analytics():
                 for n in nums:
                     if n in period_counts: period_counts[n] += 1
 
-    conn.close()
     return render_template('Admin/admin_analytics.html', 
                            total_users=total_users, 
                            total_schedules=total_schedules,
                            avg_gpa=round(avg_gpa_overall, 2),
                            gender_gpa=gender_gpa_stats,
                            year_gpa=year_gpa_stats,
-                           top_courses=[dict(row) for row in top_courses],
-                           top_areas=[dict(row) for row in top_areas],
-                           top_faculty=[dict(row) for row in top_faculty],
+                           top_courses=[dict(row._mapping) for row in top_courses],
+                           top_areas=[dict(row._mapping) for row in top_areas],
+                           top_faculty=[dict(row._mapping) for row in top_faculty],
                            day_counts=day_counts,
                            period_counts=period_counts)
