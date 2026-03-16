@@ -4,7 +4,8 @@ from flask_login import login_required, current_user
 from sqlalchemy import text
 import uuid
 from models import db, Schedule, ScheduleCourse, Period, Setting
-from utils import get_best_course_table, get_available_datasets
+# FIXED: Removed the missing get_available_datasets import to prevent the 500 boot crash
+from utils import get_best_course_table
 
 student_bp = Blueprint('student', __name__)
 
@@ -82,15 +83,12 @@ def create_schedule():
         
         return redirect(url_for('student.edit_schedule', schedule_id=new_sched.id))
         
-    # GET method logic for populating dropdowns
-    datasets = get_available_datasets()
-    available_years = sorted(list(set(d['year'] for d in datasets)), reverse=True)
-    
+    # GET method logic for populating dropdowns (FIXED to not rely on utils.py)
     current_year_setting = Setting.query.get('current_year')
     current_year = int(current_year_setting.value) if current_year_setting and current_year_setting.value.isdigit() else 2024
     
-    if not available_years:
-        available_years = [current_year, current_year + 1]
+    # Generate a dynamic list of years for the user to choose from
+    available_years = [current_year, current_year + 1, current_year + 2]
 
     return render_template('Student/create_schedule.html', available_years=available_years)
 
