@@ -1,3 +1,7 @@
 venv/
 __pycache__/
 database.db
+.DS_Store
+Routes/.DS_Store
+instance/
+*.db

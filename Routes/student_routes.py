@@ -253,6 +253,7 @@ def edit_schedule(schedule_id):
                            periods=periods)
 
 @student_bp.route('/api/add_course', methods=['POST'])
+@student_bp.route('/student/api/add_course', methods=['POST'])
 def add_course():
     data = request.get_json()
     sched_id = data.get('schedule_id')
@@ -275,7 +276,8 @@ def add_course():
 
     return jsonify({'success': True})
 
-@student_bp.route('/api/remove_course/<int:entry_id>', methods=['DELETE'])
+@student_bp.route('/api/remove_course/<int:entry_id>', methods=['DELETE', 'POST'])
+@student_bp.route('/student/api/remove_course/<int:entry_id>', methods=['DELETE', 'POST'])
 def remove_course(entry_id):
     course_entry = ScheduleCourse.query.get(entry_id)
     if not course_entry:

@@ -9,7 +9,7 @@ from functools import wraps
 from werkzeug.utils import secure_filename
 from sqlalchemy import inspect, text
 from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement
-from utils import get_course_data_tables, calculate_gpa
+from utils import get_course_data_tables, calculate_gpa, is_valid_table_name
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -137,8 +137,6 @@ def delete_announcement(announcement_id):
 @admin_required
 def manage_datasets():
     tables = get_course_data_tables()
-    from utils import is_valid_table_name
-    validated_tables = [t for t in tables if is_valid_table_name(t)]
     return render_template('Admin/manage_datasets.html', tables=tables)
 
 @admin_bp.route('/datasets/upload', methods=['POST'])
@@ -156,6 +154,10 @@ def upload_dataset():
 
     filename = secure_filename(file.filename)
     table_name = filename.replace('.csv', '')
+    table_name = re.sub(r'[^A-Za-z0-9_]', '_', table_name)
+    if not is_valid_table_name(table_name):
+        flash('Invalid dataset name after sanitization. Please rename the CSV file.', 'error')
+        return redirect(url_for('admin.manage_datasets'))
     upload_path = os.path.join('uploads', filename)
     
     if not os.path.exists('uploads'): os.makedirs('uploads')
@@ -226,6 +228,9 @@ def upload_dataset():
 @admin_required
 def delete_dataset(table_name):
     try:
+        if not is_valid_table_name(table_name) or table_name not in get_course_data_tables():
+            flash('Invalid dataset table name.', 'error')
+            return redirect(url_for('admin.manage_datasets'))
         db.session.execute(text(f'DROP TABLE "{table_name}"'))
         db.session.commit()
         flash(f'Dataset "{table_name}" deleted.', 'success')
@@ -334,7 +339,7 @@ def api_update_instructor(instructor_id):
 @login_required
 @admin_required
 def manage_courses():
-    course_tables = get_course_data_tables()
+    course_tables = [t for t in get_course_data_tables() if is_valid_table_name(t)]
     if not course_tables:
         return render_template('Admin/courses.html', courses=[])
     
@@ -351,7 +356,7 @@ def api_update_course():
     data = request.get_json()
     try:
         table = data.get("source_table")
-        if table in get_course_data_tables():
+        if table and is_valid_table_name(table) and table in get_course_data_tables():
             db.session.execute(text(f'UPDATE "{table}" SET "Course_Title" = :title, "Credits" = :creds WHERE "Course_Number" = :rid'), 
                         {'title': data.get('Course_Title'), 'creds': data.get('Credits'), 'rid': data.get('_rowid')})
             db.session.commit()
