@@ -6,11 +6,12 @@ from models import db, User
 
 auth_bp = Blueprint('auth', __name__)
 
-@auth_bp.route('/', methods=['GET', 'POST'])
+# FIXED: Changed from '/' to '/login' so the new Landing Page can take the root URL
+@auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
-        # FIXED: Everyone goes to the student dashboard now!
-        return redirect(url_for('schedule.user_dashboard'))
+        # FIXED: Pointed to the new student dashboard route
+        return redirect(url_for('student.user_dashboard'))
 
     if request.method == 'POST':
         username = request.form.get('username')
@@ -20,8 +21,8 @@ def login():
 
         if user and check_password_hash(user.password, password):
             login_user(user)
-            # FIXED: Everyone goes to the student dashboard now!
-            return redirect(url_for('schedule.user_dashboard'))
+            # FIXED: Pointed to the new student dashboard route
+            return redirect(url_for('student.user_dashboard'))
         else:
             flash("Invalid username or password.", "error")
 
