@@ -7,6 +7,9 @@ import re
 from models import db, Schedule, ScheduleCourse, Period, Setting, Announcement
 from utils import get_best_course_table, get_course_data_tables, calculate_gpa, is_valid_table_name
 from services.eligibility import prereqs_met
+from services.conflicts import parse_day_period_blocks, has_conflict
+from services.ai.recommendations import recommend_courses
+from services.ai.generator import generate_schedule_courses
 
 student_bp = Blueprint('student', __name__)
 
@@ -271,6 +274,20 @@ def add_course():
     if not sched:
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
 
+    # Prevent duplicates
+    existing = ScheduleCourse.query.filter_by(schedule_id=sched.id, course_number=course_num).first()
+    if existing:
+        return (
+            jsonify(
+                {
+                    'success': False,
+                    'error': f'Course already in schedule: {course_num}',
+                    'message': f'Course already in schedule: {course_num}'
+                }
+            ),
+            400,
+        )
+
     # --- Prerequisite enforcement ---
     # Fetch the prerequisite string for the selected course from the schedule's dataset.
     table_name, _ = get_best_course_table(sched.year, sched.semester)
@@ -288,9 +305,13 @@ def add_course():
         )
 
     prereq_str = ''
+    candidate_day_period = ''
     try:
         prereq_row = db.session.execute(
-            text(f'SELECT "Prerequisite" FROM "{table_name}" WHERE "Course_Number" = :cn LIMIT 1'),
+            text(
+                f'SELECT "Prerequisite", "Day_and_Period" FROM "{table_name}" '
+                'WHERE "Course_Number" = :cn LIMIT 1'
+            ),
             {'cn': course_num},
         ).fetchone()
         if not prereq_row:
@@ -305,6 +326,7 @@ def add_course():
                 400,
             )
         prereq_str = prereq_row[0]
+        candidate_day_period = prereq_row[1]
     except Exception as e:
         db.session.rollback()
         print(f"Error fetching prerequisites for {course_num} from {table_name}: {e}")
@@ -377,6 +399,49 @@ def add_course():
             400,
         )
 
+    # --- Conflict enforcement ---
+    try:
+        existing_rows = db.session.execute(
+            text(
+                f'''
+                SELECT c."Day_and_Period"
+                FROM schedule_courses sc
+                JOIN "{table_name}" c ON sc.course_number = c."Course_Number"
+                WHERE sc.schedule_id = :sid
+                '''
+            ),
+            {'sid': sched.id},
+        ).fetchall()
+        occupied_blocks = set()
+        for r in existing_rows:
+            occupied_blocks |= parse_day_period_blocks(r[0])
+
+        candidate_blocks = parse_day_period_blocks(candidate_day_period)
+        if has_conflict(occupied_blocks, candidate_blocks):
+            return (
+                jsonify(
+                    {
+                        'success': False,
+                        'error': f'Schedule conflict for {course_num}',
+                        'message': f'Schedule conflict for {course_num}'
+                    }
+                ),
+                400,
+            )
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error checking conflicts for {course_num} on schedule {sched.id}: {e}")
+        return (
+            jsonify(
+                {
+                    'success': False,
+                    'error': 'Unable to validate schedule conflicts',
+                    'message': 'Could not validate schedule conflicts right now.'
+                }
+            ),
+            400,
+        )
+
     new_course = ScheduleCourse(schedule_id=sched_id, course_number=course_num)
     db.session.add(new_course)
     db.session.commit()
@@ -431,3 +496,185 @@ def update_grade():
     db.session.commit()
     
     return jsonify({'success': True})
+
+
+@student_bp.route('/api/recommendations', methods=['GET'])
+@student_bp.route('/student/api/recommendations', methods=['GET'])
+def api_recommendations():
+    sched_id = request.args.get('schedule_id')
+    try:
+        limit = int(request.args.get('limit', 10))
+    except Exception:
+        limit = 10
+
+    if not sched_id:
+        return jsonify({'success': False, 'error': 'Missing schedule_id', 'message': 'Missing schedule_id'}), 400
+    try:
+        sched_id_int = int(sched_id)
+    except Exception:
+        return jsonify({'success': False, 'error': 'Invalid schedule_id', 'message': 'Invalid schedule_id'}), 400
+
+    if current_user.is_authenticated:
+        sched = Schedule.query.filter_by(id=sched_id_int, user_id=current_user.id).first()
+    else:
+        sched = Schedule.query.filter_by(id=sched_id_int, session_id=session.get('guest_id')).first()
+    if not sched:
+        return jsonify({'success': False, 'error': 'Unauthorized', 'message': 'Unauthorized'}), 403
+
+    table_name, _ = get_best_course_table(sched.year, sched.semester)
+    if not table_name or not is_valid_table_name(table_name):
+        return jsonify({'success': False, 'error': 'Catalog unavailable', 'message': 'Catalog unavailable'}), 400
+
+    try:
+        rows = db.session.execute(
+            text(
+                f'''
+                SELECT "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Area_of_Study", "Prerequisite"
+                FROM "{table_name}"
+                '''
+            )
+        ).fetchall()
+        catalog = [dict(r._mapping) for r in rows]
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error loading catalog for recommendations from {table_name}: {e}")
+        return jsonify({'success': False, 'error': 'Failed to load catalog', 'message': 'Failed to load catalog'}), 400
+
+    completed_passing = []
+    if current_user.is_authenticated:
+        try:
+            completed_rows = db.session.execute(
+                text(
+                    '''
+                    SELECT sc.course_number
+                    FROM schedule_courses sc
+                    JOIN schedules s ON s.id = sc.schedule_id
+                    WHERE s.user_id = :uid
+                      AND s.schedule_type = 'past'
+                      AND sc.grade IS NOT NULL
+                      AND sc.grade != ''
+                      AND UPPER(sc.grade) != 'F'
+                    '''
+                ),
+                {'uid': current_user.id},
+            ).fetchall()
+            completed_passing = [r[0] for r in completed_rows]
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error fetching completed courses for recommendations (user {current_user.id}): {e}")
+            return jsonify({'success': False, 'error': 'Unable to validate prerequisites', 'message': 'Unable to validate prerequisites'}), 400
+
+    # Avoid recommending courses already in the schedule.
+    try:
+        in_sched_rows = db.session.execute(
+            text('SELECT course_number FROM schedule_courses WHERE schedule_id = :sid'),
+            {'sid': sched.id},
+        ).fetchall()
+        in_sched = {r[0] for r in in_sched_rows}
+        catalog = [c for c in catalog if c.get('Course_Number') not in in_sched]
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error checking existing schedule courses for recommendations: {e}")
+
+    recs, errors = recommend_courses(catalog, completed_passing, limit=limit)
+    for err in errors:
+        print(f"Recommendation prereq parse error: {err}")
+    return jsonify({'success': True, 'recommendations': recs})
+
+
+@student_bp.route('/api/generate_schedule', methods=['POST'])
+@student_bp.route('/student/api/generate_schedule', methods=['POST'])
+def api_generate_schedule():
+    data = request.get_json(silent=True) or {}
+    sched_id = data.get('schedule_id')
+    target_count = data.get('target_count', 5)
+
+    if not sched_id:
+        return jsonify({'success': False, 'error': 'Missing schedule_id', 'message': 'Missing schedule_id'}), 400
+    try:
+        sched_id_int = int(sched_id)
+    except Exception:
+        return jsonify({'success': False, 'error': 'Invalid schedule_id', 'message': 'Invalid schedule_id'}), 400
+    try:
+        target_count = int(target_count)
+    except Exception:
+        target_count = 5
+
+    if current_user.is_authenticated:
+        sched = Schedule.query.filter_by(id=sched_id_int, user_id=current_user.id).first()
+    else:
+        sched = Schedule.query.filter_by(id=sched_id_int, session_id=session.get('guest_id')).first()
+    if not sched:
+        return jsonify({'success': False, 'error': 'Unauthorized', 'message': 'Unauthorized'}), 403
+
+    table_name, _ = get_best_course_table(sched.year, sched.semester)
+    if not table_name or not is_valid_table_name(table_name):
+        return jsonify({'success': False, 'error': 'Catalog unavailable', 'message': 'Catalog unavailable'}), 400
+
+    completed_passing = []
+    if current_user.is_authenticated:
+        try:
+            completed_rows = db.session.execute(
+                text(
+                    '''
+                    SELECT sc.course_number
+                    FROM schedule_courses sc
+                    JOIN schedules s ON s.id = sc.schedule_id
+                    WHERE s.user_id = :uid
+                      AND s.schedule_type = 'past'
+                      AND sc.grade IS NOT NULL
+                      AND sc.grade != ''
+                      AND UPPER(sc.grade) != 'F'
+                    '''
+                ),
+                {'uid': current_user.id},
+            ).fetchall()
+            completed_passing = [r[0] for r in completed_rows]
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error fetching completed courses for generator (user {current_user.id}): {e}")
+            return jsonify({'success': False, 'error': 'Unable to validate prerequisites', 'message': 'Unable to validate prerequisites'}), 400
+
+    try:
+        existing_dp_rows = db.session.execute(
+            text(
+                f'''
+                SELECT c."Day_and_Period"
+                FROM schedule_courses sc
+                JOIN "{table_name}" c ON sc.course_number = c."Course_Number"
+                WHERE sc.schedule_id = :sid
+                '''
+            ),
+            {'sid': sched.id},
+        ).fetchall()
+        existing_day_period = [r[0] for r in existing_dp_rows]
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error loading existing day/period for generator: {e}")
+        existing_day_period = []
+
+    try:
+        rows = db.session.execute(
+            text(
+                f'''
+                SELECT "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Area_of_Study", "Prerequisite"
+                FROM "{table_name}"
+                '''
+            )
+        ).fetchall()
+        catalog = [dict(r._mapping) for r in rows]
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error loading catalog for generator from {table_name}: {e}")
+        return jsonify({'success': False, 'error': 'Failed to load catalog', 'message': 'Failed to load catalog'}), 400
+
+    generated, errors = generate_schedule_courses(
+        catalog,
+        completed_passing,
+        target_count=target_count,
+        existing_day_and_period=existing_day_period,
+    )
+    for err in errors:
+        print(f"Generator prereq parse error: {err}")
+
+    return jsonify({'success': True, 'courses': generated})
