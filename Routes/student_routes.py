@@ -236,10 +236,21 @@ def create_schedule():
         
     current_year_setting = Setting.query.get('current_year')
     current_year = int(current_year_setting.value) if current_year_setting and current_year_setting.value.isdigit() else 2024
+
+    schedule_type = (request.args.get('schedule_type') or 'future').strip().lower()
+    if schedule_type not in {'past', 'future'}:
+        schedule_type = 'future'
+    if not current_user.is_authenticated:
+        schedule_type = 'future'
     
     available_years = [current_year, current_year + 1, current_year + 2]
 
-    return render_template('Student/create_schedule.html', available_years=available_years)
+    return render_template(
+        'Student/create_schedule.html',
+        available_years=available_years,
+        current_year=current_year,
+        schedule_type=schedule_type,
+    )
 
 @student_bp.route('/schedule/edit/<int:schedule_id>')
 def edit_schedule(schedule_id):
