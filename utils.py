@@ -1,6 +1,7 @@
 # utils.py
 from sqlalchemy import inspect
 from models import db, Setting
+import re
 
 def get_course_data_tables():
     """Dynamically finds all uploaded CSV tables, ignoring the core system tables."""
@@ -17,6 +18,16 @@ def get_course_data_tables():
     except Exception as e:
         print(f"Error inspecting tables: {e}")
         return []
+
+def is_valid_table_name(name: str) -> bool:
+    """Basic validation for SQL table identifiers used by the app.
+
+    Only allow ASCII letters, digits and underscores to avoid SQL injection
+    risks when identifiers are interpolated into SQL statements.
+    """
+    if not name or not isinstance(name, str):
+        return False
+    return bool(re.match(r'^[A-Za-z0-9_]+$', name))
 
 def get_app_setting(key, default=""):
     """Fetches a setting from the database using SQLAlchemy ORM."""

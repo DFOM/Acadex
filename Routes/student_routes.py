@@ -5,7 +5,7 @@ from sqlalchemy import text
 import uuid
 import re
 from models import db, Schedule, ScheduleCourse, Period, Setting, Announcement
-from utils import get_best_course_table, get_course_data_tables, calculate_gpa
+from utils import get_best_course_table, get_course_data_tables, calculate_gpa, is_valid_table_name
 
 student_bp = Blueprint('student', __name__)
 
@@ -53,7 +53,7 @@ def search_courses():
         return jsonify([])
 
     table_name, _ = get_best_course_table(year, semester)
-    if not table_name:
+    if not table_name or not is_valid_table_name(table_name):
         return jsonify([])
 
     try:
@@ -78,6 +78,8 @@ def user_dashboard():
     past_schedules = [s for s in schedules if s.schedule_type == 'past']
     
     tables = get_course_data_tables()
+    # Validate table identifiers before using them in SQL
+    validated_tables = [t for t in tables if is_valid_table_name(t)]
     
     total_credits = 0.0
     area_credits = {}
@@ -86,8 +88,8 @@ def user_dashboard():
     overall_courses_for_gpa = []
     future_courses_for_predictive = []
 
-    if tables:
-        table_union = " UNION ".join([f'SELECT "Course_Number", "Course_Title", "Credits", "Area_of_Study", "Instructor", "Day_and_Period" FROM "{t}"' for t in tables])
+    if validated_tables:
+        table_union = " UNION ".join([f'SELECT "Course_Number", "Course_Title", "Credits", "Area_of_Study", "Instructor", "Day_and_Period" FROM "{t}"' for t in validated_tables])
 
         try:
             # 1. Past Courses (For overall GPA, total credits, areas, faculty, periods)
@@ -210,7 +212,7 @@ def edit_schedule(schedule_id):
     table_name, _ = get_best_course_table(schedule.year, schedule.semester)
     
     current_courses = []
-    if table_name:
+    if table_name and is_valid_table_name(table_name):
         try:
             query = text(f'''
                 SELECT sc.id as entry_id, sc.grade, c.*
@@ -290,6 +292,20 @@ def remove_course(entry_id):
     db.session.commit()
 
     return jsonify({'success': True})
+
+
+@student_bp.route('/api/remove_course', methods=['POST'])
+def remove_course_post():
+    data = request.get_json(silent=True) or request.form
+    entry_id = data.get('entry_id') or data.get('id')
+    if not entry_id:
+        return jsonify({'success': False, 'message': 'Missing entry_id'}), 400
+    try:
+        entry_id = int(entry_id)
+    except Exception:
+        return jsonify({'success': False, 'message': 'Invalid entry_id'}), 400
+
+    return remove_course(entry_id)
 
 @student_bp.route('/api/update_grade', methods=['POST'])
 @login_required

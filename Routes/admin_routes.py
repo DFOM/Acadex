@@ -137,6 +137,8 @@ def delete_announcement(announcement_id):
 @admin_required
 def manage_datasets():
     tables = get_course_data_tables()
+    from utils import is_valid_table_name
+    validated_tables = [t for t in tables if is_valid_table_name(t)]
     return render_template('Admin/manage_datasets.html', tables=tables)
 
 @admin_bp.route('/datasets/upload', methods=['POST'])
@@ -381,6 +383,8 @@ def update_period():
 @admin_required
 def analytics():
     tables = get_course_data_tables()
+    from utils import is_valid_table_name
+    validated_tables = [t for t in tables if is_valid_table_name(t)]
     
     total_users = User.query.count()
     total_schedules = Schedule.query.count()
@@ -392,8 +396,8 @@ def analytics():
 
     for user in user_data:
         try:
-            if tables:
-                c_union = " UNION ".join([f'SELECT Course_Number, Credits FROM "{t}"' for t in tables])
+            if validated_tables:
+                c_union = " UNION ".join([f'SELECT Course_Number, Credits FROM "{t}"' for t in validated_tables])
                 courses = db.session.execute(text(f'''
                     SELECT sc.grade, c.Credits 
                     FROM schedule_courses sc 
@@ -402,14 +406,14 @@ def analytics():
                     WHERE sc.grade IS NOT NULL AND sc.grade != "" 
                     AND sc.schedule_id IN (SELECT id FROM schedules WHERE user_id = :uid)
                 '''), {'uid': user.id}).fetchall()
-                
+
                 if courses:
                     gpa = calculate_gpa([dict(row._mapping) for row in courses])
                     overall_gpas.append(gpa)
-                    
+
                     gen = user.gender if getattr(user, 'gender', None) in gpa_by_gender else "Other/Prefer not to say"
                     gpa_by_gender[gen].append(gpa)
-                    
+
                     yr = str(getattr(user, 'year_of_study', ''))
                     if yr in gpa_by_year: gpa_by_year[yr].append(gpa)
         except Exception as e:
@@ -426,8 +430,8 @@ def analytics():
     day_counts = {"Mon": 0, "Tue": 0, "Wed": 0, "Thu": 0, "Fri": 0}
     period_counts = {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0, "6": 0}
 
-    if tables:
-        table_union = " UNION ".join([f'SELECT Course_Number, Course_Title, Area_of_Study, Instructor, Day_and_Period FROM "{t}"' for t in tables])
+    if validated_tables:
+        table_union = " UNION ".join([f'SELECT Course_Number, Course_Title, Area_of_Study, Instructor, Day_and_Period FROM "{t}"' for t in validated_tables])
         
         top_courses = db.session.execute(text(f'''
             SELECT m.Course_Title, COUNT(sc.id) as count 

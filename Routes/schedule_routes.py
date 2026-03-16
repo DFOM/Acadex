@@ -4,7 +4,7 @@ from flask_login import login_required, current_user
 import re
 from sqlalchemy import text
 from models import db, Schedule, SubjectArea, Setting
-from utils import get_course_data_tables, calculate_gpa
+from utils import get_course_data_tables, calculate_gpa, is_valid_table_name
 
 schedule_bp = Blueprint('schedule', __name__)
 
@@ -12,13 +12,14 @@ def get_app_setting(key, default=""):
     setting = Setting.query.get(key)
     return setting.value if setting else default
 
-@schedule_bp.route('/dashboard')
+@schedule_bp.route('/schedule/dashboard')
 @login_required
 def user_dashboard():
     # Fetch user's schedules using ORM
     schedules_raw = Schedule.query.filter_by(user_id=current_user.id).order_by(Schedule.year.desc(), Schedule.semester.desc()).all()
 
     tables = get_course_data_tables()
+    validated_tables = [t for t in tables if is_valid_table_name(t)]
 
     # Initialize default structures
     schedules_data = []
@@ -29,8 +30,8 @@ def user_dashboard():
     table_union = ""
     
     # 1. Only process catalog data if datasets exist
-    if tables:
-        table_union = " UNION ".join([f'SELECT "Course_Number", "Credits", "Area_of_Study" FROM "{t}"' for t in tables])
+    if validated_tables:
+        table_union = " UNION ".join([f'SELECT "Course_Number", "Credits", "Area_of_Study" FROM "{t}"' for t in validated_tables])
         
         # Python-based Deduplication to prevent overcounting
         raw_catalog_courses = db.session.execute(text(f'''
@@ -83,7 +84,7 @@ def user_dashboard():
         course_list = []
 
         # Only attempt to join with courses if the tables actually exist
-        if tables:
+        if validated_tables:
             try:
                 courses = db.session.execute(text(f'''
                     SELECT sc.grade, c."Credits", c."Area_of_Study", c."Course_Number"
