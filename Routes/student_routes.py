@@ -6,6 +6,7 @@ import uuid
 import re
 from models import db, Schedule, ScheduleCourse, Period, Setting, Announcement
 from utils import get_best_course_table, get_course_data_tables, calculate_gpa, is_valid_table_name
+from services.eligibility import prereqs_met
 
 student_bp = Blueprint('student', __name__)
 
@@ -269,6 +270,112 @@ def add_course():
         
     if not sched:
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
+
+    # --- Prerequisite enforcement ---
+    # Fetch the prerequisite string for the selected course from the schedule's dataset.
+    table_name, _ = get_best_course_table(sched.year, sched.semester)
+    if not table_name or not is_valid_table_name(table_name):
+        print(f"Prereq check blocked: invalid/missing dataset table for schedule {sched.id}")
+        return (
+            jsonify(
+                {
+                    'success': False,
+                    'error': 'Unable to validate prerequisites',
+                    'message': 'Course catalog unavailable; cannot validate prerequisites.'
+                }
+            ),
+            400,
+        )
+
+    prereq_str = ''
+    try:
+        prereq_row = db.session.execute(
+            text(f'SELECT "Prerequisite" FROM "{table_name}" WHERE "Course_Number" = :cn LIMIT 1'),
+            {'cn': course_num},
+        ).fetchone()
+        if not prereq_row:
+            return (
+                jsonify(
+                    {
+                        'success': False,
+                        'error': f'Unknown course {course_num}',
+                        'message': f'Unknown course {course_num}'
+                    }
+                ),
+                400,
+            )
+        prereq_str = prereq_row[0]
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error fetching prerequisites for {course_num} from {table_name}: {e}")
+        return (
+            jsonify(
+                {
+                    'success': False,
+                    'error': 'Unable to validate prerequisites',
+                    'message': 'Could not validate prerequisites for this course.'
+                }
+            ),
+            400,
+        )
+
+    completed_passing = []
+    if current_user.is_authenticated:
+        try:
+            completed_rows = db.session.execute(
+                text(
+                    '''
+                    SELECT sc.course_number
+                    FROM schedule_courses sc
+                    JOIN schedules s ON s.id = sc.schedule_id
+                    WHERE s.user_id = :uid
+                      AND s.schedule_type = 'past'
+                      AND sc.grade IS NOT NULL
+                      AND sc.grade != ''
+                      AND UPPER(sc.grade) != 'F'
+                    '''
+                ),
+                {'uid': current_user.id},
+            ).fetchall()
+            completed_passing = [r[0] for r in completed_rows]
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error fetching completed courses for prereq check (user {current_user.id}): {e}")
+            return (
+                jsonify(
+                    {
+                        'success': False,
+                        'error': 'Unable to validate prerequisites',
+                        'message': 'Could not validate prerequisites right now.'
+                    }
+                ),
+                400,
+            )
+
+    met, friendly_error = prereqs_met(prereq_str, completed_passing)
+    if friendly_error:
+        print(f"Invalid prereq syntax for course {course_num}: {prereq_str}")
+        return (
+            jsonify(
+                {
+                    'success': False,
+                    'error': f'Invalid prerequisite format for {course_num}',
+                    'message': f'Invalid prerequisite format for {course_num}'
+                }
+            ),
+            400,
+        )
+    if not met:
+        return (
+            jsonify(
+                {
+                    'success': False,
+                    'error': f'Prerequisites not met for {course_num}',
+                    'message': f'Prerequisites not met for {course_num}'
+                }
+            ),
+            400,
+        )
 
     new_course = ScheduleCourse(schedule_id=sched_id, course_number=course_num)
     db.session.add(new_course)
