@@ -243,7 +243,9 @@ def create_schedule():
     if not current_user.is_authenticated:
         schedule_type = 'future'
     
-    available_years = [current_year, current_year + 1, current_year + 2]
+    start_year = max(0, current_year - 4)
+    end_year = current_year + 4
+    available_years = list(range(start_year, end_year + 1))
 
     return render_template(
         'Student/create_schedule.html',
