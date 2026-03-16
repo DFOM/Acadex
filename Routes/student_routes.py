@@ -202,9 +202,15 @@ def create_schedule():
             flash("Please fill out all fields.", "error")
             return redirect(url_for('student.user_dashboard') if current_user.is_authenticated else url_for('auth.login'))
 
+        try:
+            year_int = int(year)
+        except (TypeError, ValueError):
+            flash("Please enter a valid year.", "error")
+            return redirect(url_for('student.user_dashboard') if current_user.is_authenticated else url_for('auth.login'))
+
         new_sched = Schedule(
             schedule_name=name,
-            year=int(year),
+            year=year_int,
             semester=semester,
             schedule_type=sched_type
         )
@@ -214,8 +220,17 @@ def create_schedule():
         else:
             new_sched.session_id = get_guest_id()
 
-        db.session.add(new_sched)
-        db.session.commit()
+        try:
+            db.session.add(new_sched)
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"Create schedule error: {e}")
+            flash(
+                "Could not create schedule. If this persists, ensure the database is migrated (flask db upgrade).",
+                "error",
+            )
+            return redirect(url_for('student.user_dashboard') if current_user.is_authenticated else url_for('auth.login'))
         
         return redirect(url_for('student.edit_schedule', schedule_id=new_sched.id))
         

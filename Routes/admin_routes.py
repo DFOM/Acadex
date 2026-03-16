@@ -17,8 +17,20 @@ admin_bp = Blueprint('admin', __name__)
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not current_user.is_authenticated or current_user.role != 'admin':
+        is_admin = bool(getattr(current_user, 'is_admin', False))
+        if not current_user.is_authenticated or not is_admin:
+            wants_json = (
+                request.path.startswith('/admin/api/')
+                or request.is_json
+                or request.accept_mimetypes.best == 'application/json'
+            )
+
+            if wants_json:
+                return jsonify({'success': False, 'message': 'Admin privileges required.'}), 403
+
             flash("Unauthorized access. Admin privileges required.", "error")
+            if current_user.is_authenticated:
+                return redirect(url_for('student.user_dashboard'))
             return redirect(url_for('auth.login', next=request.url))
         return f(*args, **kwargs)
     return decorated_function

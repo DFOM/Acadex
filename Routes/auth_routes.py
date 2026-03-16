@@ -2,6 +2,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+import os
 from models import db, User
 
 auth_bp = Blueprint('auth', __name__)
@@ -37,6 +38,7 @@ def register():
         
         gender = request.form.get('gender')
         expected_graduation_str = request.form.get('expected_graduation')
+        secret_code = (request.form.get('secret_code') or '').strip()
         
         expected_graduation = None
         if expected_graduation_str and expected_graduation_str.isdigit():
@@ -57,10 +59,14 @@ def register():
 
         hashed_password = generate_password_hash(password, method='pbkdf2:sha256')
 
+        admin_secret = (os.environ.get('ADMIN_SECRET_CODE') or '').strip()
+        make_admin = bool(admin_secret) and secret_code and secret_code == admin_secret
+
         new_user = User(
             username=username, 
             password=hashed_password, 
-            role='student',
+            role='admin' if make_admin else 'student',
+            is_admin=make_admin,
             gender=gender,
             expected_graduation=expected_graduation
         )
