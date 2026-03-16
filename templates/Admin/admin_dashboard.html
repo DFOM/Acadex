@@ -57,7 +57,7 @@
                 <h6 class="mb-0 fw-bold"><i class="bi bi-gear-fill text-primary"></i> Global App Settings</h6>
             </div>
             <div class="card-body bg-light">
-                <form action="{{ url_for('admin.update_app_settings') }}" method="POST">
+                <form action="{{ url_for('admin.update_app_settings_route') }}" method="POST">
                     <div class="mb-3">
                         <label class="form-label small fw-bold text-muted">Current Academic Year</label>
                         <input type="text" class="form-control form-control-sm border-0 shadow-sm" name="current_year_setting" value="{{ current_year_setting }}" placeholder="e.g. 2025">

@@ -9,8 +9,7 @@ auth_bp = Blueprint('auth', __name__)
 @auth_bp.route('/', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
-        if current_user.role == 'admin':
-            return redirect(url_for('admin.index'))
+        # FIXED: Everyone goes to the student dashboard now!
         return redirect(url_for('schedule.user_dashboard'))
 
     if request.method == 'POST':
@@ -21,8 +20,7 @@ def login():
 
         if user and check_password_hash(user.password, password):
             login_user(user)
-            if user.role == 'admin':
-                return redirect(url_for('admin.index'))
+            # FIXED: Everyone goes to the student dashboard now!
             return redirect(url_for('schedule.user_dashboard'))
         else:
             flash("Invalid username or password.", "error")
@@ -58,7 +56,6 @@ def register():
 
         hashed_password = generate_password_hash(password, method='pbkdf2:sha256')
 
-        # No more secret code. Everyone is a student by default.
         new_user = User(
             username=username, 
             password=hashed_password, 
