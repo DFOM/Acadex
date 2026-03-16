@@ -14,7 +14,6 @@ class User(db.Model, UserMixin):
     
     # Demographics
     gender = db.Column(db.String(50), nullable=True)
-    # FIXED: Replaced year_of_study with a concrete Expected Graduation Year
     expected_graduation = db.Column(db.Integer, nullable=True)
     
     # Relationship: If a user is deleted, all their schedules are automatically deleted
@@ -23,7 +22,14 @@ class User(db.Model, UserMixin):
 class Schedule(db.Model):
     __tablename__ = 'schedules'
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    
+    # MODIFIED FOR GUEST MODE: 
+    # user_id is now nullable so anonymous users can save schedules
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    
+    # NEW FOR GUEST MODE: Tracks anonymous browser sessions
+    session_id = db.Column(db.String(255), nullable=True)
+    
     schedule_name = db.Column(db.String(150), nullable=False)
     year = db.Column(db.Integer, nullable=False)
     semester = db.Column(db.String(50), nullable=False)
