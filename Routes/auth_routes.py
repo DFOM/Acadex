@@ -10,26 +10,27 @@ auth_bp = Blueprint('auth', __name__)
 def login():
     if current_user.is_authenticated:
         if current_user.role == 'admin':
-            return redirect(url_for('admin.dashboard'))
+            return redirect(url_for('admin.index'))
         return redirect(url_for('schedule.user_dashboard'))
 
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
 
-        # NEW: SQLAlchemy ORM Query
+        # SQLAlchemy ORM Query
         user = User.query.filter_by(username=username).first()
 
-        # NEW: Using check_password_hash for secure logins
+        # Using check_password_hash for secure logins
         if user and check_password_hash(user.password, password):
             login_user(user)
             if user.role == 'admin':
-                return redirect(url_for('admin.dashboard'))
+                return redirect(url_for('admin.index'))
             return redirect(url_for('schedule.user_dashboard'))
         else:
             flash("Invalid username or password.", "error")
 
-    return render_template('Auth/login.html')
+    # FIXED: Pointing to the 'Student' folder instead of 'Auth'
+    return render_template('Student/login.html')
 
 @auth_bp.route('/register', methods=['GET', 'POST'])
 def register():
@@ -50,16 +51,16 @@ def register():
             flash("Passwords do not match.", "error")
             return redirect(url_for('auth.register'))
 
-        # NEW: SQLAlchemy ORM Query to check if user exists
+        # SQLAlchemy ORM Query to check if user exists
         existing_user = User.query.filter_by(username=username).first()
         if existing_user:
             flash("Username already exists. Please choose another one.", "error")
             return redirect(url_for('auth.register'))
 
-        # NEW: Encrypt the password before saving!
+        # Encrypt the password before saving
         hashed_password = generate_password_hash(password, method='pbkdf2:sha256')
 
-        # NEW: Create and save the new user using SQLAlchemy
+        # Create and save the new user using SQLAlchemy
         new_user = User(username=username, password=hashed_password, role=role)
         db.session.add(new_user)
         db.session.commit()
@@ -67,7 +68,8 @@ def register():
         flash("Registration successful! Please log in.", "success")
         return redirect(url_for('auth.login'))
 
-    return render_template('Auth/register.html')
+    # FIXED: Pointing to the 'Student' folder instead of 'Auth'
+    return render_template('Student/register.html')
 
 @auth_bp.route('/logout')
 @login_required
@@ -79,4 +81,5 @@ def logout():
 @auth_bp.route('/choose_schedule_type')
 @login_required
 def choose_schedule_type():
-    return render_template('Auth/choose_schedule_type.html')
+    # FIXED: Pointing to the 'Student' folder instead of 'Auth'
+    return render_template('Student/schedule_type.html')
