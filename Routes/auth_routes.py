@@ -17,10 +17,8 @@ def login():
         username = request.form.get('username')
         password = request.form.get('password')
 
-        # SQLAlchemy ORM Query
         user = User.query.filter_by(username=username).first()
 
-        # Using check_password_hash for secure logins
         if user and check_password_hash(user.password, password):
             login_user(user)
             if user.role == 'admin':
@@ -38,18 +36,12 @@ def register():
         password = request.form.get('password')
         confirm_password = request.form.get('confirm_password')
         
-        # FIXED: Capture the demographic data from the form
         gender = request.form.get('gender')
         expected_graduation_str = request.form.get('expected_graduation')
         
-        # Safely convert the year string into an integer for the database
         expected_graduation = None
         if expected_graduation_str and expected_graduation_str.isdigit():
             expected_graduation = int(expected_graduation_str)
-        
-        # Secret code logic to create an admin
-        secret_code = request.form.get('secret_code')
-        role = 'admin' if secret_code == 'admin123' else 'student'
 
         if not username or not password or not confirm_password:
             flash("Please fill out all required fields.", "error")
@@ -59,20 +51,18 @@ def register():
             flash("Passwords do not match.", "error")
             return redirect(url_for('auth.register'))
 
-        # SQLAlchemy ORM Query to check if user exists
         existing_user = User.query.filter_by(username=username).first()
         if existing_user:
             flash("Username already exists. Please choose another one.", "error")
             return redirect(url_for('auth.register'))
 
-        # Encrypt the password before saving
         hashed_password = generate_password_hash(password, method='pbkdf2:sha256')
 
-        # FIXED: Create and save the new user including their demographic data
+        # No more secret code. Everyone is a student by default.
         new_user = User(
             username=username, 
             password=hashed_password, 
-            role=role,
+            role='student',
             gender=gender,
             expected_graduation=expected_graduation
         )
