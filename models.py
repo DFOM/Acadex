@@ -1,6 +1,7 @@
 # models.py
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
+from datetime import datetime
 
 # Initialize the SQLAlchemy object
 db = SQLAlchemy()
@@ -61,4 +62,13 @@ class Period(db.Model):
 class Setting(db.Model):
     __tablename__ = 'settings'
     key = db.Column(db.String(100), primary_key=True)
-    value = db.Column(db.String(255))
+    # Changed from String(255) to db.Text to accommodate long paragraphs for the Landing Page
+    value = db.Column(db.Text)
+
+class Announcement(db.Model):
+    __tablename__ = 'announcements'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(150), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    date_posted = db.Column(db.DateTime, default=datetime.utcnow)
+    is_active = db.Column(db.Boolean, default=True) # Allows Admins to hide announcements without deleting them

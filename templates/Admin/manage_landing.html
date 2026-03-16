@@ -1,0 +1,102 @@
+{% extends "Layouts/admin_base.html" %}
+
+{% block title %}Manage Landing Page{% endblock %}
+
+{% block content %}
+<div class="container mt-4 mb-5">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Manage Landing Page Content</h2>
+    </div>
+    
+    <div class="card mb-5 shadow-sm">
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0">Static Content</h4>
+        </div>
+        <div class="card-body">
+            <form action="{{ url_for('admin.manage_landing') }}" method="POST">
+                <div class="mb-4">
+                    <label for="about_us" class="form-label fw-bold">About Us</label>
+                    <textarea class="form-control" id="about_us" name="about_us" rows="5" placeholder="Write a description about this scheduling tool...">{{ about_us }}</textarea>
+                    <small class="text-muted">This will appear on the guest landing page.</small>
+                </div>
+                <div class="mb-4">
+                    <label for="creator_message" class="form-label fw-bold">Creator Message</label>
+                    <textarea class="form-control" id="creator_message" name="creator_message" rows="4" placeholder="Write a personal message or update...">{{ creator_message }}</textarea>
+                </div>
+                <button type="submit" class="btn btn-primary px-4">Save Changes</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-header bg-dark text-white">
+            <h4 class="mb-0">Announcements Feed</h4>
+        </div>
+        <div class="card-body">
+            
+            <form action="{{ url_for('admin.create_announcement') }}" method="POST" class="mb-5 pb-4 border-bottom">
+                <h5 class="mb-3 text-secondary">Create New Announcement</h5>
+                <div class="row">
+                    <div class="col-md-12 mb-3">
+                        <label for="title" class="form-label fw-bold">Title</label>
+                        <input type="text" class="form-control" id="title" name="title" placeholder="e.g., Fall 2026 Dataset Now Available!" required>
+                    </div>
+                    <div class="col-md-12 mb-3">
+                        <label for="content" class="form-label fw-bold">Content</label>
+                        <textarea class="form-control" id="content" name="content" rows="3" placeholder="Write your announcement details here..." required></textarea>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-success px-4">Post Announcement</button>
+            </form>
+
+            <h5 class="mb-3 text-secondary">Existing Announcements</h5>
+            {% if announcements %}
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Date Posted</th>
+                            <th>Title</th>
+                            <th>Content Snippet</th>
+                            <th>Status</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for ann in announcements %}
+                        <tr>
+                            <td>{{ ann.date_posted.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="fw-bold">{{ ann.title }}</td>
+                            <td class="text-muted">{{ ann.content[:50] }}{% if ann.content|length > 50 %}...{% endif %}</td>
+                            <td>
+                                {% if ann.is_active %}
+                                    <span class="badge bg-success">Active</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">Hidden</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                <form action="{{ url_for('admin.toggle_announcement', announcement_id=ann.id) }}" method="POST" class="d-inline">
+                                    <button type="submit" class="btn btn-sm btn-outline-warning">
+                                        {% if ann.is_active %}Hide{% else %}Show{% endif %}
+                                    </button>
+                                </form>
+                                <form action="{{ url_for('admin.delete_announcement', announcement_id=ann.id) }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to permanently delete this announcement?');">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="alert alert-light text-center" role="alert">
+                No announcements have been posted yet.
+            </div>
+            {% endif %}
+            
+        </div>
+    </div>
+</div>
+{% endblock %}

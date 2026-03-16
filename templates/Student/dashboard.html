@@ -1,204 +1,122 @@
 {% extends "Layouts/student_base.html" %}
+
 {% block title %}My Dashboard{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4 mt-3 pb-3 border-bottom">
-    <div>
-        <h2 class="mb-0 fw-bold">My Academic Dashboard</h2>
-        <p class="text-muted mb-0">Track your degree progress and manage your study plans.</p>
-    </div>
-    <a href="{{ url_for('auth.choose_schedule_type') }}" class="btn btn-primary btn-lg shadow-sm fw-bold px-4 rounded-pill">
-        <i class="bi bi-plus-lg"></i> Create New Plan
-    </a>
-</div>
-
-<div class="row mb-4">
-    <div class="col-lg-3 col-md-6 mb-3">
-        <div class="card shadow-sm h-100 border-0 bg-primary text-white rounded-4 position-relative overflow-hidden">
-            <div class="card-body p-4">
-                <h6 class="text-uppercase tracking-widest opacity-75 mb-1 small fw-bold">Current GPA</h6>
-                <h2 class="display-5 fw-bold mb-0">{{ "%.2f"|format(overall_gpa) }}</h2>
-                <small class="opacity-75">Based on completed courses</small>
-            </div>
-            <i class="bi bi-award-fill position-absolute text-white opacity-25" style="font-size: 5rem; bottom: -10px; right: 10px;"></i>
+<div class="container mt-4 mb-5">
+    
+    <div class="d-flex justify-content-between align-items-center mb-4 border-bottom pb-3">
+        <div>
+            <h2 class="fw-bold text-primary mb-0">Welcome to your Dashboard, {{ current_user.username }}!</h2>
+            <p class="text-muted mt-1 mb-0">Track your progress, manage schedules, and plan your academic future.</p>
         </div>
+        <a href="{{ url_for('student.create_schedule') }}" class="btn btn-primary shadow-sm">
+            <i class="bi bi-plus-circle me-2"></i>Create New Schedule
+        </a>
     </div>
 
-    <div class="col-lg-3 col-md-6 mb-3">
-        <div class="card shadow-sm h-100 border-0 bg-info text-dark rounded-4 position-relative overflow-hidden">
-            <div class="card-body p-4">
-                <h6 class="text-uppercase tracking-widest opacity-75 mb-1 small fw-bold">Estimated GPA</h6>
-                <h2 class="display-5 fw-bold mb-0">{{ "%.2f"|format(estimated_overall_gpa) }}</h2>
-                <small class="opacity-75">Includes future planned grades</small>
-            </div>
-            <i class="bi bi-graph-up-arrow position-absolute text-dark opacity-10" style="font-size: 5rem; bottom: -10px; right: 10px;"></i>
-        </div>
-    </div>
-
-    <div class="col-lg-6 col-md-12 mb-3">
-        <div class="card shadow-sm h-100 border-0 bg-white rounded-4">
-            <div class="card-body p-4 d-flex flex-column justify-content-center">
-                <div class="d-flex justify-content-between align-items-end mb-2">
-                    <div>
-                        <h6 class="text-uppercase tracking-widest text-muted mb-1 small fw-bold">Degree Progress</h6>
-                        <h3 class="fw-bold mb-0 text-dark">{{ total_obtained_credits }} <span class="text-muted fs-5 fw-normal">/ {{ graduation_credits }} Credits</span></h3>
-                    </div>
-                    <div class="text-end">
-                        <span class="badge bg-warning text-dark rounded-pill mb-1">+{{ total_future_credits }} Planned</span>
-                    </div>
-                </div>
-                
-                {% set progress_percent = (total_obtained_credits / graduation_credits * 100) if graduation_credits > 0 else 0 %}
-                {% set planned_percent = (total_future_credits / graduation_credits * 100) if graduation_credits > 0 else 0 %}
-                
-                <div class="progress rounded-pill mt-2" style="height: 12px; background-color: #e9ecef;">
-                    <div class="progress-bar bg-success" role="progressbar" style="width: {{ progress_percent }}%;"></div>
-                    <div class="progress-bar bg-warning progress-bar-striped progress-bar-animated opacity-75" role="progressbar" style="width: {{ planned_percent }}%;"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="row">
-    <div class="col-lg-4 mb-4">
-        <div class="card shadow-sm border-0 rounded-4 h-100">
-            <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
-                <h6 class="mb-0 fw-bold"><i class="bi bi-pie-chart-fill text-primary pe-2"></i> Area of Study</h6>
-                <select id="areaSortSelect" class="form-select form-select-sm border-0 bg-light text-muted fw-bold shadow-sm" style="width: auto; font-size: 0.75rem;">
-                    <option value="credits">Sort: Highest Credits</option>
-                    <option value="progress">Sort: Highest Progress %</option>
-                </select>
-            </div>
-            <div class="card-body bg-light custom-scroll" style="max-height: 500px; overflow-y: auto;">
-                {% if area_credits %}
-                    <div id="areaListContainer">
-                        {% for area, data in area_credits.items() %}
-                            {% set req = data.required|float %}
-                            {% set obt = data.obtained|float %}
-                            {% set avail = data.available|float %}
-                            
-                            {% set max_val = req if req > 0 else avail %}
-                            {% set pct = (obt / max_val * 100) if max_val > 0 else 0 %}
-                            
-                            <div class="mb-4 area-item" data-name="{{ area }}" data-obtained="{{ obt }}" data-progress="{{ pct }}">
-                                <div class="d-flex justify-content-between align-items-start mb-1">
-                                    <span class="fw-bold small text-dark text-truncate pe-2" title="{{ area }}">{{ area }}</span>
-                                    <div class="text-end">
-                                        <span class="small fw-bold {{ 'text-success' if req > 0 and obt >= req else 'text-primary' }}">
-                                            {{ obt|int if obt % 1 == 0 else obt }} 
-                                            {% if req > 0 %} / {{ req|int if req % 1 == 0 else req }} Req {% else %} CR {% endif %}
-                                        </span>
-                                        <span class="d-block text-muted mt-1" style="font-size: 0.65rem;">{{ avail|int if avail % 1 == 0 else avail }} CR Available</span>
-                                    </div>
-                                </div>
-                                <div class="progress rounded-pill shadow-sm" style="height: 6px;">
-                                    <div class="progress-bar {{ 'bg-success' if req > 0 and obt >= req else 'bg-primary' }}" role="progressbar" style="width: {{ pct if pct <= 100 else 100 }}%;"></div>
-                                </div>
-                            </div>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <p class="text-muted small text-center mt-4">No course data available yet.</p>
-                {% endif %}
-            </div>
-        </div>
-    </div>
-
-    <div class="col-lg-8 mb-4">
-        <div class="card shadow-sm border-0 rounded-4 h-100">
-            <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
-                <h6 class="mb-0 fw-bold"><i class="bi bi-collection-fill text-primary pe-2"></i> My Plans</h6>
-            </div>
-            <div class="card-body p-3 bg-light custom-scroll" style="max-height: 500px; overflow-y: auto;">
-                
-                <div class="row">
-                    {% for sched in schedules %}
-                    <div class="col-md-6 mb-3">
-                        <div class="card border-0 shadow-sm h-100 rounded-3 hover-shadow transition-all">
-                            <div class="card-body p-3">
-                                <div class="d-flex justify-content-between align-items-start mb-2">
-                                    <h6 class="fw-bold text-dark mb-0 text-truncate">{{ sched.schedule_name }}</h6>
-                                    <span class="badge {{ 'bg-secondary' if sched.schedule_type == 'past' else 'bg-warning text-dark' }} rounded-pill" style="font-size: 0.65rem;">
-                                        {{ sched.schedule_type | upper }}
-                                    </span>
-                                </div>
-                                
-                                <p class="small text-muted mb-3"><i class="bi bi-calendar3"></i> {{ sched.semester }} {{ sched.year }}</p>
-                                
-                                <div class="d-flex justify-content-between align-items-center bg-light p-2 rounded mb-3">
-                                    <div class="text-center w-50 border-end">
-                                        <div class="small text-muted fw-bold" style="font-size: 0.65rem; text-transform: uppercase;">Term GPA</div>
-                                        <div class="fw-bold text-dark">{{ "%.2f"|format(sched.gpa) }}</div>
-                                    </div>
-                                    <div class="text-center w-50">
-                                        <div class="small text-muted fw-bold" style="font-size: 0.65rem; text-transform: uppercase;">Credits</div>
-                                        <div class="fw-bold text-dark">{{ sched.credits }}</div>
-                                    </div>
-                                </div>
-                                
-                                <div class="d-flex justify-content-between mt-auto">
-                                    <a href="{{ url_for('student.edit_schedule', schedule_id=sched.id) }}" class="btn btn-sm btn-outline-primary fw-bold rounded-pill px-3">
-                                        Edit Plan
-                                    </a>
-                                    <form action="{{ url_for('schedule.delete_schedule', schedule_id=sched.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this plan?');">
-                                        <button type="submit" class="btn btn-sm btn-outline-danger rounded-pill px-3">
-                                            <i class="bi bi-trash3-fill pe-1"></i> Delete
-                                        </button>
-                                    </form>
-                                </div>
-                            </div>
+    <div class="row g-4 mb-5">
+        <div class="col-lg-8">
+            <h4 class="mb-3 text-secondary">Academic Overview</h4>
+            
+            <div class="row g-3 mb-4">
+                <div class="col-md-6">
+                    <div class="card shadow-sm border-0 bg-light h-100 border-start border-primary border-4">
+                        <div class="card-body">
+                            <h6 class="text-muted text-uppercase fw-bold mb-2">Total Earned Credits</h6>
+                            <h2 class="display-5 fw-bold text-dark mb-0">{{ total_credits }}</h2>
+                            {% if current_user.expected_graduation %}
+                            <small class="text-success">Class of {{ current_user.expected_graduation }}</small>
+                            {% endif %}
                         </div>
                     </div>
-                    {% else %}
-                    <div class="col-12 text-center py-5">
-                        <i class="bi bi-calendar-x text-muted opacity-50 display-1 mb-3 d-block"></i>
-                        <h5 class="text-muted fw-bold">No plans created yet.</h5>
-                        <p class="text-muted small mb-4">Start by creating your first academic schedule!</p>
-                        <a href="{{ url_for('auth.choose_schedule_type') }}" class="btn btn-primary rounded-pill fw-bold px-4">Create Plan</a>
-                    </div>
-                    {% endfor %}
                 </div>
 
+                <div class="col-md-6">
+                    <div class="card shadow-sm border-0 bg-light h-100 border-start border-success border-4">
+                        <div class="card-body">
+                            <h6 class="text-muted text-uppercase fw-bold mb-2">Current Overall GPA</h6>
+                            <h2 class="display-5 fw-bold text-dark mb-0">{{ "%.2f"|format(overall_gpa) }}</h2>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-6">
+                    <div class="card shadow-sm border-0 bg-light h-100 border-start border-info border-4">
+                        <div class="card-body">
+                            <h6 class="text-muted text-uppercase fw-bold mb-2">Predictive GPA</h6>
+                            <h2 class="display-5 fw-bold text-dark mb-0">{{ "%.2f"|format(predictive_gpa) }}</h2>
+                            <small class="text-muted">Includes planned future grades</small>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-6">
+                    <div class="card shadow-sm border-0 bg-light h-100 border-start border-warning border-4">
+                        <div class="card-body">
+                            <h6 class="text-muted text-uppercase fw-bold mb-2">Fun Facts</h6>
+                            <p class="mb-1"><strong>Most frequent prof:</strong> <span class="text-primary">{{ favorite_faculty }}</span></p>
+                            <p class="mb-0"><strong>Busiest day:</strong> <span class="text-primary">{{ favorite_day }}</span></p>
+                        </div>
+                    </div>
+                </div>
             </div>
+
+            <h4 class="mb-3 text-secondary border-bottom pb-2">Credits by Area of Study</h4>
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-body p-0">
+                    {% if area_credits %}
+                    <ul class="list-group list-group-flush">
+                        {% for area, credits in area_credits.items() %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center py-3">
+                            <span class="fw-bold">{{ area }}</span>
+                            <span class="badge bg-primary rounded-pill fs-6">{{ credits }} cr</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                    <div class="p-4 text-center text-muted">
+                        No credits have been assigned to specific study areas yet. Ensure your past schedules have grades!
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+        </div>
+
+        <div class="col-lg-4">
+            <h4 class="mb-3 text-secondary">My Schedules</h4>
+            
+            <div class="card shadow-sm border-0">
+                <div class="card-body p-0">
+                    {% if schedules %}
+                        <div class="list-group list-group-flush">
+                        {% for sched in schedules %}
+                            <a href="{{ url_for('student.edit_schedule', schedule_id=sched.id) }}" class="list-group-item list-group-item-action py-3 flex-column align-items-start">
+                                <div class="d-flex w-100 justify-content-between">
+                                    <h6 class="mb-1 fw-bold text-dark">{{ sched.schedule_name }}</h6>
+                                    <small class="text-muted">{{ sched.semester }} {{ sched.year }}</small>
+                                </div>
+                                <div class="mt-2">
+                                    {% if sched.schedule_type == 'past' %}
+                                        <span class="badge bg-secondary"><i class="bi bi-clock-history me-1"></i>Completed</span>
+                                    {% else %}
+                                        <span class="badge bg-success"><i class="bi bi-calendar-event me-1"></i>Future Plan</span>
+                                    {% endif %}
+                                </div>
+                            </a>
+                        {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="p-4 text-center text-muted border-bottom">
+                            <p class="mb-3">You don't have any schedules yet.</p>
+                            <a href="{{ url_for('student.create_schedule') }}" class="btn btn-sm btn-outline-primary w-100">Start Planning Now</a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+            
         </div>
     </div>
 </div>
-
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const sortSelect = document.getElementById('areaSortSelect');
-    const container = document.getElementById('areaListContainer');
-    
-    if (sortSelect && container) {
-        sortSelect.addEventListener('change', function() {
-            const sortBy = this.value;
-            const items = Array.from(container.querySelectorAll('.area-item'));
-            
-            items.sort((a, b) => {
-                let diff = 0;
-                if (sortBy === 'credits') {
-                    // Sort by raw obtained credits (descending)
-                    diff = parseFloat(b.getAttribute('data-obtained')) - parseFloat(a.getAttribute('data-obtained'));
-                } else if (sortBy === 'progress') {
-                    // Sort by percentage complete (descending)
-                    diff = parseFloat(b.getAttribute('data-progress')) - parseFloat(a.getAttribute('data-progress'));
-                }
-                
-                // If it's a tie, fall back to Alphabetical Order by Name
-                if (diff === 0) {
-                    return a.getAttribute('data-name').localeCompare(b.getAttribute('data-name'));
-                }
-                return diff;
-            });
-            
-            // Re-append items in the new order (this instantly moves them on screen without reloading)
-            items.forEach(item => container.appendChild(item));
-        });
-        
-        // Trigger it once on load to ensure it matches the default dropdown state
-        sortSelect.dispatchEvent(new Event('change'));
-    }
-});
-</script>
 {% endblock %}

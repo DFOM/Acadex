@@ -3,9 +3,9 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import login_required, current_user
 from sqlalchemy import text
 import uuid
-from models import db, Schedule, ScheduleCourse, Period, Setting
-# FIXED: Removed the missing get_available_datasets import to prevent the 500 boot crash
-from utils import get_best_course_table
+import re
+from models import db, Schedule, ScheduleCourse, Period, Setting, Announcement
+from utils import get_best_course_table, get_course_data_tables, calculate_gpa
 
 student_bp = Blueprint('student', __name__)
 
@@ -13,6 +13,31 @@ def get_guest_id():
     if 'guest_id' not in session:
         session['guest_id'] = str(uuid.uuid4())
     return session['guest_id']
+
+# --- Landing Page (Guest View & Homepage) ---
+@student_bp.route('/')
+def landing_page():
+    about_us = Setting.query.get('about_us')
+    creator_message = Setting.query.get('creator_message')
+    current_year = Setting.query.get('current_year')
+    current_semester = Setting.query.get('current_semester')
+    
+    announcements = Announcement.query.filter_by(is_active=True).order_by(Announcement.date_posted.desc()).all()
+    
+    guest_schedules = []
+    if not current_user.is_authenticated:
+        guest_schedules = Schedule.query.filter_by(
+            session_id=get_guest_id(), 
+            schedule_type='future'
+        ).order_by(Schedule.year.desc()).all()
+        
+    return render_template('Student/index.html',
+                           about_us=about_us.value if about_us else "Welcome to our dynamic scheduling platform.",
+                           creator_message=creator_message.value if creator_message else "",
+                           current_year=current_year.value if current_year else "2025",
+                           current_semester=current_semester.value if current_semester else "Spring",
+                           announcements=announcements,
+                           guest_schedules=guest_schedules)
 
 @student_bp.route('/courses/search')
 def search_courses():
@@ -41,14 +66,95 @@ def search_courses():
         print(f"Search error: {e}")
         return jsonify([])
 
+# --- NEW: Premium Dashboard Logic ---
 @student_bp.route('/dashboard')
 @login_required
 def user_dashboard():
     schedules = Schedule.query.filter_by(user_id=current_user.id).order_by(Schedule.year.desc()).all()
     past_schedules = [s for s in schedules if s.schedule_type == 'past']
+    
+    tables = get_course_data_tables()
+    
+    total_credits = 0.0
+    area_credits = {}
+    top_faculty = {}
+    top_periods = {}
+    overall_courses_for_gpa = []
+    future_courses_for_predictive = []
+
+    if tables:
+        table_union = " UNION ".join([f'SELECT "Course_Number", "Course_Title", "Credits", "Area_of_Study", "Instructor", "Day_and_Period" FROM "{t}"' for t in tables])
+
+        try:
+            # 1. Past Courses (For overall GPA, total credits, areas, faculty, periods)
+            past_query = text(f'''
+                SELECT sc.grade, c."Credits", c."Area_of_Study", c."Instructor", c."Day_and_Period"
+                FROM schedule_courses sc
+                JOIN schedules s ON sc.schedule_id = s.id
+                JOIN ({table_union}) c ON sc.course_number = c."Course_Number"
+                WHERE s.user_id = :uid AND s.schedule_type = 'past'
+            ''')
+            past_results = db.session.execute(past_query, {'uid': current_user.id}).fetchall()
+
+            for row in past_results:
+                try:
+                    cred = float(row.Credits) if row.Credits else 0.0
+                except ValueError:
+                    cred = 0.0
+
+                if row.grade and row.grade.upper() != 'F':
+                    total_credits += cred
+                    area = row.Area_of_Study if row.Area_of_Study else 'Unspecified'
+                    area_credits[area] = area_credits.get(area, 0) + cred
+
+                if row.grade:
+                    overall_courses_for_gpa.append({'grade': row.grade, 'Credits': row.Credits})
+
+                instructor = row.Instructor
+                if instructor and instructor.strip():
+                    top_faculty[instructor] = top_faculty.get(instructor, 0) + 1
+
+                dp = row.Day_and_Period
+                if dp:
+                    days = re.findall(r'[A-Za-z]+', dp)
+                    for d in days:
+                        if len(d) >= 3: # E.g., Mon, Tue
+                            top_periods[d] = top_periods.get(d, 0) + 1
+
+            # 2. Future Courses (For predictive GPA, assuming user inputs expected grades)
+            future_query = text(f'''
+                SELECT sc.grade, c."Credits"
+                FROM schedule_courses sc
+                JOIN schedules s ON sc.schedule_id = s.id
+                JOIN ({table_union}) c ON sc.course_number = c."Course_Number"
+                WHERE s.user_id = :uid AND s.schedule_type = 'future' AND sc.grade IS NOT NULL AND sc.grade != ''
+            ''')
+            future_results = db.session.execute(future_query, {'uid': current_user.id}).fetchall()
+            for row in future_results:
+                future_courses_for_predictive.append({'grade': row.grade, 'Credits': row.Credits})
+                
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error calculating dashboard analytics: {e}")
+
+    overall_gpa = calculate_gpa(overall_courses_for_gpa) if overall_courses_for_gpa else 0.0
+
+    # Predictive GPA = Combined past + future expected
+    combined_for_predictive = overall_courses_for_gpa + future_courses_for_predictive
+    predictive_gpa = calculate_gpa(combined_for_predictive) if combined_for_predictive else overall_gpa
+
+    favorite_faculty = max(top_faculty, key=top_faculty.get) if top_faculty else "N/A"
+    favorite_day = max(top_periods, key=top_periods.get) if top_periods else "N/A"
+
     return render_template('Student/dashboard.html', 
                            schedules=schedules, 
-                           has_past=len(past_schedules) > 0)
+                           has_past=len(past_schedules) > 0,
+                           total_credits=total_credits,
+                           area_credits=area_credits,
+                           overall_gpa=overall_gpa,
+                           predictive_gpa=predictive_gpa,
+                           favorite_faculty=favorite_faculty,
+                           favorite_day=favorite_day)
 
 @student_bp.route('/student/schedule/create', methods=['GET', 'POST'])
 def create_schedule():
@@ -83,11 +189,9 @@ def create_schedule():
         
         return redirect(url_for('student.edit_schedule', schedule_id=new_sched.id))
         
-    # GET method logic for populating dropdowns (FIXED to not rely on utils.py)
     current_year_setting = Setting.query.get('current_year')
     current_year = int(current_year_setting.value) if current_year_setting and current_year_setting.value.isdigit() else 2024
     
-    # Generate a dynamic list of years for the user to choose from
     available_years = [current_year, current_year + 1, current_year + 2]
 
     return render_template('Student/create_schedule.html', available_years=available_years)
@@ -116,7 +220,6 @@ def edit_schedule(schedule_id):
             db.session.rollback()
             print(f"Error fetching current courses: {e}")
 
-    # ALREADY OBTAINED TRACKER
     obtained_courses = []
     if current_user.is_authenticated:
         try:

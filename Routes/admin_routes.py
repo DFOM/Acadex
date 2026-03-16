@@ -8,7 +8,7 @@ import pandas as pd
 from functools import wraps
 from werkzeug.utils import secure_filename
 from sqlalchemy import inspect, text
-from models import db, User, Schedule, SubjectArea, Period, Setting
+from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement
 from utils import get_course_data_tables, calculate_gpa
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
@@ -71,6 +71,67 @@ def index():
                            current_semester_setting=get_app_setting('current_semester', 'Spring'),
                            graduation_credits_setting=get_app_setting('graduation_credits', '124'))
 
+# ==========================================
+# NEW: LANDING PAGE & ANNOUNCEMENT MANAGEMENT
+# ==========================================
+@admin_bp.route('/landing_management', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def manage_landing():
+    if request.method == 'POST':
+        update_app_setting('about_us', request.form.get('about_us', ''))
+        update_app_setting('creator_message', request.form.get('creator_message', ''))
+        flash("Landing page settings updated successfully.", "success")
+        return redirect(url_for('admin.manage_landing'))
+        
+    about_us = get_app_setting('about_us', "Welcome to our dynamic scheduling platform.")
+    creator_message = get_app_setting('creator_message', "")
+    announcements = Announcement.query.order_by(Announcement.date_posted.desc()).all()
+    
+    return render_template('Admin/manage_landing.html', 
+                           about_us=about_us, 
+                           creator_message=creator_message,
+                           announcements=announcements)
+
+@admin_bp.route('/announcement/create', methods=['POST'])
+@login_required
+@admin_required
+def create_announcement():
+    title = request.form.get('title')
+    content = request.form.get('content')
+    if title and content:
+        new_announcement = Announcement(title=title, content=content)
+        db.session.add(new_announcement)
+        db.session.commit()
+        flash("Announcement created.", "success")
+    else:
+        flash("Title and content are required.", "error")
+    return redirect(url_for('admin.manage_landing'))
+
+@admin_bp.route('/announcement/toggle/<int:announcement_id>', methods=['POST'])
+@login_required
+@admin_required
+def toggle_announcement(announcement_id):
+    ann = Announcement.query.get_or_404(announcement_id)
+    ann.is_active = not ann.is_active
+    db.session.commit()
+    status = 'active' if ann.is_active else 'hidden'
+    flash(f"Announcement '{ann.title}' is now {status}.", "success")
+    return redirect(url_for('admin.manage_landing'))
+
+@admin_bp.route('/announcement/delete/<int:announcement_id>', methods=['POST'])
+@login_required
+@admin_required
+def delete_announcement(announcement_id):
+    ann = Announcement.query.get_or_404(announcement_id)
+    db.session.delete(ann)
+    db.session.commit()
+    flash("Announcement deleted permanently.", "success")
+    return redirect(url_for('admin.manage_landing'))
+
+# ==========================================
+# EXISTING ROUTES 
+# ==========================================
 @admin_bp.route('/datasets')
 @login_required
 @admin_required
@@ -99,7 +160,6 @@ def upload_dataset():
     file.save(upload_path)
 
     try:
-        # 1. Read the CSV purely in Python to apply your custom logic
         processed_rows = []
         seen_course_nums = set()
 
@@ -150,7 +210,6 @@ def upload_dataset():
                         "Semester": semester
                     })
 
-        # 2. Convert to DataFrame and push to PostgreSQL/SQLite safely using SQLAlchemy
         df = pd.DataFrame(processed_rows)
         df.to_sql(table_name, con=db.engine, if_exists='replace', index=False)
         
@@ -277,7 +336,6 @@ def manage_courses():
     if not course_tables:
         return render_template('Admin/courses.html', courses=[])
     
-    # FIXED: Replaced SQLite-only 'rowid' with universally unique 'Course_Number' as _rowid
     union_parts = [f'SELECT \'{t}\' as source_table, "Course_Number" as _rowid, "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Prerequisite" FROM "{t}"' for t in course_tables]
     full_query = " UNION ALL ".join(union_parts)
     
@@ -292,7 +350,6 @@ def api_update_course():
     try:
         table = data.get("source_table")
         if table in get_course_data_tables():
-            # FIXED: Updating based on Course_Number instead of rowid
             db.session.execute(text(f'UPDATE "{table}" SET "Course_Title" = :title, "Credits" = :creds WHERE "Course_Number" = :rid'), 
                         {'title': data.get('Course_Title'), 'creds': data.get('Credits'), 'rid': data.get('_rowid')})
             db.session.commit()
@@ -319,9 +376,6 @@ def update_period():
         db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
 
-# ==========================================
-# DEEP DATA ANALYTICS & COMPARISON TOOL
-# ==========================================
 @admin_bp.route('/analytics')
 @login_required
 @admin_required

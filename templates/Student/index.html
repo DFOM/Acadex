@@ -1,16 +1,99 @@
 {% extends "Layouts/student_base.html" %}
-{% block title %}Welcome to University Scheduler{% endblock %}
+
+{% block title %}Welcome - University Scheduler{% endblock %}
 
 {% block content %}
-<div class="p-5 mb-4 bg-light rounded-3 text-center shadow-sm mt-4">
-    <div class="container-fluid py-5">
-        <h1 class="display-5 fw-bold text-primary mb-3">Plan Your Academic Future</h1>
-        <p class="col-md-8 mx-auto fs-5 text-muted mb-4">
-            Easily track your graduation requirements, calculate your GPA, and build your perfect class schedule semester by semester.
-        </p>
-        <div class="mt-4">
-            <a href="{{ url_for('auth.register') }}" class="btn btn-primary btn-lg px-4 me-3 shadow-sm">Get Started</a>
-            <a href="{{ url_for('auth.login') }}" class="btn btn-outline-secondary btn-lg px-4 shadow-sm">Login</a>
+<div class="px-4 py-5 my-5 text-center bg-light rounded-3 shadow-sm border">
+    <h1 class="display-5 fw-bold text-primary">University Schedule Builder</h1>
+    <div class="col-lg-6 mx-auto">
+        <p class="lead mb-4">Plan your academic future, track your credits, and estimate your GPA with ease.</p>
+        <div class="alert alert-info d-inline-block shadow-sm">
+            <i class="bi bi-info-circle-fill me-2"></i>
+            <strong>Current Active Dataset:</strong> Scheduling for {{ current_semester }} {{ current_year }}
+        </div>
+        <div class="d-grid gap-2 d-sm-flex justify-content-sm-center mt-3">
+            <a href="{{ url_for('student.create_schedule') }}" class="btn btn-primary btn-lg px-4 gap-3 shadow-sm">Create a Schedule</a>
+            {% if not current_user.is_authenticated %}
+            <a href="{{ url_for('auth.register') }}" class="btn btn-outline-dark btn-lg px-4 shadow-sm">Register for Premium</a>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="container mb-5">
+    <div class="row g-5">
+        <div class="col-md-8">
+            
+            <article class="mb-5">
+                <h2 class="mb-3 border-bottom pb-2">About This Tool</h2>
+                <div class="p-4 bg-white border rounded shadow-sm">
+                    <p style="white-space: pre-line; margin-bottom: 0;">{{ about_us }}</p>
+                </div>
+            </article>
+
+            <article>
+                <h2 class="mb-3 border-bottom pb-2">Latest Announcements</h2>
+                {% if announcements %}
+                    <div class="list-group shadow-sm">
+                    {% for ann in announcements %}
+                        <div class="list-group-item list-group-item-action flex-column align-items-start py-3">
+                            <div class="d-flex w-100 justify-content-between mb-2">
+                                <h5 class="mb-1 fw-bold text-dark">{{ ann.title }}</h5>
+                                <small class="text-muted">{{ ann.date_posted.strftime('%B %d, %Y') }}</small>
+                            </div>
+                            <p class="mb-1 text-secondary" style="white-space: pre-line;">{{ ann.content }}</p>
+                        </div>
+                    {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="alert alert-secondary border text-center" role="alert">
+                        No announcements at this time. Check back later!
+                    </div>
+                {% endif %}
+            </article>
+            
+        </div>
+
+        <div class="col-md-4">
+            <div class="position-sticky" style="top: 2rem;">
+                
+                {% if creator_message %}
+                <div class="p-4 mb-4 bg-light rounded shadow-sm border-start border-primary border-4">
+                    <h4 class="fst-italic">Message from the Creator</h4>
+                    <p class="mb-0 text-secondary" style="white-space: pre-line;">{{ creator_message }}</p>
+                </div>
+                {% endif %}
+
+                {% if not current_user.is_authenticated %}
+                <div class="p-4 bg-white rounded shadow-sm border">
+                    <h4 class="fst-italic border-bottom pb-2 mb-3">Your Saved Plans</h4>
+                    {% if guest_schedules %}
+                        <p class="text-muted small">We saved these locally for your session. <a href="{{ url_for('auth.register') }}" class="text-decoration-none fw-bold text-primary">Register</a> to keep them permanently!</p>
+                        <ul class="list-unstyled mb-0">
+                            {% for sched in guest_schedules %}
+                            <li class="mb-2 p-2 bg-light rounded border">
+                                <a href="{{ url_for('student.edit_schedule', schedule_id=sched.id) }}" class="text-decoration-none text-dark fw-bold d-block">
+                                    <i class="bi bi-calendar3 me-2"></i>{{ sched.schedule_name }} 
+                                    <span class="badge bg-secondary float-end">{{ sched.semester }} {{ sched.year }}</span>
+                                </a>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="text-muted mb-3">You haven't created any schedules yet.</p>
+                        <a href="{{ url_for('student.create_schedule') }}" class="btn btn-sm btn-outline-primary w-100">Start Planning Now</a>
+                    {% endif %}
+                </div>
+                
+                {% else %}
+                <div class="p-4 bg-white rounded shadow-sm border text-center border-top border-success border-4">
+                    <h4 class="fst-italic mb-3">Welcome Back, {{ current_user.username }}!</h4>
+                    <p class="text-muted mb-4">Head over to your Premium Dashboard to view advanced analytics, calculate your GPA, and track your degree progress.</p>
+                    <a href="{{ url_for('student.user_dashboard') }}" class="btn btn-success w-100 shadow-sm">Go to My Dashboard</a>
+                </div>
+                {% endif %}
+                
+            </div>
         </div>
     </div>
 </div>
