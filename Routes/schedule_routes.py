@@ -15,6 +15,11 @@ def get_app_setting(key, default=""):
 @schedule_bp.route('/dashboard')
 @login_required
 def user_dashboard():
+    # The canonical student dashboard is served under /student/dashboard.
+    # Keep this route as a stable alias to avoid broken links.
+    return redirect(url_for('student.user_dashboard'))
+
+    # Fetch user's schedules using ORM
     # Fetch user's schedules using ORM
     schedules_raw = Schedule.query.filter_by(user_id=current_user.id).order_by(Schedule.year.desc(), Schedule.semester.desc()).all()
 
