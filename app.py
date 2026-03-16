@@ -7,16 +7,17 @@ from flask_migrate import Migrate
 
 from Routes.auth_routes import auth_bp
 from Routes.admin_routes import admin_bp
+from Routes.main_routes import main_bp
 from Routes.student_routes import student_bp
 from Routes.schedule_routes import schedule_bp
 
 app = Flask(__name__)
 
-app.secret_key = os.environ.get('jcxa%rUdH+Z+{WDaHc.w+5h-qB&zxw!K')
+app.secret_key = os.environ.get('SECRET_KEY')
 if not app.secret_key:
     raise RuntimeError("SECRET_KEY must be set as an environment variable.")
 
-database_url = os.environ.get('postgresql://university_db_jt42_user:JpymFt7bc734Y07JPiFUrt78dNzz6rsW@dpg-d6s1c9a4d50c73bevgpg-a.singapore-postgres.render.com/university_db_jt42')
+database_url = os.environ.get('DATABASE_URL')
 if not database_url:
     raise RuntimeError("DATABASE_URL must be set as an environment variable.")
 
@@ -38,9 +39,10 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 app.register_blueprint(auth_bp)
+app.register_blueprint(main_bp)
 app.register_blueprint(admin_bp, url_prefix='/admin')
-app.register_blueprint(student_bp)
-app.register_blueprint(schedule_bp)
+app.register_blueprint(student_bp, url_prefix='/student')
+app.register_blueprint(schedule_bp, url_prefix='/schedule')
 
 if __name__ == '__main__':
     app.run(debug=True)

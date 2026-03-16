@@ -18,55 +18,75 @@ def get_guest_id():
         session['guest_id'] = str(uuid.uuid4())
     return session['guest_id']
 
-# --- Landing Page (Guest View & Homepage) ---
-@student_bp.route('/')
-def landing_page():
-    about_us = Setting.query.get('about_us')
-    creator_message = Setting.query.get('creator_message')
-    current_year = Setting.query.get('current_year')
-    current_semester = Setting.query.get('current_semester')
-    
-    announcements = Announcement.query.filter_by(is_active=True).order_by(Announcement.date_posted.desc()).all()
-    
-    guest_schedules = []
-    if not current_user.is_authenticated:
-        guest_schedules = Schedule.query.filter_by(
-            session_id=get_guest_id(), 
-            schedule_type='future'
-        ).order_by(Schedule.year.desc()).all()
-        
-    # NEW: Fetch all available datasets to show on the landing page
-    available_tables = get_course_data_tables()
-        
-    return render_template('Student/index.html',
-                           about_us=about_us.value if about_us else "Welcome to our dynamic scheduling platform.",
-                           creator_message=creator_message.value if creator_message else "",
-                           current_year=current_year.value if current_year else "2025",
-                           current_semester=current_semester.value if current_semester else "Spring",
-                           announcements=announcements,
-                           guest_schedules=guest_schedules,
-                           available_tables=available_tables)
-
 @student_bp.route('/courses/search')
 def search_courses():
-    query_str = request.args.get('q', '').strip()
+    # Supports two modes:
+    # 1) Search: q/query provided (>=2 chars) -> returns matching courses
+    # 2) Catalog load for schedule editor: json=true & schedule_id -> returns full catalog
+
+    query_str = (request.args.get('query') or request.args.get('q') or '').strip()
+    json_mode = str(request.args.get('json', '')).lower() in {'1', 'true', 'yes'}
+
+    schedule_id = request.args.get('schedule_id')
     year = request.args.get('year')
     semester = request.args.get('semester')
 
-    if not query_str or len(query_str) < 2:
-        return jsonify([])
+    # Resolve dataset table by schedule (preferred for the editor), otherwise by year/semester.
+    resolved_year = year
+    resolved_semester = semester
 
-    table_name, _ = get_best_course_table(year, semester)
+    if schedule_id:
+        try:
+            schedule_id_int = int(schedule_id)
+        except Exception:
+            return jsonify([])
+
+        if current_user.is_authenticated:
+            sched = Schedule.query.filter_by(id=schedule_id_int, user_id=current_user.id).first()
+        else:
+            sched = Schedule.query.filter_by(id=schedule_id_int, session_id=session.get('guest_id')).first()
+
+        if not sched:
+            return jsonify([])
+
+        resolved_year = sched.year
+        resolved_semester = sched.semester
+
+    table_name, _ = get_best_course_table(resolved_year, resolved_semester)
     if not table_name or not is_valid_table_name(table_name):
         return jsonify([])
 
+    # Full catalog load for the schedule editor.
+    if json_mode and schedule_id and query_str == '':
+        try:
+            results = db.session.execute(
+                text(
+                    f'''
+                    SELECT "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Area_of_Study", "Prerequisite"
+                    FROM "{table_name}"
+                    '''
+                )
+            ).fetchall()
+            return jsonify([dict(r._mapping) for r in results])
+        except Exception as e:
+            db.session.rollback()
+            print(f"Catalog load error: {e}")
+            return jsonify([])
+
+    # Search mode
+    if not query_str or len(query_str) < 2:
+        return jsonify([])
+
     try:
-        search_sql = text(f'''
-            SELECT * FROM "{table_name}"
+        search_sql = text(
+            f'''
+            SELECT "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Area_of_Study", "Prerequisite"
+            FROM "{table_name}"
             WHERE LOWER("Course_Number") LIKE LOWER(:q)
-            OR LOWER("Course_Name") LIKE LOWER(:q)
-            LIMIT 20
-        ''')
+               OR LOWER("Course_Title") LIKE LOWER(:q)
+            LIMIT 50
+            '''
+        )
         results = db.session.execute(search_sql, {'q': f'%{query_str}%'}).fetchall()
         return jsonify([dict(r._mapping) for r in results])
     except Exception as e:
@@ -166,7 +186,7 @@ def user_dashboard():
                            favorite_faculty=favorite_faculty,
                            favorite_day=favorite_day)
 
-@student_bp.route('/student/schedule/create', methods=['GET', 'POST'])
+@student_bp.route('/schedule/create', methods=['GET', 'POST'])
 def create_schedule():
     if request.method == 'POST':
         name = request.form.get('schedule_name')
@@ -206,7 +226,7 @@ def create_schedule():
 
     return render_template('Student/create_schedule.html', available_years=available_years)
 
-@student_bp.route('/student/schedule/edit/<int:schedule_id>')
+@student_bp.route('/schedule/edit/<int:schedule_id>')
 def edit_schedule(schedule_id):
     if current_user.is_authenticated:
         schedule = Schedule.query.filter_by(id=schedule_id, user_id=current_user.id).first_or_404()
@@ -257,7 +277,6 @@ def edit_schedule(schedule_id):
                            periods=periods)
 
 @student_bp.route('/api/add_course', methods=['POST'])
-@student_bp.route('/student/api/add_course', methods=['POST'])
 def add_course():
     data = request.get_json()
     sched_id = data.get('schedule_id')
@@ -449,7 +468,6 @@ def add_course():
     return jsonify({'success': True})
 
 @student_bp.route('/api/remove_course/<int:entry_id>', methods=['DELETE', 'POST'])
-@student_bp.route('/student/api/remove_course/<int:entry_id>', methods=['DELETE', 'POST'])
 def remove_course(entry_id):
     course_entry = ScheduleCourse.query.get(entry_id)
     if not course_entry:
@@ -499,7 +517,6 @@ def update_grade():
 
 
 @student_bp.route('/api/recommendations', methods=['GET'])
-@student_bp.route('/student/api/recommendations', methods=['GET'])
 def api_recommendations():
     sched_id = request.args.get('schedule_id')
     try:
@@ -583,7 +600,6 @@ def api_recommendations():
 
 
 @student_bp.route('/api/generate_schedule', methods=['POST'])
-@student_bp.route('/student/api/generate_schedule', methods=['POST'])
 def api_generate_schedule():
     data = request.get_json(silent=True) or {}
     sched_id = data.get('schedule_id')

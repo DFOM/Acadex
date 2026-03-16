@@ -12,7 +12,7 @@ def get_app_setting(key, default=""):
     setting = Setting.query.get(key)
     return setting.value if setting else default
 
-@schedule_bp.route('/schedule/dashboard')
+@schedule_bp.route('/dashboard')
 @login_required
 def user_dashboard():
     # Fetch user's schedules using ORM

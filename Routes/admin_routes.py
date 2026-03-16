@@ -11,7 +11,7 @@ from sqlalchemy import inspect, text
 from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement
 from utils import get_course_data_tables, calculate_gpa, is_valid_table_name
 
-admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
+admin_bp = Blueprint('admin', __name__)
 
 # --- SECURITY WRAPPER ---
 def admin_required(f):
