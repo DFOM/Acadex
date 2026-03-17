@@ -74,6 +74,10 @@ Database URL behavior:
 - All `/admin/*` routes are protected with per-request permission checks.
 - Login rate limiting is enabled via `login_attempts` table (default: 5 failed attempts per 15 minutes).
 - Profile and registration passwords are always stored as salted hashes.
+- Global CSRF protection is enabled for all mutating requests (`POST/PUT/PATCH/DELETE`).
+- Session cookies are hardened (`HttpOnly`, `SameSite=Lax`, and `Secure` in production).
+- Global request throttling is enabled for login/registration/admin/student API mutation paths.
+- Structured audit logs are emitted for critical mutating operations without sensitive payloads.
 
 ## Local Development
 

@@ -115,7 +115,7 @@ def register():
     ).order_by(SubjectArea.name.asc()).all()
 
     if request.method == 'POST':
-        full_name = (request.form.get('full_name') or '').strip()
+        full_name = (request.form.get('full_name') or '').strip()[:150]
         email = (request.form.get('email') or '').strip().lower()
         password = request.form.get('password')
         confirm_password = request.form.get('confirm_password')
@@ -148,6 +148,10 @@ def register():
 
         if password != confirm_password:
             flash("Passwords do not match.", "error")
+            return render_template('Student/register.html', majors=majors, minors=minors, dynamic_fields=dynamic_fields)
+
+        if len(password or '') < 8:
+            flash("Password must be at least 8 characters.", "error")
             return render_template('Student/register.html', majors=majors, minors=minors, dynamic_fields=dynamic_fields)
 
         if not major_subject_area_id or not minor_subject_area_id:

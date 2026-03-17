@@ -91,3 +91,14 @@ body.admin-sidebar-collapsed #adminSidebar {
 body.admin-sidebar-collapsed .ax-sidebar-title {
     display: none !important;
 }
+
+.ax-footer-credit {
+    color: var(--ax-muted);
+    text-decoration: none;
+    transition: opacity .18s ease, text-decoration-color .18s ease;
+}
+
+.ax-footer-credit:hover {
+    opacity: .92;
+    text-decoration: underline;
+}

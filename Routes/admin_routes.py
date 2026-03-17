@@ -671,7 +671,7 @@ def upload_dataset():
                 db.session.commit()
         except Exception:
             db.session.rollback()
-        flash(f'Upload failed: {e}', 'error')
+        flash('Upload failed.', 'error')
 
     return redirect(url_for('admin.manage_datasets'))
 
@@ -696,7 +696,7 @@ def delete_dataset(table_name):
         flash(f'Course Catalog "{table_name}" deleted.', 'success')
     except Exception as e:
         db.session.rollback()
-        flash(f'Error: {e}', 'error')
+        flash('Error deleting dataset.', 'error')
     return redirect(url_for('admin.manage_datasets'))
 
 @admin_bp.route('/update_app_settings', methods=['POST'])
@@ -979,7 +979,7 @@ def update_user_demographics():
         return jsonify({'success': True})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Unable to update user demographics.'}), 500
 
 @admin_bp.route('/api/delete_user/<int:user_id>', methods=['POST'])
 @login_required
@@ -998,7 +998,7 @@ def delete_user(user_id):
         return jsonify({'success': False, 'message': 'User not found'}), 404
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Unable to delete user.'}), 500
 
 @admin_bp.route('/subjects', methods=['GET', 'POST'])
 @login_required
@@ -1117,7 +1117,7 @@ def api_update_subject_area(subject_id: int):
         )
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Unable to update subject area.'}), 500
 
 @admin_bp.route('/instructors')
 @login_required
@@ -1183,7 +1183,7 @@ def api_update_instructor(instructor_id):
         return jsonify({'success': True, 'updated_rows': updated_rows})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Unable to update instructor.'}), 500
 
 
 @admin_bp.route('/api/instructors/delete', methods=['POST'])
@@ -1216,7 +1216,7 @@ def api_delete_instructor():
         return jsonify({'success': True, 'updated_rows': updated_rows})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Unable to delete instructor.'}), 500
 
 @admin_bp.route('/courses')
 @login_required
@@ -1253,7 +1253,7 @@ def university_connection():
     return render_template(
         'Admin/university_connection.html',
         endpoint=get_app_setting('university_connection_endpoint', ''),
-        api_key=get_app_setting('university_connection_api_key', ''),
+        api_key='••••••••' if get_app_setting('university_connection_api_key', '') else '',
         client_id=get_app_setting('university_connection_client_id', ''),
         sync_enabled=get_app_setting('university_connection_sync_enabled', 'false'),
     )
@@ -1273,7 +1273,7 @@ def api_update_course():
         return jsonify({'success': False, 'message': 'Invalid table'})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Unable to update course.'}), 500
 
 @admin_bp.route('/api/update_period', methods=['POST'])
 @login_required
@@ -1290,7 +1290,7 @@ def update_period():
         return jsonify({'success': False, 'message': 'Period not found'})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Unable to update period.'}), 500
 
 
 @admin_bp.route('/api/periods/create', methods=['POST'])
@@ -1327,7 +1327,7 @@ def api_create_period():
         return jsonify({'success': True, 'period': {'id': period.id, 'name': period.name, 'start_time': period.start_time, 'end_time': period.end_time}})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Unable to create period.'}), 500
 
 
 @admin_bp.route('/api/periods/<int:period_id>/update', methods=['POST'])
@@ -1370,7 +1370,7 @@ def api_update_period_full(period_id: int):
         return jsonify({'success': True, 'period': {'id': period.id, 'name': period.name, 'start_time': period.start_time, 'end_time': period.end_time}})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Unable to update period.'}), 500
 
 
 @admin_bp.route('/api/periods/<int:period_id>/delete', methods=['POST'])
@@ -1386,7 +1386,7 @@ def api_delete_period(period_id: int):
         return jsonify({'success': True})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Unable to delete period.'}), 500
 
 
 @admin_bp.route('/api/lunch_settings', methods=['POST'])
@@ -2615,7 +2615,7 @@ def ai_export_events_csv():
         )
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Unable to export AI events.'}), 500
 
 
 @admin_bp.route('/ai/export_behavior_events.csv', methods=['GET'])
@@ -2663,4 +2663,4 @@ def ai_export_behavior_events_csv():
         )
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Unable to export behavior events.'}), 500

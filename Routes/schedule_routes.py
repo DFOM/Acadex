@@ -164,6 +164,6 @@ def delete_schedule(schedule_id):
             flash('Unauthorized action.', 'error')
     except Exception as e:
         db.session.rollback()
-        flash(f'Error deleting schedule: {e}', 'error')
+        flash('Error deleting schedule.', 'error')
         
     return redirect(url_for('schedule.user_dashboard'))

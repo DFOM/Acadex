@@ -1,8 +1,12 @@
 # app.py
-from flask import Flask, jsonify
-from flask_login import LoginManager
+from flask import Flask, jsonify, request, session
+from flask_login import LoginManager, current_user
 import os
+import secrets
+import logging
+from collections import defaultdict, deque
 from pathlib import Path
+from datetime import timedelta
 from werkzeug.security import generate_password_hash
 from models import db, User, Role, Permission, RegistrationField, RBAC_PERMISSION_KEYS
 from flask_migrate import Migrate, upgrade
@@ -53,6 +57,139 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER', 'uploads')
 app.config['PROFILE_UPLOAD_FOLDER'] = os.path.join(app.config['UPLOAD_FOLDER'], 'profile_images')
 app.config['STRICT_MIGRATIONS'] = _env_bool('STRICT_MIGRATIONS', default=False)
+app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('MAX_CONTENT_LENGTH_BYTES', 2 * 1024 * 1024))
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = _env_bool('SESSION_COOKIE_SECURE', default=os.environ.get('FLASK_ENV') == 'production')
+app.config['REMEMBER_COOKIE_HTTPONLY'] = True
+app.config['REMEMBER_COOKIE_SAMESITE'] = 'Lax'
+app.config['REMEMBER_COOKIE_SECURE'] = app.config['SESSION_COOKIE_SECURE']
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)
+
+if not app.logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s event=%(message)s'))
+    app.logger.addHandler(handler)
+app.logger.setLevel(logging.INFO)
+
+_rate_limit_buckets: dict[str, deque] = defaultdict(deque)
+
+
+def _request_ip() -> str:
+    forwarded = (request.headers.get('X-Forwarded-For') or '').strip()
+    if forwarded:
+        return forwarded.split(',')[0].strip()[:64]
+    return (request.remote_addr or 'unknown')[:64]
+
+
+def _apply_rate_limit(bucket: str, max_events: int, window_seconds: int) -> bool:
+    now = __import__('time').time()
+    q = _rate_limit_buckets[bucket]
+    cutoff = now - float(window_seconds)
+    while q and q[0] < cutoff:
+        q.popleft()
+    if len(q) >= int(max_events):
+        return False
+    q.append(now)
+    return True
+
+
+def _csrf_token() -> str:
+    token = session.get('_csrf_token')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['_csrf_token'] = token
+    return token
+
+
+@app.context_processor
+def _inject_csrf_token():
+    return {'csrf_token': _csrf_token()}
+
+
+@app.before_request
+def _security_before_request():
+    _csrf_token()
+
+    if request.endpoint == 'static':
+        return None
+
+    if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+        path = request.path or ''
+        ip = _request_ip()
+
+        if path.endswith('/login') and not _apply_rate_limit(f'login:{ip}', 20, 300):
+            return jsonify({'success': False, 'message': 'Too many login attempts.'}), 429
+        if path.endswith('/register') and not _apply_rate_limit(f'register:{ip}', 10, 600):
+            return jsonify({'success': False, 'message': 'Too many registration attempts.'}), 429
+        if path.startswith('/admin') and not _apply_rate_limit(f'admin:{ip}', 180, 60):
+            return jsonify({'success': False, 'message': 'Too many admin requests.'}), 429
+        if path.startswith('/student/api/') and not _apply_rate_limit(f'student-api:{ip}', 240, 60):
+            return jsonify({'success': False, 'message': 'Too many requests.'}), 429
+
+        provided = (request.headers.get('X-CSRF-Token') or request.form.get('csrf_token') or '').strip()
+        expected = str(session.get('_csrf_token') or '')
+        if not expected or provided != expected:
+            wants_json = request.is_json or path.startswith('/admin/api/') or path.startswith('/student/api/')
+            if wants_json:
+                return jsonify({'success': False, 'message': 'Invalid CSRF token.'}), 400
+            return 'Invalid request token.', 400
+    return None
+
+
+@app.after_request
+def _security_after_request(response):
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
+    if app.config.get('SESSION_COOKIE_SECURE'):
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+
+    if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'} and (
+        request.path.startswith('/admin')
+        or request.path.startswith('/student/api/')
+        or request.path.startswith('/schedule/')
+    ):
+        user_id = current_user.id if getattr(current_user, 'is_authenticated', False) else None
+        app.logger.info('audit method=%s path=%s status=%s ip=%s user=%s', request.method, request.path, response.status_code, _request_ip(), user_id)
+    return response
+
+
+@app.errorhandler(400)
+def _bad_request(_err):
+    if request.path.startswith('/admin/api/') or request.path.startswith('/student/api/'):
+        return jsonify({'success': False, 'message': 'Bad request.'}), 400
+    return 'Bad request.', 400
+
+
+@app.errorhandler(403)
+def _forbidden(_err):
+    if request.path.startswith('/admin/api/') or request.path.startswith('/student/api/'):
+        return jsonify({'success': False, 'message': 'Forbidden.'}), 403
+    return 'Forbidden.', 403
+
+
+@app.errorhandler(404)
+def _not_found(_err):
+    if request.path.startswith('/admin/api/') or request.path.startswith('/student/api/'):
+        return jsonify({'success': False, 'message': 'Not found.'}), 404
+    return 'Not found.', 404
+
+
+@app.errorhandler(429)
+def _too_many(_err):
+    if request.path.startswith('/admin/api/') or request.path.startswith('/student/api/'):
+        return jsonify({'success': False, 'message': 'Too many requests.'}), 429
+    return 'Too many requests. Please retry shortly.', 429
+
+
+@app.errorhandler(500)
+def _server_error(err):
+    app.logger.exception('server_error path=%s method=%s ip=%s error=%s', request.path, request.method, _request_ip(), err)
+    if request.path.startswith('/admin/api/') or request.path.startswith('/student/api/'):
+        return jsonify({'success': False, 'message': 'Internal server error.'}), 500
+    return 'Internal server error.', 500
 
 db.init_app(app)
 migrate = Migrate(app, db)

@@ -1311,7 +1311,13 @@ def profile():
             if not _allowed_profile_image(image_file.filename):
                 flash('Profile image must be png, jpg, jpeg, webp, or gif.', 'error')
                 return render_template('Student/profile.html', majors=majors, minors=minors)
-            filename = secure_filename(f"user_{current_user.id}_{image_file.filename}")
+            allowed_mimes = {'image/png', 'image/jpeg', 'image/webp', 'image/gif'}
+            if (image_file.mimetype or '').lower() not in allowed_mimes:
+                flash('Invalid image type.', 'error')
+                return render_template('Student/profile.html', majors=majors, minors=minors)
+
+            ext = os.path.splitext(secure_filename(image_file.filename))[1].lower()
+            filename = secure_filename(f"user_{current_user.id}_{uuid.uuid4().hex}{ext}")
             profile_dir = current_app.config.get('PROFILE_UPLOAD_FOLDER', os.path.join('uploads', 'profile_images'))
             os.makedirs(profile_dir, exist_ok=True)
             file_path = os.path.join(profile_dir, filename)
@@ -1328,6 +1334,9 @@ def profile():
                 return render_template('Student/profile.html', majors=majors, minors=minors)
             if new_password != confirm_new_password:
                 flash('New passwords do not match.', 'error')
+                return render_template('Student/profile.html', majors=majors, minors=minors)
+            if len(new_password) < 8:
+                flash('New password must be at least 8 characters.', 'error')
                 return render_template('Student/profile.html', majors=majors, minors=minors)
             current_user.password = generate_password_hash(new_password, method='pbkdf2:sha256')
 
@@ -1395,7 +1404,7 @@ def api_notifications_list():
         return jsonify({'success': True, 'notifications': [_serialize_notification(n) for n in items]})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': 'Could not load notifications', 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Could not load notifications'}), 500
 
 
 @student_bp.route('/api/notifications/unread_count', methods=['GET'])
@@ -1419,7 +1428,7 @@ def api_notifications_unread_count():
         return jsonify({'success': True, 'unread': int(broadcast_unread + guest_unread)})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': 'Could not load unread count', 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Could not load unread count'}), 500
 
 
 @student_bp.route('/api/notifications/<int:notif_id>/read', methods=['POST'])
@@ -1457,7 +1466,7 @@ def api_notifications_mark_read(notif_id: int):
         return jsonify({'success': True})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': 'Could not update notification', 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Could not update notification'}), 500
 
 
 @student_bp.route('/api/notifications/mark_all_read', methods=['POST'])
@@ -1490,7 +1499,7 @@ def api_notifications_mark_all_read():
         return jsonify({'success': True})
     except Exception as e:
         db.session.rollback()
-        return jsonify({'success': False, 'message': 'Could not update notifications', 'error': str(e)}), 500
+        return jsonify({'success': False, 'message': 'Could not update notifications'}), 500
 
 
 @student_bp.route('/ai/consent', methods=['POST'])
@@ -1520,9 +1529,9 @@ def create_schedule():
     dataset_years = get_available_dataset_years()
 
     if request.method == 'POST':
-        name = request.form.get('schedule_name')
+        name = (request.form.get('schedule_name') or '').strip()[:150]
         year = request.form.get('year')
-        semester = request.form.get('semester')
+        semester = (request.form.get('semester') or '').strip()[:50]
         
         if not current_user.is_authenticated:
             sched_type = 'future'
