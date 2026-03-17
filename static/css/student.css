@@ -16,3 +16,83 @@
    opacity: .92;
    text-decoration: underline;
 }
+
+.register-shell {
+   min-height: calc(100vh - 140px);
+}
+
+.register-card {
+   max-width: 980px;
+   border: 1px solid var(--ax-border);
+}
+
+.register-side {
+   border-right: 1px solid var(--ax-border);
+   padding-right: 1.25rem;
+}
+
+.register-input-group {
+   transition: transform .16s ease, box-shadow .16s ease;
+}
+
+.register-input-group:focus-within {
+   transform: translateY(-1px);
+}
+
+.register-icon {
+   background: var(--ax-surface);
+   border-right: 0;
+}
+
+.register-input-group .form-control,
+.register-input-group .form-select {
+   border-left: 0;
+}
+
+.register-input-group .form-control:focus,
+.register-input-group .form-select:focus {
+   box-shadow: 0 0 0 .25rem var(--ax-ring);
+}
+
+.register-inline-error {
+   min-height: 1rem;
+   color: var(--ax-danger, #dc3545);
+}
+
+.register-optional {
+   border: 1px dashed var(--ax-border);
+   border-radius: .85rem;
+   padding: .85rem 1rem;
+   background: color-mix(in srgb, var(--ax-surface) 88%, var(--ax-bg));
+}
+
+.register-optional summary {
+   cursor: pointer;
+   list-style: none;
+}
+
+.register-optional summary::-webkit-details-marker {
+   display: none;
+}
+
+#registerSubmit {
+   transition: transform .16s ease, opacity .16s ease;
+}
+
+#registerSubmit:hover:not(:disabled) {
+   transform: translateY(-1px);
+}
+
+#registerSubmit:disabled {
+   opacity: .7;
+   cursor: not-allowed;
+}
+
+@media (max-width: 991px) {
+   .register-side {
+      border-right: 0;
+      border-bottom: 1px solid var(--ax-border);
+      padding-right: 0;
+      padding-bottom: 1rem;
+   }
+}

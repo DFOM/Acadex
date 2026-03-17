@@ -115,74 +115,65 @@ def register():
     ).order_by(SubjectArea.name.asc()).all()
 
     if request.method == 'POST':
+        username = (request.form.get('username') or '').strip()[:150]
         full_name = (request.form.get('full_name') or '').strip()[:150]
         email = (request.form.get('email') or '').strip().lower()
         password = request.form.get('password')
-        confirm_password = request.form.get('confirm_password')
 
         gender = request.form.get('gender')
         career_interests = (request.form.get('career_interests') or '').strip() or None
         expected_graduation_str = request.form.get('expected_graduation')
-        major_subject_area_id = request.form.get('major_subject_area_id', type=int)
-        minor_subject_area_id = request.form.get('minor_subject_area_id', type=int)
+        major_raw = (request.form.get('major_subject_area_id') or '').strip().lower()
+        minor_raw = (request.form.get('minor_subject_area_id') or '').strip().lower()
+        major_subject_area_id = None if major_raw in {'', 'undeclared'} else request.form.get('major_subject_area_id', type=int)
+        minor_subject_area_id = None if minor_raw in {'', 'undeclared'} else request.form.get('minor_subject_area_id', type=int)
         
         expected_graduation = None
         if expected_graduation_str and expected_graduation_str.isdigit():
             expected_graduation = int(expected_graduation_str)
 
-        if not email or not password or not confirm_password:
+        if not username or not email or not password:
             flash("Please fill out all required fields.", "error")
             return render_template('Student/register.html', majors=majors, minors=minors, dynamic_fields=dynamic_fields)
-
-        for row in dynamic_fields:
-            field = row['field']
-            value = (request.form.get(field.field_key) or '').strip()
-            if field.is_required and not value:
-                flash(f"{field.label} is required.", "error")
-                return render_template('Student/register.html', majors=majors, minors=minors, dynamic_fields=dynamic_fields)
 
         email_regex = r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
         if not re.match(email_regex, email):
             flash("Please provide a valid email address.", "error")
             return render_template('Student/register.html', majors=majors, minors=minors, dynamic_fields=dynamic_fields)
 
-        if password != confirm_password:
-            flash("Passwords do not match.", "error")
-            return render_template('Student/register.html', majors=majors, minors=minors, dynamic_fields=dynamic_fields)
-
         if len(password or '') < 8:
             flash("Password must be at least 8 characters.", "error")
             return render_template('Student/register.html', majors=majors, minors=minors, dynamic_fields=dynamic_fields)
 
-        if not major_subject_area_id or not minor_subject_area_id:
-            flash("Please select both a major and a minor.", "error")
-            return render_template('Student/register.html', majors=majors, minors=minors, dynamic_fields=dynamic_fields)
+        if major_subject_area_id is not None:
+            major = SubjectArea.query.filter(
+                SubjectArea.id == major_subject_area_id,
+                SubjectArea.is_active.is_(True),
+                or_(SubjectArea.area_type == 'major', SubjectArea.area_type == 'both'),
+            ).first()
+            if not major:
+                flash("Invalid major selection. Please choose an active option or Undeclared.", "error")
+                return render_template('Student/register.html', majors=majors, minors=minors, dynamic_fields=dynamic_fields)
 
-        major = SubjectArea.query.filter(
-            SubjectArea.id == major_subject_area_id,
-            SubjectArea.is_active.is_(True),
-            or_(SubjectArea.area_type == 'major', SubjectArea.area_type == 'both'),
-        ).first()
-        minor = SubjectArea.query.filter(
-            SubjectArea.id == minor_subject_area_id,
-            SubjectArea.is_active.is_(True),
-            or_(SubjectArea.area_type == 'minor', SubjectArea.area_type == 'both'),
-        ).first()
-        if not major or not minor:
-            flash("Invalid major/minor selection. Please choose active options.", "error")
+        if minor_subject_area_id is not None:
+            minor = SubjectArea.query.filter(
+                SubjectArea.id == minor_subject_area_id,
+                SubjectArea.is_active.is_(True),
+                or_(SubjectArea.area_type == 'minor', SubjectArea.area_type == 'both'),
+            ).first()
+            if not minor:
+                flash("Invalid minor selection. Please choose an active option or Undeclared.", "error")
+                return render_template('Student/register.html', majors=majors, minors=minors, dynamic_fields=dynamic_fields)
+
+        existing_user = User.query.filter_by(username=username).first()
+        if existing_user:
+            flash("Username already exists. Please choose another one.", "error")
             return render_template('Student/register.html', majors=majors, minors=minors, dynamic_fields=dynamic_fields)
 
         existing_email = User.query.filter_by(email=email).first()
         if existing_email:
             flash("Email already registered. Please use another email.", "error")
             return render_template('Student/register.html', majors=majors, minors=minors, dynamic_fields=dynamic_fields)
-
-        username_seed = (email.split('@')[0] or 'user').strip()[:120] or 'user'
-        candidate_username = username_seed
-        suffix = 1
-        while User.query.filter_by(username=candidate_username).first():
-            suffix += 1
-            candidate_username = f"{username_seed}_{suffix}"[:149]
 
         hashed_password = generate_password_hash(password, method='pbkdf2:sha256')
 
@@ -200,7 +191,7 @@ def register():
                 extra_profile[key] = value
 
         new_user = User(
-            username=candidate_username,
+            username=username,
             full_name=full_name or None,
             email=email,
             password=hashed_password,
