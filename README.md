@@ -46,12 +46,18 @@ This makes first-run bootstrapping easier on fresh hosts.
 
 Required:
 - `SECRET_KEY`
-- `DATABASE_URL` (default: `sqlite:///instance/app.db`)
+- `DATABASE_URL` (recommended on Render: PostgreSQL connection string)
 
 Optional:
 - `UPLOAD_FOLDER` (default: `uploads`)
 - `FLASK_ENV=production`
 - `STRICT_MIGRATIONS=true` (fail startup if migration upgrade fails)
+
+Database URL behavior:
+- If `DATABASE_URL` starts with `postgres://`, the app rewrites it to `postgresql://` for SQLAlchemy compatibility.
+- If `DATABASE_URL` is not set:
+	- On Render (`RENDER` env var present), fallback is `sqlite:////tmp/acadex.db`.
+	- Otherwise fallback is an app-local SQLite file under `instance/app.db`.
 
 ## Local Development
 

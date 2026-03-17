@@ -2,6 +2,7 @@
 from flask import Flask, jsonify
 from flask_login import LoginManager
 import os
+from pathlib import Path
 from models import db, User
 from flask_migrate import Migrate, upgrade
 
@@ -25,10 +26,26 @@ app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-change-me')
 if os.environ.get('FLASK_ENV') == 'production' and app.secret_key == 'dev-secret-change-me':
     raise RuntimeError('SECRET_KEY must be set in production.')
 
-database_url = os.environ.get('DATABASE_URL', 'sqlite:///instance/app.db')
+def _resolve_database_url() -> str:
+    database_url = os.environ.get('DATABASE_URL')
 
-if database_url.startswith("postgres://"):
-    database_url = database_url.replace("postgres://", "postgresql://", 1)
+    if database_url and database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+    if not database_url:
+        if os.environ.get('RENDER'):
+            return 'sqlite:////tmp/acadex.db'
+        return f"sqlite:///{Path(app.instance_path) / 'app.db'}"
+
+    if database_url.startswith('sqlite:///'):
+        sqlite_path = database_url.replace('sqlite:///', '', 1)
+        if sqlite_path != ':memory:' and not os.path.isabs(sqlite_path):
+            database_url = f"sqlite:///{Path(app.root_path) / sqlite_path}"
+
+    return database_url
+
+
+database_url = _resolve_database_url()
 
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -62,7 +79,11 @@ def health_check():
 
 def _bootstrap_database() -> None:
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    os.makedirs(os.path.join(app.root_path, 'instance'), exist_ok=True)
+
+    if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:///'):
+        sqlite_path = app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '', 1)
+        if sqlite_path and sqlite_path != ':memory:':
+            os.makedirs(os.path.dirname(sqlite_path), exist_ok=True)
 
     with app.app_context():
         db.create_all()
