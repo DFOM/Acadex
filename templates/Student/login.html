@@ -2,26 +2,36 @@
 {% block title %}Student Login{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-5">
-        <div class="card shadow-sm mt-5 border-0 ax-card">
-            <div class="card-body p-5">
-                <h3 class="card-title text-center mb-4 fw-bold">Student Login</h3>
-                <form method="POST" action="{{ url_for('auth.login') }}">
-                    <div class="mb-3">
-                        <label class="form-label text-muted fw-bold">Email or Username</label>
-                        <input type="text" name="username" class="form-control form-control-lg" required autofocus>
-                    </div>
-                    <div class="mb-4">
-                        <label class="form-label text-muted fw-bold">Password</label>
-                        <input type="password" name="password" class="form-control form-control-lg" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-lg w-100 shadow-sm">Login to Portal</button>
-                </form>
-                <div class="mt-4 text-center">
-                    <span class="text-muted">Don't have an account?</span> 
-                    <a href="{{ url_for('auth.register') }}" class="text-decoration-none fw-bold">Register here</a>
+<div class="ax-auth-shell">
+    <div class="ax-auth-card">
+        <div class="ax-auth-header">
+            <div class="ax-auth-logo" aria-hidden="true">
+                <img src="{{ url_for('static', filename='img/acadex-icon.svg') }}" alt="" width="26" height="26">
+            </div>
+            <h3 class="fw-bold mb-1" style="font-size:1.35rem;letter-spacing:-.02em;">Welcome back</h3>
+            <p style="color:var(--ax-muted);font-size:.86rem;margin:0;">Sign in to your Acadex account</p>
+        </div>
+        <div class="ax-auth-body">
+            <form method="POST" action="{{ url_for('auth.login') }}">
+                <div class="mb-3">
+                    <label class="form-label" style="font-size:.82rem;font-weight:600;color:var(--ax-text-dim);">Email or Username</label>
+                    <input type="text" name="username" class="form-control"
+                           style="background:var(--ax-surface-2);border:1.5px solid var(--ax-border);color:var(--ax-text);border-radius:var(--ax-radius-xs);padding:.6rem .85rem;"
+                           required autofocus>
                 </div>
+                <div class="mb-4">
+                    <label class="form-label" style="font-size:.82rem;font-weight:600;color:var(--ax-text-dim);">Password</label>
+                    <input type="password" name="password" class="form-control"
+                           style="background:var(--ax-surface-2);border:1.5px solid var(--ax-border);color:var(--ax-text);border-radius:var(--ax-radius-xs);padding:.6rem .85rem;"
+                           required>
+                </div>
+                <button type="submit" class="btn btn-primary w-100" style="font-size:.9rem;font-weight:600;">
+                    Login to Portal
+                </button>
+            </form>
+            <div class="mt-4 text-center" style="font-size:.84rem;color:var(--ax-muted);">
+                Don't have an account?
+                <a href="{{ url_for('auth.register') }}" style="color:#818CF8;font-weight:700;text-decoration:none;">Register here</a>
             </div>
         </div>
     </div>

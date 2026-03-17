@@ -3,127 +3,112 @@
 {% block title %}Admin Dashboard{% endblock %}
 
 {% block content %}
-<style>
-    .custom-scroll::-webkit-scrollbar { width: 6px; }
-    .custom-scroll::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--ax-muted) 40%, var(--ax-border)); border-radius: 10px; }
-</style>
 
-<div class="d-flex justify-content-between align-items-center mb-4 mt-2">
-    <div>
-        <h2 class="mb-0 fw-bold">System Dashboard</h2>
-        <p class="text-muted mb-0">Manage global settings and monitor all student schedules.</p>
-    </div>
+<div class="ax-page-header">
+    <h1 class="ax-page-title">System Dashboard</h1>
+    <p class="ax-page-subtitle">Manage global settings and monitor all student schedules.</p>
 </div>
 
-<div class="row mb-4">
-    <div class="col-md-3 mb-3">
-        <div class="card shadow-sm h-100 border-0 bg-primary text-white rounded-4">
-            <div class="card-body d-flex justify-content-between align-items-center p-4">
-                <div>
-                    <h6 class="text-uppercase tracking-widest opacity-75 mb-1 small fw-bold">Total Students</h6>
-                    <h2 class="display-5 fw-bold mb-0">{{ user_count }}</h2>
-                </div>
-                {{ hi('users', 'ax-icon fs-1 opacity-50') }}
+{# ── Stat cards ── #}
+<div class="row g-3 mb-4 ax-stagger">
+    <div class="col-md-3">
+        <div class="ax-admin-stat">
+            <div class="ax-admin-stat-accent"></div>
+            <div class="ax-admin-stat-icon">
+                {{ hi('users', 'ax-icon') }}
             </div>
+            <div class="ax-admin-stat-label">Total Students</div>
+            <div class="ax-admin-stat-value">{{ user_count }}</div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
-        <div class="card shadow-sm h-100 border-0 bg-success text-white rounded-4">
-            <div class="card-body d-flex justify-content-between align-items-center p-4">
-                <div>
-                    <h6 class="text-uppercase tracking-widest opacity-75 mb-1 small fw-bold">Active Plans</h6>
-                    <h2 class="display-5 fw-bold mb-0">{{ schedule_count }}</h2>
-                </div>
-                {{ hi('calendar-check', 'ax-icon fs-1 opacity-50') }}
+    <div class="col-md-3">
+        <div class="ax-admin-stat" style="--accent:var(--ax-c-emerald);">
+            <div class="ax-admin-stat-accent" style="background:linear-gradient(135deg,var(--ax-c-emerald),#34D399);"></div>
+            <div class="ax-admin-stat-icon" style="background:rgba(16,185,129,.12);color:#34D399;">
+                {{ hi('calendar-check', 'ax-icon') }}
             </div>
+            <div class="ax-admin-stat-label">Active Plans</div>
+            <div class="ax-admin-stat-value">{{ schedule_count }}</div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
-        <div class="card shadow-sm h-100 border-0 bg-dark text-white rounded-4">
-            <div class="card-body d-flex justify-content-between align-items-center p-4">
-                <div>
-                    <h6 class="text-uppercase tracking-widest opacity-75 mb-1 small fw-bold">Loaded Course Catalogs</h6>
-                    <h2 class="display-5 fw-bold mb-0">{{ course_tables|length }}</h2>
-                </div>
-                {{ hi('database', 'ax-icon fs-1 opacity-50') }}
+    <div class="col-md-3">
+        <div class="ax-admin-stat">
+            <div class="ax-admin-stat-accent" style="background:linear-gradient(135deg,var(--ax-c-cyan),#38BDF8);"></div>
+            <div class="ax-admin-stat-icon" style="background:rgba(6,182,212,.12);color:#06B6D4;">
+                {{ hi('database', 'ax-icon') }}
             </div>
+            <div class="ax-admin-stat-label">Course Catalogs</div>
+            <div class="ax-admin-stat-value">{{ course_tables|length }}</div>
         </div>
     </div>
-    <div class="col-md-3 mb-3">
-        <div class="card shadow-sm h-100 border-0 bg-secondary text-white rounded-4">
-            <div class="card-body d-flex justify-content-between align-items-center p-4">
-                <div>
-                    <h6 class="text-uppercase tracking-widest opacity-75 mb-1 small fw-bold">Recent Activity</h6>
-                    <h2 class="display-5 fw-bold mb-0">{{ notification_count }}</h2>
-                    <div class="small opacity-75">Announcements: {{ announcement_count }}</div>
-                </div>
-                {{ hi('bell-alert', 'ax-icon fs-1 opacity-50') }}
+    <div class="col-md-3">
+        <div class="ax-admin-stat">
+            <div class="ax-admin-stat-accent" style="background:linear-gradient(135deg,var(--ax-c-pink),#F472B6);"></div>
+            <div class="ax-admin-stat-icon" style="background:rgba(236,72,153,.12);color:#EC4899;">
+                {{ hi('bell-alert', 'ax-icon') }}
             </div>
+            <div class="ax-admin-stat-label">Recent Activity</div>
+            <div class="ax-admin-stat-value">{{ notification_count }}</div>
+            <div class="ax-admin-stat-sub">Announcements: {{ announcement_count }}</div>
         </div>
     </div>
 </div>
 
-<div class="row">
-    <div class="col-lg-4 mb-4">
-        <div class="card shadow-sm border-0 rounded-4 h-100">
-            <div class="card-header border-bottom py-3" style="background: var(--ax-surface);">
-                <h6 class="mb-0 fw-bold">{{ hi('gear', 'ax-icon me-2 text-primary') }}Global App Settings</h6>
+<div class="row g-4">
+    {# ── Settings form ── #}
+    <div class="col-lg-4">
+        <div class="ax-admin-card h-100">
+            <div class="ax-admin-card-header">
+                {{ hi('gear', 'ax-icon me-2') }}Global App Settings
             </div>
-            <div class="card-body">
+            <div class="ax-admin-card-body">
                 <form action="{{ url_for('admin.update_app_settings_route') }}" method="POST">
                     <div class="mb-3">
-                        <label class="form-label small fw-bold text-muted">Current Academic Year</label>
-                        <input type="text" class="form-control form-control-sm border-0 shadow-sm" name="current_year_setting" value="{{ current_year_setting }}" placeholder="e.g. 2025">
+                        <label class="form-label" style="font-size:.78rem;font-weight:700;color:var(--ax-muted);text-transform:uppercase;letter-spacing:.04em;">Academic Year</label>
+                        <input type="text" class="admin-input form-control" name="current_year_setting" value="{{ current_year_setting }}" placeholder="e.g. 2025">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label small fw-bold text-muted">Current Semester</label>
-                        <select class="form-select form-select-sm border-0 shadow-sm" name="current_semester_setting">
+                        <label class="form-label" style="font-size:.78rem;font-weight:700;color:var(--ax-muted);text-transform:uppercase;letter-spacing:.04em;">Current Semester</label>
+                        <select class="admin-input form-select" name="current_semester_setting">
                             <option value="Spring" {% if current_semester_setting == 'Spring' %}selected{% endif %}>Spring</option>
                             <option value="Fall" {% if current_semester_setting == 'Fall' %}selected{% endif %}>Fall</option>
                         </select>
                     </div>
                     <div class="mb-4">
-                        <label class="form-label small fw-bold text-muted">Required Grad Credits</label>
-                        <input type="number" class="form-control form-control-sm border-0 shadow-sm" name="graduation_credits_setting" value="{{ graduation_credits_setting }}" placeholder="124">
+                        <label class="form-label" style="font-size:.78rem;font-weight:700;color:var(--ax-muted);text-transform:uppercase;letter-spacing:.04em;">Required Grad Credits</label>
+                        <input type="number" class="admin-input form-control" name="graduation_credits_setting" value="{{ graduation_credits_setting }}" placeholder="124">
                     </div>
-
                     <div class="mb-2">
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" value="true" id="ai_enabled_setting" name="ai_enabled_setting"
                                 {% if (ai_enabled_setting|string)|lower in ['1','true','yes','on'] %}checked{% endif %}>
-                            <label class="form-check-label small fw-bold text-muted" for="ai_enabled_setting">
-                                Enable AI features
-                            </label>
+                            <label class="form-check-label" style="font-size:.84rem;color:var(--ax-text-dim);" for="ai_enabled_setting">Enable AI features</label>
                         </div>
                     </div>
-
                     <div class="mb-4">
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" value="true" id="ai_data_collection_enabled_setting" name="ai_data_collection_enabled_setting"
                                 {% if (ai_data_collection_enabled_setting|string)|lower in ['1','true','yes','on'] %}checked{% endif %}>
-                            <label class="form-check-label small fw-bold text-muted" for="ai_data_collection_enabled_setting">
-                                Enable AI data collection (opt-in only)
-                            </label>
+                            <label class="form-check-label" style="font-size:.84rem;color:var(--ax-text-dim);" for="ai_data_collection_enabled_setting">Enable AI data collection (opt-in only)</label>
                         </div>
-                        <div class="small text-muted">
-                            Only logs events for users who opt in.
-                        </div>
+                        <p style="font-size:.75rem;color:var(--ax-muted);margin:.3rem 0 0 1.6rem;">Only logs events for users who opt in.</p>
                     </div>
-                    <button type="submit" class="btn btn-primary btn-sm w-100 rounded-pill fw-bold shadow-sm">Save Settings</button>
+                    <button type="submit" class="admin-btn-primary w-100">Save Settings</button>
                 </form>
             </div>
         </div>
     </div>
 
-    <div class="col-lg-8 mb-4">
-        <div class="card shadow-sm border-0 rounded-4 h-100">
-            <div class="card-header border-bottom py-3 d-flex justify-content-between align-items-center" style="background: var(--ax-surface);">
-                <h6 class="mb-0 fw-bold">{{ hi('list', 'ax-icon me-2 text-primary') }}All User Schedules</h6>
-                <span class="badge bg-primary rounded-pill">{{ schedule_count }} Total</span>
+    {# ── All user schedules ── #}
+    <div class="col-lg-8">
+        <div class="ax-admin-card h-100">
+            <div class="ax-admin-card-header d-flex justify-content-between align-items-center">
+                <span>{{ hi('list', 'ax-icon me-2') }}All User Schedules</span>
+                <span class="ax-badge" style="background:var(--ax-grad-subtle);color:#818CF8;border:1px solid rgba(99,102,241,.2);">{{ schedule_count }} Total</span>
             </div>
-            <div class="card-body p-0 custom-scroll" style="max-height: 400px; overflow-y: auto;">
-                <table class="table table-hover align-middle mb-0">
-                    <thead class="sticky-top" style="background: var(--ax-surface);">
+            <div class="ax-admin-card-body p-0" style="max-height:420px;overflow-y:auto;">
+                <table class="admin-table">
+                    <thead>
                         <tr>
                             <th class="ps-4">Student</th>
                             <th>Plan Name</th>
@@ -135,16 +120,20 @@
                         {% if all_schedules %}
                             {% for s in all_schedules %}
                             <tr>
-                                <td class="ps-4 fw-bold text-primary small">{{ s.username }}</td>
-                                <td class="fw-bold small">{{ s.schedule_name }}</td>
-                                <td class="small text-muted">{{ s.semester }} {{ s.year }}</td>
-                                <td><span class="badge bg-secondary bg-opacity-10 text-secondary border rounded-pill fw-bold" style="font-size: 0.65rem;">{{ s.schedule_type | capitalize }}</span></td>
+                                <td class="ps-4" style="font-weight:700;color:#818CF8;font-size:.85rem;">{{ s.username }}</td>
+                                <td style="font-weight:600;font-size:.85rem;">{{ s.schedule_name }}</td>
+                                <td style="color:var(--ax-muted);font-size:.83rem;">{{ s.semester }} {{ s.year }}</td>
+                                <td>
+                                    <span class="ax-badge" style="background:var(--ax-surface-2);color:var(--ax-text-dim);border:1px solid var(--ax-border);font-size:.68rem;">
+                                        {{ s.schedule_type | capitalize }}
+                                    </span>
+                                </td>
                             </tr>
                             {% endfor %}
                         {% else %}
                             <tr>
-                                <td colspan="4" class="text-center py-5 text-muted small">
-                                    <i>Data link pending... Table requires Python backend update to load rows.</i>
+                                <td colspan="4" class="text-center py-5" style="color:var(--ax-muted);font-size:.85rem;">
+                                    No schedules found.
                                 </td>
                             </tr>
                         {% endif %}

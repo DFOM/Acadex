@@ -4,269 +4,193 @@
 {% block title %}Welcome - Acadex{% endblock %}
 
 {% block content %}
-<style>
-    /* Full Page Loader */
-    #page-loader {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: var(--ax-bg);
-        z-index: 9999;
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-        transition: opacity 0.6s ease-out, visibility 0.6s ease-out;
-    }
-    .spinner-border {
-        width: 3rem;
-        height: 3rem;
-        color: var(--ax-primary);
-    }
-    
-    /* Modern Hover Effects */
-    .hover-card {
-        transition: transform var(--ax-transition) ease, box-shadow var(--ax-transition) ease;
-    }
-    .hover-card:hover {
-        transform: translateY(-5px);
-        box-shadow: var(--ax-shadow-md) !important;
-    }
-    
-    /* Gradient Text */
-    .text-gradient {
-        background: linear-gradient(45deg, var(--ax-primary), color-mix(in srgb, var(--ax-primary) 40%, var(--ax-text)));
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-    }
 
-    .ax-fade-in {
-        animation: axFadeIn 280ms ease-out both;
-    }
-    @keyframes axFadeIn {
-        from { opacity: 0; transform: translateY(6px); }
-        to { opacity: 1; transform: translateY(0); }
-    }
-</style>
-
-<div id="page-loader">
-    <div class="spinner-border mb-3" role="status"></div>
-    <h4 class="text-secondary fw-light">Loading your academic experience...</h4>
+{# ── Page loader ── #}
+<div id="page-loader" style="position:fixed;top:0;left:0;width:100%;height:100%;background:var(--ax-bg);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .5s ease,visibility .5s ease;">
+    <div class="ax-loader-ring mb-3" aria-hidden="true"></div>
+    <p style="color:var(--ax-muted);font-size:.9rem;font-weight:500;">Loading your academic experience…</p>
 </div>
 
 {% set _hero_headline = hero_cfg.get('headline', 'Master Your Academic Journey') %}
 {% set _hero_subtext = hero_cfg.get('subtext', '') %}
 {% set _hero_primary = hero_cfg.get('primary_label', 'Start Planning') %}
-{% set _hero_secondary = hero_cfg.get('secondary_label', 'Register for Premium') %}
+{% set _hero_secondary = hero_cfg.get('secondary_label', 'Register for Free') %}
 
 {% for section in landing_sections %}
-    {% if section.enabled %}
-        {% if section.name == 'hero' %}
-            <div class="px-4 py-5 my-4 text-center rounded-4 shadow-sm border hover-card ax-card">
-                <h1 class="display-4 fw-bold text-gradient mb-3">{{ _hero_headline }}</h1>
-                <div class="col-lg-8 mx-auto">
-                    {% if _hero_subtext %}
-                    <p class="lead text-secondary mb-4">{{ _hero_subtext }}</p>
+  {% if section.enabled %}
+
+    {# ══ HERO ══ #}
+    {% if section.name == 'hero' %}
+    <section class="ax-hero text-center py-5 my-3 ax-stagger">
+        <div class="ax-hero-eyebrow">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+            {{ current_semester }} {{ current_year }} Course Catalog Live
+        </div>
+        <h1 class="ax-hero-headline">{{ _hero_headline }}</h1>
+        {% if _hero_subtext %}
+        <p class="ax-hero-sub mx-auto">{{ _hero_subtext }}</p>
+        {% endif %}
+        <div class="d-flex justify-content-center gap-3 flex-wrap mt-4">
+            {% if current_user.is_authenticated %}
+            <a href="{{ url_for('auth.choose_schedule_type') }}" class="btn btn-primary btn-lg px-5">
+                {{ hi('calendar', 'ax-icon me-2') }}{{ _hero_primary }}
+            </a>
+            <a href="{{ url_for('student.user_dashboard') }}" class="btn btn-lg px-5" style="background:var(--ax-surface-2);border:1px solid var(--ax-border);color:var(--ax-text);">
+                {{ hi('speedometer', 'ax-icon me-2') }}Go to Dashboard
+            </a>
+            {% else %}
+            <a href="{{ url_for('student.create_schedule', schedule_type='future') }}" class="btn btn-primary btn-lg px-5">
+                {{ hi('calendar', 'ax-icon me-2') }}{{ _hero_primary }}
+            </a>
+            <a href="{{ url_for('auth.register') }}" class="btn btn-lg px-5" style="background:var(--ax-surface-2);border:1px solid var(--ax-border);color:var(--ax-text);">
+                {{ hi('user-plus', 'ax-icon me-2') }}{{ _hero_secondary }}
+            </a>
+            {% endif %}
+        </div>
+    </section>
+
+    {# ══ FEATURES ══ #}
+    {% elif section.name == 'features' %}
+    {% set _features_title = features_cfg.get('title', 'Why Acadex') %}
+    {% set _cards = features_cfg.get('cards', []) %}
+    <section class="mb-5 ax-stagger">
+        <div class="text-center mb-4">
+            <h2 class="fw-bold" style="font-size:1.75rem;letter-spacing:-.02em;">{{ _features_title }}</h2>
+        </div>
+        <div class="row g-4">
+            {% for c in _cards %}
+            <div class="col-md-6 col-lg-4">
+                <div class="ax-feature-card h-100">
+                    <div class="ax-feature-icon-wrap mb-3" aria-hidden="true">
+                        {{ hi(c.get('icon','sparkles'), 'ax-icon') }}
+                    </div>
+                    <h5 class="fw-bold mb-2" style="font-size:.97rem;">{{ c.get('title','') }}</h5>
+                    <p style="color:var(--ax-text-dim);font-size:.88rem;line-height:1.65;margin:0;">{{ c.get('description','') }}</p>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+
+    {# ══ ANNOUNCEMENTS ══ #}
+    {% elif section.name == 'announcements' %}
+    <section class="mb-5" id="announcements">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+            <h3 class="fw-bold mb-0" style="font-size:1.25rem;">
+                {{ hi('megaphone', 'ax-icon me-2') }}Latest Announcements
+            </h3>
+            <button type="button" class="btn btn-sm" id="axMarkSeenBtn"
+                    style="background:var(--ax-surface-2);border:1px solid var(--ax-border);color:var(--ax-text-dim);font-size:.8rem;border-radius:var(--ax-radius-xs);">
+                Mark seen
+            </button>
+        </div>
+        <div id="axAnnouncementsGrid" class="row g-4" data-initial-count="{{ announcements|length }}">
+            {% for ann in announcements %}
+            <div class="col-md-6 col-lg-4" data-ann-id="{{ ann.id }}">
+                <div class="ax-ann-card h-100">
+                    <h5 class="fw-bold mb-2" style="font-size:.93rem;color:var(--ax-text);">{{ ann.title }}</h5>
+                    <p style="color:var(--ax-text-dim);font-size:.85rem;white-space:pre-line;line-height:1.6;flex:1;margin:0 0 .75rem;">{{ ann.content }}</p>
+                    <small style="color:var(--ax-muted);font-size:.75rem;">
+                        {{ hi('clock', 'ax-icon me-1') }}{{ ann.date_posted.strftime('%B %d, %Y') }}
+                    </small>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% if not announcements %}
+        <div id="axAnnouncementsEmpty" class="text-center py-5" style="color:var(--ax-muted);">
+            {{ hi('inbox', 'ax-icon ax-icon-lg mb-2') }}
+            <p class="mb-0">No new announcements right now. Check back later!</p>
+        </div>
+        {% else %}
+        <div id="axAnnouncementsEmpty" class="text-center py-5" style="color:var(--ax-muted);display:none!important;">
+            {{ hi('inbox', 'ax-icon ax-icon-lg mb-2') }}
+            <p class="mb-0">No new announcements right now. Check back later!</p>
+        </div>
+        {% endif %}
+    </section>
+
+    {# ══ INFO GRID ══ #}
+    {% elif section.name == 'info_grid' %}
+    <section class="mb-5">
+        <div class="row g-4">
+            <div class="col-md-7">
+                {# About #}
+                <div class="ax-card mb-4 p-4">
+                    <h4 class="fw-bold mb-3" style="font-size:1rem;">{{ hi('info', 'ax-icon me-2') }}About This Tool</h4>
+                    <p style="color:var(--ax-text-dim);white-space:pre-line;line-height:1.75;font-size:.9rem;margin:0;">{{ about_us }}</p>
+                </div>
+
+                {# Course catalogs #}
+                <div class="ax-card p-4">
+                    <h4 class="fw-bold mb-1" style="font-size:1rem;">{{ hi('book-open', 'ax-icon me-2') }}Course Catalogs</h4>
+                    <p style="color:var(--ax-muted);font-size:.8rem;margin:0 0 1rem;">Plan schedules using available course catalogs.</p>
+                    {% if course_catalog_statuses %}
+                        <div class="d-flex flex-column gap-2">
+                            {% for s in course_catalog_statuses %}
+                            <div class="ax-catalog-row">
+                                <span class="fw-semibold" style="font-size:.88rem;">{{ s.term }}</span>
+                                {% if s.status == 'processing' %}
+                                    <span class="ax-badge ax-badge-warning">Processing</span>
+                                {% else %}
+                                    <span class="ax-badge ax-badge-success">Available</span>
+                                {% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p style="color:var(--ax-muted);font-size:.88rem;margin:0;">No course catalogs currently loaded.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="col-md-5">
+                <div class="position-sticky" style="top:5.5rem;">
+                    {% if not current_user.is_authenticated %}
+                    <div class="ax-card p-4 mb-4">
+                        <h4 class="fw-bold mb-1" style="font-size:.95rem;">{{ hi('folder-open', 'ax-icon me-2') }}Your Session Plans</h4>
+                        {% if guest_schedules %}
+                        <div class="ax-alert ax-alert-warning mb-3" style="font-size:.8rem;">
+                            {{ hi('alert', 'ax-icon me-1') }}Saved temporarily in your browser.
+                            <a href="{{ url_for('auth.register') }}" style="color:var(--ax-c-pink);font-weight:700;">Create an account</a> to keep them forever!
+                        </div>
+                        <div class="d-flex flex-column gap-2">
+                            {% for sched in guest_schedules %}
+                            <a href="{{ url_for('student.edit_schedule', schedule_id=sched.id) }}" class="ax-schedule-item">
+                                <span class="fw-bold" style="font-size:.88rem;">{{ hi('calendar', 'ax-icon me-2') }}{{ sched.schedule_name }}</span>
+                                <span class="ax-badge" style="background:var(--ax-grad-subtle);color:#818CF8;border:1px solid rgba(99,102,241,.2);">{{ sched.semester }} {{ sched.year }}</span>
+                            </a>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <p style="color:var(--ax-muted);font-size:.88rem;margin:0 0 1rem;">You haven't built any schedules yet.</p>
+                        <a href="{{ url_for('student.create_schedule', schedule_type='future') }}" class="btn btn-primary w-100" style="font-size:.85rem;">Start Planning Now</a>
+                        {% endif %}
+                    </div>
                     {% endif %}
 
-                    <div class="d-flex justify-content-center gap-3 mb-4 flex-wrap">
-                        <div class="badge bg-primary bg-opacity-10 text-primary border border-primary rounded-pill px-3 py-2 fs-6">
-                            {{ hi('star', 'ax-icon me-2') }}Current Course Catalog: {{ current_semester }} {{ current_year }}
-                        </div>
+                    {% if creator_message %}
+                    <div class="ax-creator-card p-4">
+                        <h5 class="fst-italic mb-3" style="font-size:.9rem;border-bottom:1px solid var(--ax-border);padding-bottom:.75rem;">{{ hi('chat', 'ax-icon me-2') }}Message from the Creator</h5>
+                        <p style="color:var(--ax-text-dim);white-space:pre-line;line-height:1.65;font-size:.88rem;margin:0;">{{ creator_message }}</p>
                     </div>
-
-                    <div class="d-grid gap-3 d-sm-flex justify-content-sm-center">
-                        {% if current_user.is_authenticated %}
-                        <a href="{{ url_for('auth.choose_schedule_type') }}" class="btn btn-primary btn-lg px-5 shadow-sm rounded-pill">
-                            {{ hi('calendar', 'ax-icon me-2') }}{{ _hero_primary }}
-                        </a>
-                        {% else %}
-                        <a href="{{ url_for('student.create_schedule', schedule_type='future') }}" class="btn btn-primary btn-lg px-5 shadow-sm rounded-pill">
-                            {{ hi('calendar', 'ax-icon me-2') }}{{ _hero_primary }}
-                        </a>
-                        {% endif %}
-                        {% if not current_user.is_authenticated %}
-                        <a href="{{ url_for('auth.register') }}" class="btn btn-outline-dark btn-lg px-5 shadow-sm rounded-pill">
-                            {{ hi('user-plus', 'ax-icon me-2') }}{{ _hero_secondary }}
-                        </a>
-                        {% else %}
-                        <a href="{{ url_for('student.user_dashboard') }}" class="btn btn-outline-success btn-lg px-5 shadow-sm rounded-pill">
-                            {{ hi('speedometer', 'ax-icon me-2') }}Go to Dashboard
-                        </a>
-                        {% endif %}
-                    </div>
+                    {% endif %}
                 </div>
             </div>
-        {% elif section.name == 'features' %}
-            {% set _features_title = features_cfg.get('title', 'Why Acadex') %}
-            {% set _cards = features_cfg.get('cards', []) %}
-            <div class="container mb-5">
-                <div class="row">
-                    <div class="col-12">
-                        <div class="card shadow-sm border-0 rounded-4 overflow-hidden hover-card ax-card">
-                            <div class="card-body p-4 p-lg-5">
-                                <h3 class="fw-bold mb-4 text-center">{{ _features_title }}</h3>
-                                <div class="row g-4">
-                                    {% for c in _cards %}
-                                    <div class="col-md-6 col-lg-4">
-                                        <div class="card h-100 border border-secondary border-opacity-25 shadow-sm">
-                                            <div class="card-body">
-                                                <div class="d-flex align-items-center gap-2 mb-2">
-                                                    <span class="text-primary">{{ hi(c.get('icon','sparkles'), 'ax-icon') }}</span>
-                                                    <h5 class="mb-0 fw-bold">{{ c.get('title','') }}</h5>
-                                                </div>
-                                                <p class="text-secondary mb-0">{{ c.get('description','') }}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    {% endfor %}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        {% elif section.name == 'announcements' %}
-            <div class="container mb-5" id="announcements">
-                <div class="row mb-2">
-                    <div class="col-12">
-                        <div class="card shadow-sm border-0 rounded-4 overflow-hidden hover-card ax-card">
-                            <div class="card-header bg-primary text-white py-3">
-                                <div class="d-flex align-items-center justify-content-between">
-                                    <h3 class="mb-0 fw-bold">{{ hi('megaphone', 'ax-icon me-2') }}Latest Announcements</h3>
-                                    <button type="button" class="btn btn-sm btn-outline-light" id="axMarkSeenBtn">Mark seen</button>
-                                </div>
-                            </div>
-                            <div class="card-body p-4">
-                                <div id="axAnnouncementsGrid" class="row g-4" data-initial-count="{{ announcements|length }}">
-                                    {# Server-render fallback (replaced/updated by JS) #}
-                                    {% for ann in announcements %}
-                                    <div class="col-md-6 col-lg-4" data-ann-id="{{ ann.id }}">
-                                        <div class="card h-100 border border-secondary border-opacity-25 shadow-sm">
-                                            <div class="card-body">
-                                                <div class="d-flex justify-content-between align-items-start mb-2">
-                                                    <h5 class="card-title fw-bold text-primary mb-0">{{ ann.title }}</h5>
-                                                </div>
-                                                <p class="card-text text-secondary" style="white-space: pre-line;">{{ ann.content }}</p>
-                                            </div>
-                                            <div class="card-footer border-0 pt-0" style="background: var(--ax-surface);">
-                                                <small class="text-muted">{{ hi('clock', 'ax-icon me-1') }}Posted {{ ann.date_posted.strftime('%B %d, %Y') }}</small>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    {% endfor %}
-                                </div>
-
-                                {% if not announcements %}
-                                <div id="axAnnouncementsEmpty" class="text-center py-4 text-muted">
-                                    <div class="mb-2">{{ hi('inbox', 'ax-icon') }}</div>
-                                    <p class="fs-5 mb-0">No new announcements right now. Check back later!</p>
-                                </div>
-                                {% else %}
-                                <div id="axAnnouncementsEmpty" class="text-center py-4 text-muted" style="display:none;">
-                                    <div class="mb-2">{{ hi('inbox', 'ax-icon') }}</div>
-                                    <p class="fs-5 mb-0">No new announcements right now. Check back later!</p>
-                                </div>
-                                {% endif %}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        {% elif section.name == 'info_grid' %}
-            <div class="container mb-5">
-                <div class="row g-5">
-                    <div class="col-md-7">
-                        <div class="card shadow-sm border-0 rounded-4 mb-4 hover-card">
-                            <div class="card-body p-4">
-                                <h4 class="fw-bold border-bottom pb-2 mb-3">{{ hi('info', 'ax-icon me-2') }}About This Tool</h4>
-                                <p class="text-secondary" style="white-space: pre-line; margin-bottom: 0; line-height: 1.7;">{{ about_us }}</p>
-                            </div>
-                        </div>
-
-                        <div class="card shadow-sm border-0 rounded-4 hover-card">
-                            <div class="card-body p-4">
-                                <h4 class="fw-bold border-bottom pb-2 mb-3">{{ hi('book-open', 'ax-icon me-2') }}Course Catalogs</h4>
-                                <p class="text-muted small mb-3">Plan schedules using available course catalogs.</p>
-
-                                {% if course_catalog_statuses %}
-                                    <div class="d-flex flex-column gap-2">
-                                        {% for s in course_catalog_statuses %}
-                                            <div class="d-flex justify-content-between align-items-center px-3 py-2 rounded-3" style="background: var(--ax-surface); border: 1px solid var(--ax-border);">
-                                                <div class="fw-semibold">{{ s.term }}</div>
-                                                {% if s.status == 'processing' %}
-                                                    <span class="badge bg-warning text-dark">Processing</span>
-                                                {% else %}
-                                                    <span class="badge bg-success">Available</span>
-                                                {% endif %}
-                                            </div>
-                                        {% endfor %}
-                                    </div>
-                                {% else %}
-                                    <div class="alert border mb-0" style="background: var(--ax-surface); border-color: var(--ax-border); color: var(--ax-text);">No course catalogs currently loaded.</div>
-                                {% endif %}
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-5">
-                        <div class="position-sticky" style="top: 2rem;">
-                            {% if not current_user.is_authenticated %}
-                            <div class="card shadow-sm border-0 rounded-4 mb-4 hover-card border-top border-primary border-4">
-                                <div class="card-body p-4">
-                                    <h4 class="fw-bold border-bottom pb-2 mb-3">{{ hi('folder-open', 'ax-icon me-2') }}Your Session Plans</h4>
-                                    {% if guest_schedules %}
-                                        <div class="alert alert-warning py-2 small mb-3">
-                                            {{ hi('alert', 'ax-icon me-1') }}These are saved temporarily in your browser. <a href="{{ url_for('auth.register') }}" class="fw-bold alert-link">Create an account</a> to keep them forever!
-                                        </div>
-                                        <ul class="list-group list-group-flush mb-0">
-                                            {% for sched in guest_schedules %}
-                                            <li class="list-group-item px-0 py-2 border-0">
-                                                <a href="{{ url_for('student.edit_schedule', schedule_id=sched.id) }}" class="btn w-100 text-start shadow-sm d-flex justify-content-between align-items-center ax-hover" style="background: var(--ax-surface); color: var(--ax-text); border: 1px solid var(--ax-border);">
-                                                    <span class="fw-bold">{{ hi('calendar', 'ax-icon me-2') }}{{ sched.schedule_name }}</span>
-                                                    <span class="badge bg-primary rounded-pill">{{ sched.semester }} {{ sched.year }}</span>
-                                                </a>
-                                            </li>
-                                            {% endfor %}
-                                        </ul>
-                                    {% else %}
-                                        <div class="text-center py-3">
-                                            <p class="text-muted mb-3">You haven't built any schedules yet.</p>
-                                            <a href="{{ url_for('student.create_schedule', schedule_type='future') }}" class="btn btn-outline-primary rounded-pill w-100">Start Planning Now</a>
-                                        </div>
-                                    {% endif %}
-                                </div>
-                            </div>
-                            {% endif %}
-
-                            {% if creator_message %}
-                            <div class="card shadow-sm border-0 rounded-4 bg-primary text-white hover-card bg-gradient">
-                                <div class="card-body p-4">
-                                    <h5 class="fst-italic border-bottom border-light pb-2 mb-3">{{ hi('chat', 'ax-icon me-2') }}Message from the Creator</h5>
-                                    <p class="mb-0 text-light" style="white-space: pre-line; line-height: 1.6;">{{ creator_message }}</p>
-                                </div>
-                            </div>
-                            {% endif %}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        {% endif %}
+        </div>
+    </section>
     {% endif %}
+
+  {% endif %}
 {% endfor %}
 
 <script>
     window.addEventListener('load', function() {
-        // Add a tiny delay so the animation is noticeable but not annoying
         setTimeout(function() {
             const loader = document.getElementById('page-loader');
-            loader.style.opacity = '0';
-            loader.style.visibility = 'hidden';
-        }, 400); 
+            if (loader) { loader.style.opacity = '0'; loader.style.visibility = 'hidden'; }
+        }, 350);
     });
 </script>
-
 <script src="{{ url_for('static', filename='js/landing_live.js') }}"></script>
 {% endblock %}

@@ -1,7 +1,8 @@
-/* Acadex Theme Controller
+/* Acadex Theme Controller v2
+   - DARK is the default (no data-theme attr = dark)
+   - Light mode is opt-in: sets data-theme="light"
    - Persists user choice in localStorage
-   - Falls back to system preference
-   - Applies theme via data-theme on :root
+   - Falls back to system preference only when no stored value
 */
 
 (function () {
@@ -13,7 +14,7 @@
         ? 'dark'
         : 'light';
     } catch (_) {
-      return 'light';
+      return 'dark'; // default to dark
     }
   }
 
@@ -26,24 +27,28 @@
     }
   }
 
+  // Dark = default (no attribute). Light = data-theme="light".
   function setTheme(theme) {
     const root = document.documentElement;
-    root.setAttribute('data-theme', theme);
+    if (theme === 'light') {
+      root.setAttribute('data-theme', 'light');
+    } else {
+      root.removeAttribute('data-theme');
+    }
 
-    // Keep a helpful meta theme-color for mobile browser UI.
+    // Mobile browser chrome color
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) {
-      meta.setAttribute('content', theme === 'dark' ? '#0F172A' : '#F9FAFB');
+      meta.setAttribute('content', theme === 'light' ? '#F9FAFB' : '#060D1A');
     }
 
-    // Update toggle button state if present.
+    // Update toggle button icon (sun shown in dark, moon in light)
     const btn = document.getElementById('themeToggle');
     if (btn) {
-      btn.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
-      btn.setAttribute('data-theme', theme);
+      btn.setAttribute('aria-pressed', theme === 'light' ? 'true' : 'false');
+      btn.setAttribute('data-current-theme', theme);
     }
 
-    // Allow other UI (e.g., charts) to react.
     window.dispatchEvent(new CustomEvent('acadex:theme-changed', { detail: { theme } }));
   }
 
@@ -62,8 +67,8 @@
     const btn = document.getElementById('themeToggle');
     if (btn) {
       btn.addEventListener('click', function () {
-        const current = document.documentElement.getAttribute('data-theme') || 'light';
-        const next = current === 'dark' ? 'light' : 'dark';
+        const current = document.documentElement.hasAttribute('data-theme') ? 'light' : 'dark';
+        const next = current === 'light' ? 'dark' : 'light';
         setTheme(next);
         persistTheme(next);
       });

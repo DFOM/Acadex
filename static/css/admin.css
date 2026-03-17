@@ -1,104 +1,202 @@
-/* Admin area: rely on static/css/design_system.css for tokens */
+/* =================================================================
+   Acadex Admin CSS v2 — Futuristic Dark SaaS
+   All global tokens live in design_system.css.
+   ================================================================= */
 
-/* DataTables Integration */
+/* ─── Sidebar layout */
+#adminSidebar {
+  background: rgba(6, 13, 26, 0.92);
+  backdrop-filter: blur(20px) saturate(1.6);
+  -webkit-backdrop-filter: blur(20px) saturate(1.6);
+  border-right: 1px solid var(--ax-border) !important;
+  width: 260px;
+  flex-shrink: 0;
+  transition: width var(--ax-transition) var(--ax-ease);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+[data-theme="light"] #adminSidebar { background: rgba(255,255,255,0.96); }
+
+body.admin-sidebar-collapsed #adminSidebar { width: 72px !important; }
+body.admin-sidebar-collapsed .ax-sidebar-title { display: none !important; }
+body.admin-sidebar-collapsed .ax-sidebar-section-label { display: none !important; }
+
+/* ─── Sidebar brand */
+.ax-sidebar-brand {
+  display: flex; align-items: center; gap: .75rem;
+  padding: 1rem .85rem .75rem;
+  text-decoration: none !important;
+  color: var(--ax-text) !important;
+  font-weight: 700; font-size: .95rem;
+  border-bottom: 1px solid var(--ax-border);
+  margin-bottom: .5rem;
+}
+.ax-sidebar-brand-icon {
+  width: 34px; height: 34px; border-radius: 10px;
+  background: var(--ax-grad); display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; box-shadow: var(--ax-glow-sm);
+}
+
+/* ─── Sidebar section labels */
+.ax-sidebar-section-label {
+  font-size: .62rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ax-muted); padding: .65rem .85rem .3rem; margin: 0;
+}
+
+/* ─── Sidebar nav links */
+#adminSidebar .nav-link {
+  display: flex; align-items: center; gap: .6rem;
+  color: var(--ax-text-dim) !important;
+  border-radius: var(--ax-radius-xs);
+  padding: .5rem .8rem !important;
+  font-size: .86rem; font-weight: 500;
+  transition: background var(--ax-transition) ease, color var(--ax-transition) ease, transform var(--ax-transition) ease;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+#adminSidebar .nav-link:hover {
+  background: rgba(99,102,241,0.12);
+  color: #818CF8 !important;
+  transform: translateX(2px);
+}
+#adminSidebar .nav-link.active,
+#adminSidebar .nav-link[aria-current="page"] {
+  background: var(--ax-grad-subtle);
+  color: #818CF8 !important;
+  border: 1px solid rgba(99,102,241,0.18);
+}
+
+/* ─── Sidebar utility buttons */
+.ax-sidebar-btn {
+  display: flex; align-items: center; justify-content: center; gap: .5rem;
+  width: 100%; padding: .45rem .8rem;
+  background: var(--ax-surface-2); border: 1px solid var(--ax-border);
+  border-radius: var(--ax-radius-xs); color: var(--ax-text-dim);
+  font-size: .82rem; font-weight: 500; cursor: pointer;
+  transition: background var(--ax-transition) ease, border-color var(--ax-transition) ease, color var(--ax-transition) ease;
+  text-decoration: none;
+}
+.ax-sidebar-btn:hover { background: var(--ax-surface-3); border-color: rgba(99,102,241,0.25); color: var(--ax-text); }
+.ax-sidebar-btn.danger { color: #FC8181; }
+.ax-sidebar-btn.danger:hover { background: rgba(239,68,68,0.10); border-color: rgba(239,68,68,0.30); }
+
+/* ─── Sidebar footer */
+.ax-sidebar-footer {
+  border-top: 1px solid var(--ax-border);
+  padding: .75rem .85rem;
+  margin-top: auto;
+  display: flex; flex-direction: column; gap: .5rem;
+}
+
+/* ─── Admin content area */
+.ax-admin-main {
+  background: var(--ax-bg);
+  flex: 1;
+  overflow-y: auto;
+  min-height: 100vh;
+}
+
+/* ─── Admin page header */
+.ax-page-header {
+  padding: 1.5rem 0 1.25rem;
+  border-bottom: 1px solid var(--ax-border);
+  margin-bottom: 1.5rem;
+}
+.ax-page-title { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+.ax-page-subtitle { font-size: .85rem; color: var(--ax-muted); margin: .2rem 0 0; }
+
+/* ─── Admin stat cards */
+.ax-admin-stat {
+  background: var(--ax-surface) !important; border: 1px solid var(--ax-border) !important;
+  border-radius: var(--ax-radius) !important; padding: 1.25rem 1.5rem;
+  position: relative; overflow: hidden;
+  transition: transform var(--ax-transition) var(--ax-ease), box-shadow var(--ax-transition) var(--ax-ease), border-color var(--ax-transition) var(--ax-ease);
+}
+.ax-admin-stat:hover { transform: translateY(-4px); box-shadow: var(--ax-shadow-md), var(--ax-glow-sm) !important; border-color: rgba(99,102,241,0.28) !important; }
+.ax-admin-stat-accent {
+  position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--ax-grad);
+}
+.ax-admin-stat-icon {
+  width: 44px; height: 44px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--ax-grad-subtle); color: #818CF8;
+  margin-bottom: .9rem; flex-shrink: 0;
+}
+.ax-admin-stat-value { font-size: 2.2rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1; color: var(--ax-text); }
+.ax-admin-stat-label { font-size: .70rem; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ax-muted); margin-bottom: .3rem; }
+.ax-admin-stat-sub { font-size: .78rem; color: var(--ax-text-dim); margin-top: .3rem; }
+
+/* ─── Admin content cards */
+.ax-admin-card {
+  background: var(--ax-surface) !important; border: 1px solid var(--ax-border) !important;
+  border-radius: var(--ax-radius) !important; box-shadow: var(--ax-shadow-sm) !important;
+  overflow: hidden;
+}
+.ax-admin-card-header {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--ax-border);
+  background: var(--ax-surface-2);
+  font-size: .88rem; font-weight: 700;
+  display: flex; align-items: center; gap: .5rem;
+}
+.ax-admin-card-body { padding: 1.25rem; }
+
+/* ─── DataTables integration */
 .dataTables_wrapper .dataTables_filter input,
 .dataTables_wrapper .dataTables_length select {
-    border: 1px solid var(--ax-border);
-    border-radius: 0.5rem;
-    padding: 0.4rem 0.8rem;
-    background-color: var(--ax-surface);
-    color: var(--ax-text);
-    outline: none;
-    transition: border-color 0.2s;
+  background: var(--ax-surface-2) !important;
+  border: 1px solid var(--ax-border) !important;
+  border-radius: var(--ax-radius-xs) !important;
+  padding: .4rem .75rem;
+  color: var(--ax-text) !important;
+  outline: none;
+  transition: border-color var(--ax-transition) ease, box-shadow var(--ax-transition) ease;
+}
+.dataTables_wrapper .dataTables_filter input:focus,
+.dataTables_wrapper .dataTables_length select:focus {
+  border-color: var(--ax-c-blue) !important;
+  box-shadow: 0 0 0 3px var(--ax-ring) !important;
 }
 
-.dataTables_wrapper .dataTables_filter input:focus {
-    border-color: var(--ax-primary);
+.dataTables_wrapper .dataTables_paginate .paginate_button {
+  background: var(--ax-surface-2) !important;
+  border: 1px solid var(--ax-border) !important;
+  border-radius: var(--ax-radius-xs) !important;
+  color: var(--ax-text) !important;
+  padding: .3rem .65rem !important;
+  margin: 0 2px;
+  cursor: pointer;
+  transition: background var(--ax-transition) ease, border-color var(--ax-transition) ease;
 }
+.dataTables_wrapper .dataTables_paginate .paginate_button:hover { background: rgba(99,102,241,0.12) !important; border-color: rgba(99,102,241,0.30) !important; color: #818CF8 !important; }
+.dataTables_wrapper .dataTables_paginate .paginate_button.current { background: var(--ax-grad) !important; border-color: transparent !important; color: #fff !important; }
+.dataTables_wrapper .dataTables_info { color: var(--ax-muted) !important; font-size: .82rem; }
 
-/* Custom Table Styling */
-.admin-table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-}
+/* ─── Admin table */
+.admin-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.admin-table thead th { background: var(--ax-surface-2) !important; color: var(--ax-muted); font-weight: 700; text-transform: uppercase; font-size: .70rem; letter-spacing: .06em; padding: .9rem 1rem; border-bottom: 1px solid var(--ax-border) !important; }
+.admin-table tbody td { padding: .85rem 1rem; border-bottom: 1px solid var(--ax-border); background: var(--ax-surface) !important; color: var(--ax-text); vertical-align: middle; transition: background var(--ax-transition) ease; }
+.admin-table tbody tr:hover td { background: rgba(99,102,241,0.06) !important; }
 
-.admin-table thead th {
-    background-color: color-mix(in srgb, var(--ax-surface) 92%, var(--ax-bg));
-    color: var(--ax-muted);
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 0.75rem;
-    letter-spacing: 0.05em;
-    padding: 1rem;
-    border-bottom: 2px solid var(--ax-border);
-}
+/* ─── Admin form inputs */
+.admin-input { width: 100%; padding: .55rem .85rem; background: var(--ax-surface-2) !important; border: 1.5px solid var(--ax-border) !important; border-radius: var(--ax-radius-xs) !important; transition: border-color var(--ax-transition) ease, box-shadow var(--ax-transition) ease; color: var(--ax-text) !important; }
+.admin-input:focus { border-color: var(--ax-c-blue) !important; box-shadow: 0 0 0 3px var(--ax-ring) !important; outline: none !important; background: var(--ax-surface) !important; }
 
-.admin-table tbody td {
-    padding: 1rem;
-    border-bottom: 1px solid var(--ax-border);
-    background-color: var(--ax-surface);
-}
+/* ─── Admin primary button */
+.admin-btn-primary { background: var(--ax-grad) !important; border: none !important; color: #fff !important; padding: .55rem 1.25rem; border-radius: var(--ax-radius-xs); font-weight: 600; cursor: pointer; transition: filter var(--ax-transition) ease, transform var(--ax-transition) ease; }
+.admin-btn-primary:hover { filter: brightness(1.12) saturate(1.2); transform: translateY(-1px); box-shadow: var(--ax-glow-sm); }
 
-.admin-table tbody tr:hover td {
-    background-color: rgba(var(--ax-primary-rgb), 0.06);
-}
+/* ─── Footer credit */
+.ax-footer-credit { color: var(--ax-muted); text-decoration: none; transition: color var(--ax-transition) ease; }
+.ax-footer-credit:hover { color: var(--ax-c-blue); }
 
-/* Form Controls */
-.admin-input {
-    width: 100%;
-    padding: 0.625rem;
-    background-color: var(--ax-surface);
-    border: 1px solid var(--ax-border);
-    border-radius: 0.5rem;
-    transition: all 0.2s;
-    color: var(--ax-text);
+/* ─── Sidebar collapse toggle */
+#sidebarToggle {
+  background: transparent; border: 1px solid var(--ax-border); color: var(--ax-muted);
+  border-radius: var(--ax-radius-xs); padding: .3rem .55rem; cursor: pointer;
+  transition: background var(--ax-transition) ease, color var(--ax-transition) ease;
+  flex-shrink: 0;
 }
+#sidebarToggle:hover { background: var(--ax-surface-2); color: var(--ax-text); }
 
-.admin-input:focus {
-    background-color: var(--ax-surface);
-    border-color: var(--ax-primary);
-    box-shadow: 0 0 0 0.25rem var(--ax-ring);
-}
-
-.admin-btn-primary {
-    background-color: var(--ax-primary);
-    color: white;
-    padding: 0.625rem 1.25rem;
-    border-radius: 0.5rem;
-    font-weight: 600;
-    transition: background-color 0.2s;
-}
-
-.admin-btn-primary:hover {
-    background-color: color-mix(in srgb, var(--ax-primary) 86%, black);
-}
-
-#adminSidebar .nav-link {
-    color: var(--ax-text);
-    border-radius: 0.5rem;
-    padding: 0.45rem 0.6rem;
-}
-
-#adminSidebar .nav-link:hover {
-    background: color-mix(in srgb, var(--ax-primary) 14%, transparent);
-}
-
-body.admin-sidebar-collapsed #adminSidebar {
-    width: 72px !important;
-}
-
-body.admin-sidebar-collapsed .ax-sidebar-title {
-    display: none !important;
-}
-
-.ax-footer-credit {
-    color: var(--ax-muted);
-    text-decoration: none;
-    transition: opacity .18s ease, text-decoration-color .18s ease;
-}
-
-.ax-footer-credit:hover {
-    opacity: .92;
-    text-decoration: underline;
-}

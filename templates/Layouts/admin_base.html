@@ -3,150 +3,230 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#F9FAFB">
+    <meta name="theme-color" content="#060D1A">
     <meta name="csrf-token" content="{{ csrf_token }}">
     <title>{% block title %}Acadex Admin{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/acadex-icon.svg') }}">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.datatables.net/1.13.6/css/dataTables.bootstrap5.min.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/design_system.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
-    
+
+    <script src="{{ url_for('static', filename='js/theme.js') }}" defer></script>
     <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 </head>
 <body>
-    <div class="d-flex min-vh-100">
-        <aside id="adminSidebar" class="border-end p-3" style="width: 300px; background: var(--ax-surface);">
-            <div class="d-flex align-items-center justify-content-between mb-3">
-                <a class="navbar-brand fw-bold d-flex align-items-center gap-2 m-0" href="{{ url_for('admin.index') }}" style="color: var(--ax-text);">
-                    <img src="{{ url_for('static', filename='img/acadex-icon.svg') }}" alt="Acadex" width="28" height="28">
-                    <span class="ax-sidebar-title">Acadex Admin</span>
+<div class="d-flex min-vh-100">
+
+    <!-- ─── Sidebar ─── -->
+    <aside id="adminSidebar" class="d-flex flex-column py-3 px-2" style="min-height:100vh;">
+
+        <!-- Brand -->
+        <a class="ax-sidebar-brand" href="{{ url_for('admin.index') }}">
+            <span class="ax-sidebar-brand-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+            </span>
+            <span class="ax-sidebar-title">Acadex Admin</span>
+        </a>
+
+        <!-- Dashboard -->
+        <p class="ax-sidebar-section-label">Dashboard</p>
+        <ul class="nav flex-column gap-1 mb-2">
+            <li class="nav-item">
+                <a class="nav-link {{ 'active' if request.endpoint == 'admin.index' }}" href="{{ url_for('admin.index') }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+                    <span class="ax-sidebar-title">Overview</span>
                 </a>
-                <button id="sidebarToggle" class="btn btn-sm btn-outline-secondary" type="button" title="Collapse sidebar">☰</button>
-            </div>
+            </li>
+        </ul>
 
-            <div class="mb-3">
-                <button id="themeToggle" class="btn btn-sm btn-outline-primary w-100" type="button" aria-pressed="false" title="Toggle theme">
-                    Theme
-                </button>
-            </div>
-
-            <div class="mb-3">
-                <a class="btn btn-sm btn-outline-secondary w-100" href="{{ url_for('main.landing_page') }}">← Back to Site</a>
-            </div>
-
-            <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">Dashboard</div>
-            <ul class="nav flex-column mb-3">
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.index') }}">📊 <span class="ax-sidebar-title">Overview</span></a></li>
-            </ul>
-
-            {% if current_user.has_permission('edit_courses') or current_user.has_permission('manage_datasets') %}
-                <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">Management</div>
-                <ul class="nav flex-column mb-3">
-                    {% if current_user.has_permission('edit_courses') %}
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_courses') }}">📚 <span class="ax-sidebar-title">Courses</span></a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_subjects') }}">🎯 <span class="ax-sidebar-title">Subjects</span></a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_instructors') }}">👩‍🏫 <span class="ax-sidebar-title">Instructors</span></a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_periods') }}">🕒 <span class="ax-sidebar-title">Periods</span></a></li>
-                    {% endif %}
-                    {% if current_user.has_permission('manage_datasets') %}
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_datasets') }}">🗂️ <span class="ax-sidebar-title">Datasets</span></a></li>
-                    {% endif %}
-                </ul>
+        {% if current_user.has_permission('edit_courses') or current_user.has_permission('manage_datasets') %}
+        <p class="ax-sidebar-section-label">Management</p>
+        <ul class="nav flex-column gap-1 mb-2">
+            {% if current_user.has_permission('edit_courses') %}
+            <li class="nav-item">
+                <a class="nav-link {{ 'active' if request.endpoint == 'admin.manage_courses' }}" href="{{ url_for('admin.manage_courses') }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19.5M4 19.5A2.5 2.5 0 0 0 6.5 22H20V2"/><path d="M8 7h6M8 11h8"/></svg>
+                    <span class="ax-sidebar-title">Courses</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {{ 'active' if request.endpoint == 'admin.manage_subjects' }}" href="{{ url_for('admin.manage_subjects') }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                    <span class="ax-sidebar-title">Subjects</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {{ 'active' if request.endpoint == 'admin.manage_instructors' }}" href="{{ url_for('admin.manage_instructors') }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span class="ax-sidebar-title">Instructors</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {{ 'active' if request.endpoint == 'admin.manage_periods' }}" href="{{ url_for('admin.manage_periods') }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    <span class="ax-sidebar-title">Periods</span>
+                </a>
+            </li>
             {% endif %}
+            {% if current_user.has_permission('manage_datasets') %}
+            <li class="nav-item">
+                <a class="nav-link {{ 'active' if request.endpoint == 'admin.manage_datasets' }}" href="{{ url_for('admin.manage_datasets') }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>
+                    <span class="ax-sidebar-title">Datasets</span>
+                </a>
+            </li>
+            {% endif %}
+        </ul>
+        {% endif %}
 
+        {% if current_user.has_permission('manage_users') %}
+        <p class="ax-sidebar-section-label">Users</p>
+        <ul class="nav flex-column gap-1 mb-2">
+            <li class="nav-item">
+                <a class="nav-link {{ 'active' if request.endpoint == 'admin.manage_users' }}" href="{{ url_for('admin.manage_users') }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span class="ax-sidebar-title">Users List</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {{ 'active' if request.endpoint == 'admin.manage_roles' }}" href="{{ url_for('admin.manage_roles') }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    <span class="ax-sidebar-title">Roles &amp; Permissions</span>
+                </a>
+            </li>
+        </ul>
+        {% endif %}
+
+        {% if current_user.has_permission('control_ai') or current_user.has_permission('view_analytics') %}
+        <p class="ax-sidebar-section-label">AI &amp; Analytics</p>
+        <ul class="nav flex-column gap-1 mb-2">
+            {% if current_user.has_permission('control_ai') %}
+            <li class="nav-item">
+                <a class="nav-link {{ 'active' if request.endpoint == 'admin.ai_dashboard' }}" href="{{ url_for('admin.ai_dashboard') }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4 4 4 0 0 1-4 4 4 4 0 0 1-4-4 4 4 0 0 1 4-4z"/><path d="M12 14c-6 0-8 2-8 4v2h16v-2c0-2-2-4-8-4z"/><path d="M17 7h5M2 7h5"/></svg>
+                    <span class="ax-sidebar-title">AI Control</span>
+                </a>
+            </li>
+            {% endif %}
+            {% if current_user.has_permission('view_analytics') %}
+            <li class="nav-item">
+                <a class="nav-link {{ 'active' if request.endpoint == 'admin.analytics' }}" href="{{ url_for('admin.analytics') }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
+                    <span class="ax-sidebar-title">Analytics</span>
+                </a>
+            </li>
+            {% endif %}
+        </ul>
+        {% endif %}
+
+        {% if current_user.has_permission('manage_users') or current_user.has_permission('edit_landing_page') %}
+        <p class="ax-sidebar-section-label">System</p>
+        <ul class="nav flex-column gap-1 mb-2">
             {% if current_user.has_permission('manage_users') %}
-                <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">Users</div>
-                <ul class="nav flex-column mb-3">
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_users') }}">👥 <span class="ax-sidebar-title">Users List</span></a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_roles') }}">🔐 <span class="ax-sidebar-title">Roles & Permissions</span></a></li>
-                </ul>
+            <li class="nav-item">
+                <a class="nav-link" href="{{ url_for('admin.index') }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <span class="ax-sidebar-title">Settings</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {{ 'active' if request.endpoint == 'admin.university_connection' }}" href="{{ url_for('admin.university_connection') }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                    <span class="ax-sidebar-title">University Integration</span>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {{ 'active' if request.endpoint == 'admin.manage_registration_fields' }}" href="{{ url_for('admin.manage_registration_fields') }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    <span class="ax-sidebar-title">Registration Fields</span>
+                </a>
+            </li>
             {% endif %}
-
-            {% if current_user.has_permission('control_ai') or current_user.has_permission('view_analytics') %}
-                <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">AI & Analytics</div>
-                <ul class="nav flex-column mb-3">
-                    {% if current_user.has_permission('control_ai') %}
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.ai_dashboard') }}">🤖 <span class="ax-sidebar-title">AI Control</span></a></li>
-                    {% endif %}
-                    {% if current_user.has_permission('view_analytics') %}
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.analytics') }}">📈 <span class="ax-sidebar-title">Analytics</span></a></li>
-                    {% endif %}
-                </ul>
+            {% if current_user.has_permission('edit_landing_page') %}
+            <li class="nav-item">
+                <a class="nav-link {{ 'active' if request.endpoint == 'admin.manage_landing' }}" href="{{ url_for('admin.manage_landing') }}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+                    <span class="ax-sidebar-title">Landing Management</span>
+                </a>
+            </li>
             {% endif %}
+        </ul>
+        {% endif %}
 
-            {% if current_user.has_permission('manage_users') or current_user.has_permission('edit_landing_page') %}
-                <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">System</div>
-                <ul class="nav flex-column mb-4">
-                    {% if current_user.has_permission('manage_users') %}
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.index') }}">⚙️ <span class="ax-sidebar-title">Settings</span></a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.university_connection') }}">🏛️ <span class="ax-sidebar-title">University Integration</span></a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_registration_fields') }}">🧾 <span class="ax-sidebar-title">Registration Fields</span></a></li>
-                    {% endif %}
-                    {% if current_user.has_permission('edit_landing_page') %}
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_landing') }}">🖼️ <span class="ax-sidebar-title">Landing Management</span></a></li>
-                    {% endif %}
-                </ul>
-            {% endif %}
+        <!-- Footer actions -->
+        <div class="ax-sidebar-footer mt-auto">
+            <button id="themeToggle" class="ax-sidebar-btn" type="button" aria-pressed="false">
+                <svg class="ax-icon ax-icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+                <svg class="ax-icon ax-icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.5 6.5 0 0 0 9.8 9.8Z"/></svg>
+                <span class="ax-sidebar-title">Toggle Theme</span>
+            </button>
+            <a class="ax-sidebar-btn" href="{{ url_for('main.landing_page') }}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                <span class="ax-sidebar-title">Back to Site</span>
+            </a>
+            <a class="ax-sidebar-btn danger" href="{{ url_for('admin.logout') }}">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+                <span class="ax-sidebar-title">Logout</span>
+            </a>
+        </div>
+    </aside>
 
-            <a class="btn btn-outline-danger w-100" href="{{ url_for('admin.logout') }}">Logout</a>
-        </aside>
+    <!-- ─── Main content ─── -->
+    <main class="ax-admin-main p-4 flex-grow-1">
+        <div class="container-fluid mb-5">
 
-        <main class="flex-grow-1 p-4">
-            <div class="container-fluid mb-5">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ 'success' if category == 'success' else 'danger' }} alert-dismissible fade show">
-                        {{ message }}
-                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                    </div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ 'success' if category == 'success' else 'danger' }} alert-dismissible fade show">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
 
-        {% block content %}{% endblock %}
-            </div>
-            <footer class="text-center pt-2 pb-3" style="opacity:.72; font-size:.82rem;">
-                <a href="mailto:abdulrahman.m.h30@gmail.com" class="ax-footer-credit">Made by Hasan</a>
-            </footer>
-        </main>
-    </div>
+            {% block content %}{% endblock %}
+        </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
-    <script>
-        (function () {
-            const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
-            document.querySelectorAll('form').forEach((form) => {
-                const method = (form.getAttribute('method') || 'GET').toUpperCase();
-                if (method === 'POST' && !form.querySelector('input[name="csrf_token"]')) {
-                    const input = document.createElement('input');
-                    input.type = 'hidden';
-                    input.name = 'csrf_token';
-                    input.value = token;
-                    form.appendChild(input);
-                }
-            });
+        <footer class="text-center pt-2 pb-3" style="opacity:.45; font-size:.78rem;">
+            <a href="mailto:abdulrahman.m.h30@gmail.com" class="ax-footer-credit">Made by Hasan</a>
+        </footer>
+    </main>
+</div>
 
-            const originalFetch = window.fetch;
-            window.fetch = function (input, init) {
-                init = init || {};
-                init.headers = init.headers || {};
-                if (!init.headers['X-CSRF-Token']) {
-                    init.headers['X-CSRF-Token'] = token;
-                }
-                return originalFetch(input, init);
-            };
-        })();
-    </script>
-    <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
+<script>
+    (function () {
+        const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        document.querySelectorAll('form').forEach((form) => {
+            const method = (form.getAttribute('method') || 'GET').toUpperCase();
+            if (method === 'POST' && !form.querySelector('input[name="csrf_token"]')) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'csrf_token';
+                input.value = token;
+                form.appendChild(input);
+            }
+        });
+        const originalFetch = window.fetch;
+        window.fetch = function (input, init) {
+            init = init || {};
+            init.headers = init.headers || {};
+            if (!init.headers['X-CSRF-Token']) init.headers['X-CSRF-Token'] = token;
+            return originalFetch(input, init);
+        };
+    })();
+</script>
+<script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+{% block extra_scripts %}{% endblock %}
 </body>
 </html>
