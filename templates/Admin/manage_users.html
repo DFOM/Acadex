@@ -13,6 +13,8 @@
                 <tr>
                     <th>ID</th>
                     <th>Username</th>
+                    <th>Email</th>
+                    <th>Role</th>
                     <th>Gender</th>
                     <th>Expected Graduation</th>
                     <th>Actions</th>
@@ -23,6 +25,18 @@
                 <tr>
                     <td>{{ user.id }}</td>
                     <td>{{ user.username }}</td>
+                    <td>{{ user.email or '—' }}</td>
+                    <td>
+                        <form method="POST" action="{{ url_for('admin.assign_user_role') }}" class="d-flex gap-2 align-items-center">
+                            <input type="hidden" name="user_id" value="{{ user.id }}">
+                            <select name="role_id" class="form-select form-select-sm">
+                                {% for role in roles %}
+                                <option value="{{ role.id }}" {% if user.role_id == role.id or (not user.role_id and user.role == role.name) %}selected{% endif %}>{{ role.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <button class="btn btn-sm btn-outline-primary" type="submit">Assign</button>
+                        </form>
+                    </td>
                     <td>{{ user.gender or '—' }}</td>
                     <td>{{ user.expected_graduation or '—' }}</td>
                     <td>
@@ -34,7 +48,7 @@
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="5" class="text-center">No users found.</td></tr>
+                <tr><td colspan="7" class="text-center">No users found.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

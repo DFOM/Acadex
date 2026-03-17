@@ -3,6 +3,13 @@
 $(document).ready(function() {
 
     // ==========================================
+    // SIDEBAR TOGGLE
+    // ==========================================
+    $('#sidebarToggle').on('click', function() {
+        document.body.classList.toggle('admin-sidebar-collapsed');
+    });
+
+    // ==========================================
     // 0. SMART DATATABLES WITH DROPDOWN FILTERS
     // ==========================================
     $('.smart-table').each(function() {

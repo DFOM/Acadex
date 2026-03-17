@@ -9,7 +9,7 @@ from functools import wraps
 from werkzeug.utils import secure_filename
 from sqlalchemy import inspect, text
 import sqlalchemy as sa
-from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification
+from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField
 from utils import (
     get_course_data_tables,
     calculate_gpa,
@@ -43,25 +43,91 @@ def _minutes_to_hhmm(total_minutes: int) -> str:
 
 admin_bp = Blueprint('admin', __name__)
 
+
+ENDPOINT_PERMISSION_MAP = {
+    'admin.manage_datasets': 'manage_datasets',
+    'admin.upload_dataset': 'manage_datasets',
+    'admin.delete_dataset': 'manage_datasets',
+    'admin.manage_users': 'manage_users',
+    'admin.update_user_demographics': 'manage_users',
+    'admin.delete_user': 'manage_users',
+    'admin.manage_roles': 'manage_users',
+    'admin.assign_user_role': 'manage_users',
+    'admin.manage_registration_fields': 'manage_users',
+    'admin.analytics': 'view_analytics',
+    'admin.analytics_data_api': 'view_analytics',
+    'admin.analytics_overrides_api': 'view_analytics',
+    'admin.analytics_export': 'view_analytics',
+    'admin.manage_courses': 'edit_courses',
+    'admin.api_update_course': 'edit_courses',
+    'admin.manage_subjects': 'edit_courses',
+    'admin.api_update_subject_area': 'edit_courses',
+    'admin.manage_instructors': 'edit_courses',
+    'admin.api_update_instructor': 'edit_courses',
+    'admin.api_delete_instructor': 'edit_courses',
+    'admin.manage_periods': 'edit_courses',
+    'admin.update_period': 'edit_courses',
+    'admin.api_create_period': 'edit_courses',
+    'admin.api_update_period_full': 'edit_courses',
+    'admin.api_delete_period': 'edit_courses',
+    'admin.api_update_lunch_settings': 'edit_courses',
+    'admin.ai_dashboard': 'control_ai',
+    'admin.ai_settings_update': 'control_ai',
+    'admin.ai_export_events_csv': 'control_ai',
+    'admin.ai_export_behavior_events_csv': 'control_ai',
+    'admin.manage_landing': 'edit_landing_page',
+    'admin.create_announcement': 'edit_landing_page',
+    'admin.edit_announcement': 'edit_landing_page',
+    'admin.toggle_announcement': 'edit_landing_page',
+    'admin.delete_announcement': 'edit_landing_page',
+    'admin.update_app_settings_route': 'manage_users',
+    'admin.university_connection': 'manage_users',
+}
+
+
+def _wants_json_response() -> bool:
+    return (
+        request.path.startswith('/admin/api/')
+        or request.is_json
+        or request.accept_mimetypes.best == 'application/json'
+    )
+
+
+def _deny_admin_access(message: str, status_code: int = 403):
+    if _wants_json_response():
+        return jsonify({'success': False, 'message': message}), status_code
+    flash(message, 'error')
+    if current_user.is_authenticated:
+        return redirect(url_for('student.user_dashboard'))
+    return redirect(url_for('auth.login', next=request.url))
+
+
+@admin_bp.before_request
+def _enforce_admin_access_control():
+    if request.endpoint in {'admin.login', 'admin.logout'}:
+        return None
+
+    # Security: every admin request is validated server-side per request.
+    # We never trust client-side UI visibility; permissions are checked here before route handlers run.
+    if not current_user.is_authenticated:
+        return _deny_admin_access('Authentication required.', status_code=401)
+
+    if not current_user.can_access_admin_panel():
+        return _deny_admin_access('Admin access required.')
+
+    required_permission = ENDPOINT_PERMISSION_MAP.get(request.endpoint)
+    # Security: role permissions are stored in DB and resolved from the authenticated user role.
+    # This prevents privilege escalation by blocking operations when role permission is missing.
+    if required_permission and not current_user.has_permission(required_permission):
+        return _deny_admin_access('You do not have permission for this action.')
+    return None
+
 # --- SECURITY WRAPPER ---
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        is_admin = bool(getattr(current_user, 'is_admin', False))
-        if not current_user.is_authenticated or not is_admin:
-            wants_json = (
-                request.path.startswith('/admin/api/')
-                or request.is_json
-                or request.accept_mimetypes.best == 'application/json'
-            )
-
-            if wants_json:
-                return jsonify({'success': False, 'message': 'Admin privileges required.'}), 403
-
-            flash("Unauthorized access. Admin privileges required.", "error")
-            if current_user.is_authenticated:
-                return redirect(url_for('student.user_dashboard'))
-            return redirect(url_for('auth.login', next=request.url))
+        if not current_user.is_authenticated or not current_user.can_access_admin_panel():
+            return _deny_admin_access('Admin privileges required.')
         return f(*args, **kwargs)
     return decorated_function
 
@@ -89,6 +155,16 @@ def _safe_float(value, default: float = 0.0) -> float:
 
 def _setting_truthy(value: str) -> bool:
     return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _admin_user_count() -> int:
+    admin_role = Role.query.filter_by(name='admin').first()
+    admin_role_id = admin_role.id if admin_role else -1
+    return User.query.filter(
+        (User.is_admin.is_(True))
+        | (User.role_id == admin_role_id)
+        | (sa.func.lower(sa.func.coalesce(User.role, '')) == 'admin')
+    ).count()
 
 
 def _normalize_area_type(value: str) -> str:
@@ -244,6 +320,8 @@ def index():
     user_count = User.query.count()
     schedule_count = Schedule.query.count()
     course_tables = get_course_data_tables()
+    notification_count = Notification.query.count()
+    announcement_count = Announcement.query.count()
     
     # SQLAlchemy Core execution for complex joins
     all_schedules = db.session.execute(text('''
@@ -256,6 +334,8 @@ def index():
     return render_template('Admin/admin_dashboard.html', 
                            user_count=user_count, 
                            schedule_count=schedule_count,
+                           notification_count=notification_count,
+                           announcement_count=announcement_count,
                            course_tables=course_tables,
                            all_schedules=[dict(row._mapping) for row in all_schedules],
                            current_year_setting=get_app_setting('current_year', '2025'), 
@@ -656,7 +736,207 @@ def manage_periods():
 @admin_required
 def manage_users():
     users = User.query.order_by(User.id.asc()).all()
-    return render_template('Admin/manage_users.html', users=users)
+    roles = Role.query.order_by(Role.name.asc()).all()
+    return render_template('Admin/manage_users.html', users=users, roles=roles)
+
+
+@admin_bp.route('/roles', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def manage_roles():
+    permissions = Permission.query.order_by(Permission.label.asc()).all()
+    if request.method == 'POST':
+        action = (request.form.get('action') or '').strip()
+
+        if action == 'create':
+            name = (request.form.get('name') or '').strip().lower()
+            description = (request.form.get('description') or '').strip()
+            if not name:
+                flash('Role name is required.', 'error')
+                return redirect(url_for('admin.manage_roles'))
+            existing = Role.query.filter(sa.func.lower(Role.name) == name).first()
+            if existing:
+                flash('Role already exists.', 'error')
+                return redirect(url_for('admin.manage_roles'))
+
+            role = Role(name=name, description=description, is_system=False)
+            selected = set(request.form.getlist('permission_keys'))
+            role.permissions = [p for p in permissions if p.key in selected]
+            db.session.add(role)
+            db.session.commit()
+            flash('Role created.', 'success')
+            return redirect(url_for('admin.manage_roles'))
+
+        if action == 'update':
+            role_id = request.form.get('role_id', type=int)
+            role = Role.query.get(role_id)
+            if not role:
+                flash('Role not found.', 'error')
+                return redirect(url_for('admin.manage_roles'))
+            if role.is_system and role.name == 'admin':
+                role.name = 'admin'
+
+            if not role.is_system:
+                role.name = (request.form.get('name') or role.name).strip().lower() or role.name
+            role.description = (request.form.get('description') or '').strip() or role.description
+
+            selected = set(request.form.getlist('permission_keys'))
+            if role.name == 'admin':
+                role.permissions = permissions
+            else:
+                role.permissions = [p for p in permissions if p.key in selected]
+            db.session.commit()
+            flash('Role updated.', 'success')
+            return redirect(url_for('admin.manage_roles'))
+
+        if action == 'delete':
+            role_id = request.form.get('role_id', type=int)
+            role = Role.query.get(role_id)
+            if not role:
+                flash('Role not found.', 'error')
+                return redirect(url_for('admin.manage_roles'))
+            if role.is_system:
+                flash('System roles cannot be deleted.', 'error')
+                return redirect(url_for('admin.manage_roles'))
+            affected_users = User.query.filter_by(role_id=role.id).all()
+            user_role = Role.query.filter_by(name='user').first()
+            fallback_role_id = user_role.id if user_role else None
+            for user in affected_users:
+                user.role_id = fallback_role_id
+                user.role = 'user'
+                user.is_admin = False
+            db.session.delete(role)
+            db.session.commit()
+            flash('Role deleted.', 'success')
+            return redirect(url_for('admin.manage_roles'))
+
+    roles = Role.query.order_by(Role.name.asc()).all()
+    return render_template('Admin/roles.html', roles=roles, permissions=permissions)
+
+
+@admin_bp.route('/roles/assign', methods=['POST'])
+@login_required
+@admin_required
+def assign_user_role():
+    user_id = request.form.get('user_id', type=int)
+    role_id = request.form.get('role_id', type=int)
+    target = User.query.get(user_id)
+    role = Role.query.get(role_id)
+
+    if not target or not role:
+        flash('Invalid role assignment request.', 'error')
+        return redirect(url_for('admin.manage_users'))
+
+    if current_user.id == target.id and role.name == 'admin' and not current_user.is_admin:
+        flash('You cannot self-assign admin access.', 'error')
+        return redirect(url_for('admin.manage_users'))
+
+    if not current_user.is_admin and role.name == 'admin':
+        flash('Only admins can assign the admin role.', 'error')
+        return redirect(url_for('admin.manage_users'))
+
+    if not current_user.is_admin:
+        missing = [p.key for p in role.permissions if not current_user.has_permission(p.key)]
+        if missing:
+            flash('You cannot assign a role with permissions you do not have.', 'error')
+            return redirect(url_for('admin.manage_users'))
+
+    previous_was_admin = bool(target.is_admin or target.effective_role_name() == 'admin')
+
+    target.role_id = role.id
+    target.role = role.name
+    target.is_admin = (role.name == 'admin')
+
+    if previous_was_admin and role.name != 'admin' and _admin_user_count() <= 1:
+        db.session.rollback()
+        flash('At least one admin account must exist.', 'error')
+        return redirect(url_for('admin.manage_users'))
+
+    db.session.commit()
+    flash('User role updated.', 'success')
+    return redirect(url_for('admin.manage_users'))
+
+
+@admin_bp.route('/registration_fields', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def manage_registration_fields():
+    if request.method == 'POST':
+        action = (request.form.get('action') or '').strip()
+        if action == 'create':
+            field_key = (request.form.get('field_key') or '').strip().lower()
+            label = (request.form.get('label') or '').strip()
+            input_type = (request.form.get('input_type') or 'text').strip().lower()
+            options_raw = (request.form.get('options_csv') or '').strip()
+            if not field_key or not label:
+                flash('Field key and label are required.', 'error')
+                return redirect(url_for('admin.manage_registration_fields'))
+            if RegistrationField.query.filter_by(field_key=field_key).first():
+                flash('Field key already exists.', 'error')
+                return redirect(url_for('admin.manage_registration_fields'))
+            if input_type not in {'text', 'textarea', 'select'}:
+                input_type = 'text'
+
+            options_json = None
+            if input_type == 'select' and options_raw:
+                options = [x.strip() for x in options_raw.split(',') if x.strip()]
+                options_json = json.dumps(options)
+
+            db.session.add(
+                RegistrationField(
+                    field_key=field_key,
+                    label=label,
+                    input_type=input_type,
+                    options_json=options_json,
+                    is_required=('is_required' in request.form),
+                    is_active=('is_active' in request.form),
+                    display_order=request.form.get('display_order', type=int) or 0,
+                )
+            )
+            db.session.commit()
+            flash('Registration field created.', 'success')
+            return redirect(url_for('admin.manage_registration_fields'))
+
+        if action == 'update':
+            field_id = request.form.get('field_id', type=int)
+            field = RegistrationField.query.get(field_id)
+            if not field:
+                flash('Field not found.', 'error')
+                return redirect(url_for('admin.manage_registration_fields'))
+
+            field.label = (request.form.get('label') or field.label).strip() or field.label
+            field.is_required = ('is_required' in request.form)
+            field.is_active = ('is_active' in request.form)
+            field.display_order = request.form.get('display_order', type=int) or field.display_order
+
+            input_type = (request.form.get('input_type') or field.input_type).strip().lower()
+            if input_type not in {'text', 'textarea', 'select'}:
+                input_type = 'text'
+            field.input_type = input_type
+
+            options_raw = (request.form.get('options_csv') or '').strip()
+            if field.input_type == 'select':
+                options = [x.strip() for x in options_raw.split(',') if x.strip()]
+                field.options_json = json.dumps(options)
+            else:
+                field.options_json = None
+            db.session.commit()
+            flash('Registration field updated.', 'success')
+            return redirect(url_for('admin.manage_registration_fields'))
+
+        if action == 'delete':
+            field_id = request.form.get('field_id', type=int)
+            field = RegistrationField.query.get(field_id)
+            if field and field.field_key not in {'gender', 'career_interests'}:
+                db.session.delete(field)
+                db.session.commit()
+                flash('Registration field deleted.', 'success')
+            else:
+                flash('This field cannot be deleted.', 'error')
+            return redirect(url_for('admin.manage_registration_fields'))
+
+    fields = RegistrationField.query.order_by(RegistrationField.display_order.asc(), RegistrationField.id.asc()).all()
+    return render_template('Admin/registration_fields.html', fields=fields)
 
 @admin_bp.route('/api/update_user_demographics', methods=['POST'])
 @login_required
@@ -708,6 +988,10 @@ def delete_user(user_id):
     try:
         user = User.query.get(user_id)
         if user:
+            if user.id == current_user.id:
+                return jsonify({'success': False, 'message': 'You cannot delete your own account.'}), 400
+            if (user.is_admin or user.effective_role_name() == 'admin') and _admin_user_count() <= 1:
+                return jsonify({'success': False, 'message': 'At least one admin account must exist.'}), 400
             db.session.delete(user)
             db.session.commit()
             return jsonify({'success': True})

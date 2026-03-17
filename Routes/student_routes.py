@@ -1,12 +1,15 @@
 # Routes/student_routes.py
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session, current_app
 from flask_login import login_required, current_user
 from sqlalchemy import text, or_, and_, inspect
 import uuid
 import re
 import json
+import os
 from datetime import datetime
 from typing import Optional, Dict, Any, Set, Iterable
+from werkzeug.utils import secure_filename
+from werkzeug.security import check_password_hash, generate_password_hash
 from models import db, User, Schedule, ScheduleCourse, Period, Setting, Announcement, AIEvent, BehaviorEvent, Notification, SubjectArea
 from utils import (
     get_best_course_table,
@@ -24,6 +27,11 @@ from services.ai.recommendations import recommend_courses
 from services.ai.generator import generate_schedule_courses
 
 student_bp = Blueprint('student', __name__)
+
+
+def _allowed_profile_image(filename: str) -> bool:
+    ext = (filename.rsplit('.', 1)[-1] if '.' in filename else '').strip().lower()
+    return ext in {'png', 'jpg', 'jpeg', 'webp', 'gif'}
 
 
 def get_str_setting(key: str, default: str = '') -> str:
@@ -1251,6 +1259,83 @@ def user_dashboard():
                            dataset_years=dataset_years,
                            notifications=notifications,
                            unread_notifications_count=unread_notifications_count)
+
+
+@student_bp.route('/profile', methods=['GET', 'POST'])
+@login_required
+def profile():
+    majors = SubjectArea.query.filter(
+        SubjectArea.is_active.is_(True),
+        or_(SubjectArea.area_type == 'major', SubjectArea.area_type == 'both'),
+    ).order_by(SubjectArea.name.asc()).all()
+    minors = SubjectArea.query.filter(
+        SubjectArea.is_active.is_(True),
+        or_(SubjectArea.area_type == 'minor', SubjectArea.area_type == 'both'),
+    ).order_by(SubjectArea.name.asc()).all()
+
+    if request.method == 'POST':
+        full_name = (request.form.get('full_name') or '').strip()
+        email = (request.form.get('email') or '').strip().lower()
+        gender = (request.form.get('gender') or '').strip() or None
+        career_interests = (request.form.get('career_interests') or '').strip() or None
+        major_subject_area_id = request.form.get('major_subject_area_id', type=int)
+        minor_subject_area_id = request.form.get('minor_subject_area_id', type=int)
+
+        if not full_name:
+            flash('Name is required.', 'error')
+            return render_template('Student/profile.html', majors=majors, minors=minors)
+
+        email_regex = r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+        if not email or not re.match(email_regex, email):
+            flash('Please provide a valid email address.', 'error')
+            return render_template('Student/profile.html', majors=majors, minors=minors)
+
+        existing_email = User.query.filter(User.email == email, User.id != current_user.id).first()
+        if existing_email:
+            flash('Email already in use by another account.', 'error')
+            return render_template('Student/profile.html', majors=majors, minors=minors)
+
+        if not major_subject_area_id or not minor_subject_area_id:
+            flash('Major and minor are required.', 'error')
+            return render_template('Student/profile.html', majors=majors, minors=minors)
+
+        current_user.full_name = full_name
+        current_user.email = email
+        current_user.gender = gender
+        current_user.career_interests = career_interests
+        current_user.major_subject_area_id = major_subject_area_id
+        current_user.minor_subject_area_id = minor_subject_area_id
+
+        image_file = request.files.get('profile_image')
+        if image_file and image_file.filename:
+            if not _allowed_profile_image(image_file.filename):
+                flash('Profile image must be png, jpg, jpeg, webp, or gif.', 'error')
+                return render_template('Student/profile.html', majors=majors, minors=minors)
+            filename = secure_filename(f"user_{current_user.id}_{image_file.filename}")
+            profile_dir = current_app.config.get('PROFILE_UPLOAD_FOLDER', os.path.join('uploads', 'profile_images'))
+            os.makedirs(profile_dir, exist_ok=True)
+            file_path = os.path.join(profile_dir, filename)
+            image_file.save(file_path)
+            current_user.profile_image_path = file_path
+
+        old_password = request.form.get('old_password') or ''
+        new_password = request.form.get('new_password') or ''
+        confirm_new_password = request.form.get('confirm_new_password') or ''
+
+        if new_password or confirm_new_password:
+            if not old_password or not check_password_hash(current_user.password, old_password):
+                flash('Old password is incorrect.', 'error')
+                return render_template('Student/profile.html', majors=majors, minors=minors)
+            if new_password != confirm_new_password:
+                flash('New passwords do not match.', 'error')
+                return render_template('Student/profile.html', majors=majors, minors=minors)
+            current_user.password = generate_password_hash(new_password, method='pbkdf2:sha256')
+
+        db.session.commit()
+        flash('Profile updated successfully.', 'success')
+        return redirect(url_for('student.profile'))
+
+    return render_template('Student/profile.html', majors=majors, minors=minors)
 
 
 @student_bp.route('/notifications/<int:notif_id>/mark_read', methods=['POST'])

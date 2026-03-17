@@ -53,7 +53,13 @@
                             </a>
                         </li>
 
-                        {% if current_user.is_admin %}
+                        <li class="nav-item">
+                            <a class="nav-link px-3" href="{{ url_for('student.profile') }}">
+                                Profile
+                            </a>
+                        </li>
+
+                        {% if current_user.can_access_admin_panel() %}
                         <li class="nav-item ms-lg-2 me-lg-2">
                             <a class="nav-link fw-bold" href="{{ url_for('admin.index') }}" style="color: var(--ax-primary);">
                                 Admin

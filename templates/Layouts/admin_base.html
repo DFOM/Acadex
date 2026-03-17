@@ -19,51 +19,61 @@
     <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg ax-navbar sticky-top">
-        <div class="container-fluid">
-            <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="{{ url_for('admin.index') }}" style="color: var(--ax-text);">
-                <img src="{{ url_for('static', filename='img/acadex-icon.svg') }}" alt="Acadex" width="28" height="28">
-                <span>Acadex Admin</span>
-            </a>
-            <div class="collapse navbar-collapse">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item me-2">
-                        <button id="themeToggle" class="btn btn-sm btn-outline-primary" type="button" aria-pressed="false" title="Toggle theme">
-                            <span class="d-inline-flex align-items-center gap-2">
-                                <svg class="ax-icon ax-icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <circle cx="12" cy="12" r="4"/>
-                                    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
-                                </svg>
-                                <svg class="ax-icon ax-icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.5 6.5 0 0 0 9.8 9.8Z"/>
-                                </svg>
-                                <span class="d-none d-md-inline">Theme</span>
-                            </span>
-                        </button>
-                    </li>
-
-                    <li class="nav-item"><a class="nav-link fw-bold" href="{{ url_for('admin.analytics') }}">Analytics</a></li>
-
-                    <li class="nav-item"><a class="nav-link fw-bold" href="{{ url_for('admin.ai_dashboard') }}">AI</a></li>
-
-                    <li class="nav-item"><a class="nav-link fw-bold" href="{{ url_for('admin.manage_landing') }}">Landing</a></li>
-
-                    <li class="nav-item"><a class="nav-link fw-bold" href="{{ url_for('admin.university_connection') }}">University Connection</a></li>
-                    
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_users') }}">Users</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_datasets') }}">Course Catalogs</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_subjects') }}">Subjects</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_instructors') }}">Instructors</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_courses') }}">Courses</a></li>
-                    <li class="nav-item"><a class="nav-link text-info fw-bold" href="{{ url_for('admin.manage_periods') }}">Periods</a></li>
-                    
-                    <li class="nav-item"><a class="nav-link text-danger ms-3" href="{{ url_for('admin.logout') }}">Logout</a></li>
-                </ul>
+    <div class="d-flex min-vh-100">
+        <aside id="adminSidebar" class="border-end p-3" style="width: 300px; background: var(--ax-surface);">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <a class="navbar-brand fw-bold d-flex align-items-center gap-2 m-0" href="{{ url_for('admin.index') }}" style="color: var(--ax-text);">
+                    <img src="{{ url_for('static', filename='img/acadex-icon.svg') }}" alt="Acadex" width="28" height="28">
+                    <span class="ax-sidebar-title">Acadex Admin</span>
+                </a>
+                <button id="sidebarToggle" class="btn btn-sm btn-outline-secondary" type="button" title="Collapse sidebar">☰</button>
             </div>
-        </div>
-    </nav>
 
-    <div class="container mb-5">
+            <div class="mb-3">
+                <button id="themeToggle" class="btn btn-sm btn-outline-primary w-100" type="button" aria-pressed="false" title="Toggle theme">
+                    Theme
+                </button>
+            </div>
+
+            <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">Dashboard</div>
+            <ul class="nav flex-column mb-3">
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.index') }}">📊 <span class="ax-sidebar-title">Overview</span></a></li>
+            </ul>
+
+            <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">Management</div>
+            <ul class="nav flex-column mb-3">
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_courses') }}">📚 <span class="ax-sidebar-title">Courses</span></a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_datasets') }}">🗂️ <span class="ax-sidebar-title">Datasets</span></a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_subjects') }}">🎯 <span class="ax-sidebar-title">Subjects</span></a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_instructors') }}">👩‍🏫 <span class="ax-sidebar-title">Instructors</span></a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_periods') }}">🕒 <span class="ax-sidebar-title">Periods</span></a></li>
+            </ul>
+
+            <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">Users</div>
+            <ul class="nav flex-column mb-3">
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_users') }}">👥 <span class="ax-sidebar-title">Users List</span></a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_roles') }}">🔐 <span class="ax-sidebar-title">Roles & Permissions</span></a></li>
+            </ul>
+
+            <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">AI & Analytics</div>
+            <ul class="nav flex-column mb-3">
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.ai_dashboard') }}">🤖 <span class="ax-sidebar-title">AI Control</span></a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.analytics') }}">📈 <span class="ax-sidebar-title">Analytics</span></a></li>
+            </ul>
+
+            <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">System</div>
+            <ul class="nav flex-column mb-4">
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.index') }}">⚙️ <span class="ax-sidebar-title">Settings</span></a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.university_connection') }}">🏛️ <span class="ax-sidebar-title">University Integration</span></a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_landing') }}">🖼️ <span class="ax-sidebar-title">Landing Management</span></a></li>
+                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_registration_fields') }}">🧾 <span class="ax-sidebar-title">Registration Fields</span></a></li>
+            </ul>
+
+            <a class="btn btn-outline-danger w-100" href="{{ url_for('admin.logout') }}">Logout</a>
+        </aside>
+
+        <main class="flex-grow-1 p-4">
+            <div class="container-fluid mb-5">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
@@ -76,6 +86,8 @@
         {% endwith %}
 
         {% block content %}{% endblock %}
+            </div>
+        </main>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

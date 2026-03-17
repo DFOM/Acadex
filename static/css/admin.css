@@ -73,3 +73,21 @@
 .admin-btn-primary:hover {
     background-color: color-mix(in srgb, var(--ax-primary) 86%, black);
 }
+
+#adminSidebar .nav-link {
+    color: var(--ax-text);
+    border-radius: 0.5rem;
+    padding: 0.45rem 0.6rem;
+}
+
+#adminSidebar .nav-link:hover {
+    background: color-mix(in srgb, var(--ax-primary) 14%, transparent);
+}
+
+body.admin-sidebar-collapsed #adminSidebar {
+    width: 72px !important;
+}
+
+body.admin-sidebar-collapsed .ax-sidebar-title {
+    display: none !important;
+}

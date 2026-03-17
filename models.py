@@ -6,13 +6,77 @@ from datetime import datetime
 # Initialize the SQLAlchemy object
 db = SQLAlchemy()
 
+
+role_permissions = db.Table(
+    'role_permissions',
+    db.Column('role_id', db.Integer, db.ForeignKey('roles.id'), primary_key=True),
+    db.Column('permission_id', db.Integer, db.ForeignKey('permissions.id'), primary_key=True),
+)
+
+
+class Role(db.Model):
+    __tablename__ = 'roles'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), unique=True, nullable=False)
+    description = db.Column(db.String(255), nullable=True)
+    is_system = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    permissions = db.relationship('Permission', secondary=role_permissions, lazy='subquery', backref='roles')
+
+
+class Permission(db.Model):
+    __tablename__ = 'permissions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(80), unique=True, nullable=False)
+    label = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class RegistrationField(db.Model):
+    __tablename__ = 'registration_fields'
+
+    id = db.Column(db.Integer, primary_key=True)
+    field_key = db.Column(db.String(80), unique=True, nullable=False)
+    label = db.Column(db.String(120), nullable=False)
+    input_type = db.Column(db.String(30), default='text', nullable=False)
+    options_json = db.Column(db.Text, nullable=True)
+    is_required = db.Column(db.Boolean, default=False, nullable=False)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    display_order = db.Column(db.Integer, default=0, nullable=False)
+
+
+class LoginAttempt(db.Model):
+    __tablename__ = 'login_attempts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    identity = db.Column(db.String(255), nullable=False, index=True)
+    ip_address = db.Column(db.String(64), nullable=True, index=True)
+    success = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    attempted_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+RBAC_PERMISSION_KEYS = (
+    'view_analytics',
+    'edit_courses',
+    'manage_datasets',
+    'manage_users',
+    'control_ai',
+    'edit_landing_page',
+)
+
 class User(db.Model, UserMixin):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(150), unique=True, nullable=False)
+    full_name = db.Column(db.String(150), nullable=True)
     email = db.Column(db.String(255), unique=True, nullable=True)
     password = db.Column(db.String(150), nullable=False)
     role = db.Column(db.String(50), default='student')
+    role_id = db.Column(db.Integer, db.ForeignKey('roles.id'), nullable=True, index=True)
     is_admin = db.Column(db.Boolean, default=False, nullable=False)
 
     # AI consent (opt-in)
@@ -20,12 +84,41 @@ class User(db.Model, UserMixin):
     
     # Demographics
     gender = db.Column(db.String(50), nullable=True)
+    career_interests = db.Column(db.Text, nullable=True)
+    extra_profile_json = db.Column(db.Text, nullable=True)
+    profile_image_path = db.Column(db.String(255), nullable=True)
     expected_graduation = db.Column(db.Integer, nullable=True)
     major_subject_area_id = db.Column(db.Integer, db.ForeignKey('subject_areas.id'), nullable=True)
     minor_subject_area_id = db.Column(db.Integer, db.ForeignKey('subject_areas.id'), nullable=True)
+    two_factor_enabled = db.Column(db.Boolean, default=False, nullable=False)
+    two_factor_secret = db.Column(db.String(255), nullable=True)
     
     # Relationship: If a user is deleted, all their schedules are automatically deleted
     schedules = db.relationship('Schedule', backref='student', lazy=True, cascade="all, delete-orphan")
+    assigned_role = db.relationship('Role', backref='users', lazy=True)
+
+    @property
+    def display_name(self) -> str:
+        return (self.full_name or self.username or '').strip()
+
+    def effective_role_name(self) -> str:
+        if self.assigned_role and self.assigned_role.name:
+            return str(self.assigned_role.name).strip().lower()
+        return str(self.role or 'user').strip().lower()
+
+    def has_permission(self, permission_key: str) -> bool:
+        role_name = self.effective_role_name()
+        if self.is_admin or role_name == 'admin':
+            return True
+        if not self.assigned_role:
+            return False
+        wanted = str(permission_key or '').strip().lower()
+        return any(str(p.key or '').strip().lower() == wanted for p in self.assigned_role.permissions)
+
+    def can_access_admin_panel(self) -> bool:
+        if self.is_admin or self.effective_role_name() in {'admin', 'moderator'}:
+            return True
+        return any(self.has_permission(k) for k in RBAC_PERMISSION_KEYS)
 
 class Schedule(db.Model):
     __tablename__ = 'schedules'
