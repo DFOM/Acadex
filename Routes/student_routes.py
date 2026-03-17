@@ -547,17 +547,35 @@ def remove_course_post():
 @student_bp.route('/api/update_grade', methods=['POST'])
 @login_required
 def update_grade():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     entry_id = data.get('entry_id')
     grade = data.get('grade')
-    
-    course_entry = ScheduleCourse.query.get(entry_id)
-    if not course_entry or course_entry.schedule.user_id != current_user.id:
-        return jsonify({'success': False, 'message': 'Unauthorized or not found'}), 403
-        
+
+    if entry_id is None:
+        return jsonify({'success': False, 'message': 'Missing entry_id'}), 400
+    try:
+        entry_id_int = int(entry_id)
+    except Exception:
+        return jsonify({'success': False, 'message': 'Invalid entry_id'}), 400
+
+    allowed_grades = {'', None, 'A', 'B', 'C', 'D', 'F'}
+    if grade not in allowed_grades:
+        return jsonify({'success': False, 'message': 'Invalid grade'}), 400
+
+    course_entry = ScheduleCourse.query.get(entry_id_int)
+    if not course_entry:
+        return jsonify({'success': False, 'message': 'Not found'}), 404
+
+    # Defense-in-depth: even though this route is login-protected, ensure the target
+    # entry belongs to a registered user's schedule (not a guest/session schedule).
+    if course_entry.schedule.user_id is None:
+        return jsonify({'success': False, 'message': 'Grades are only available for registered users'}), 403
+    if course_entry.schedule.user_id != current_user.id:
+        return jsonify({'success': False, 'message': 'Unauthorized'}), 403
+
     course_entry.grade = grade
     db.session.commit()
-    
+
     return jsonify({'success': True})
 
 
