@@ -16,9 +16,15 @@
         <h2 class="mb-0">Editing Plan: <span class="text-primary fw-bold">{{ schedule.schedule_name }}</span></h2>
         <small class="text-muted fw-bold">{{ schedule.semester }} {{ schedule.year }} <span class="badge {{ 'bg-secondary' if schedule.schedule_type == 'past' else 'bg-warning text-dark' }} rounded-pill ms-2">{{ schedule.schedule_type | upper }}</span></small>
     </div>
-    <a href="{{ url_for('schedule.user_dashboard') }}" class="btn btn-success btn-lg shadow-sm fw-bold px-4">
+    {% if current_user.is_authenticated %}
+    <a href="{{ url_for('student.user_dashboard') }}" class="btn btn-success btn-lg shadow-sm fw-bold px-4">
         ✅ Finish & Save Plan
     </a>
+    {% else %}
+    <a href="{{ url_for('main.landing_page') }}" class="btn btn-success btn-lg shadow-sm fw-bold px-4">
+        ✅ Finish & Save Plan
+    </a>
+    {% endif %}
 </div>
 
 <div class="row">
@@ -145,6 +151,7 @@
                                         <td class="small">{{ course.Credits }}</td>
                                         <td><span class="badge bg-info text-dark" style="font-size: 0.65rem;">{{ course.Day_and_Period or 'TBA' }}</span></td>
                                         <td>
+                                            {% if current_user.is_authenticated %}
                                             <select class="form-select form-select-sm border-0 bg-light shadow-sm grade-select" data-entry-id="{{ course.entry_id }}" style="width: 75px; font-size: 0.75rem; font-weight: bold;">
                                                 <option value="" {% if not course.grade %}selected{% endif %}>--</option>
                                                 <option value="A" {% if course.grade == 'A' %}selected{% endif %}>A</option>
@@ -153,6 +160,9 @@
                                                 <option value="D" {% if course.grade == 'D' %}selected{% endif %}>D</option>
                                                 <option value="F" {% if course.grade == 'F' %}selected{% endif %}>F</option>
                                             </select>
+                                            {% else %}
+                                            <span class="text-muted small">—</span>
+                                            {% endif %}
                                         </td>
                                         <td class="text-end pe-3">
                                             <button class="btn btn-sm btn-outline-danger remove-course-btn drop-no-confirm py-0 px-2 shadow-sm fw-bold" data-entry-id="{{ course.entry_id }}">✖</button>

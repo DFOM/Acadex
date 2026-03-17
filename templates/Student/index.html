@@ -62,9 +62,15 @@
         </div>
 
         <div class="d-grid gap-3 d-sm-flex justify-content-sm-center">
-            <a href="{{ url_for('student.create_schedule') }}" class="btn btn-primary btn-lg px-5 shadow-sm rounded-pill">
+            {% if current_user.is_authenticated %}
+            <a href="{{ url_for('auth.choose_schedule_type') }}" class="btn btn-primary btn-lg px-5 shadow-sm rounded-pill">
                 <i class="bi bi-calendar-plus me-2"></i>Start Planning
             </a>
+            {% else %}
+            <a href="{{ url_for('student.create_schedule', schedule_type='future') }}" class="btn btn-primary btn-lg px-5 shadow-sm rounded-pill">
+                <i class="bi bi-calendar-plus me-2"></i>Start Planning
+            </a>
+            {% endif %}
             {% if not current_user.is_authenticated %}
             <a href="{{ url_for('auth.register') }}" class="btn btn-outline-dark btn-lg px-5 shadow-sm rounded-pill">
                 <i class="bi bi-person-plus me-2"></i>Register for Premium
@@ -173,7 +179,7 @@
                         {% else %}
                             <div class="text-center py-3">
                                 <p class="text-muted mb-3">You haven't built any schedules yet.</p>
-                                <a href="{{ url_for('student.create_schedule') }}" class="btn btn-outline-primary rounded-pill w-100">Start Planning Now</a>
+                                <a href="{{ url_for('student.create_schedule', schedule_type='future') }}" class="btn btn-outline-primary rounded-pill w-100">Start Planning Now</a>
                             </div>
                         {% endif %}
                     </div>

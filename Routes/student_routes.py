@@ -200,13 +200,21 @@ def create_schedule():
 
         if not all([name, year, semester]):
             flash("Please fill out all fields.", "error")
-            return redirect(url_for('student.user_dashboard') if current_user.is_authenticated else url_for('auth.login'))
+            return redirect(
+                url_for('student.user_dashboard')
+                if current_user.is_authenticated
+                else url_for('student.create_schedule', schedule_type='future')
+            )
 
         try:
             year_int = int(year)
         except (TypeError, ValueError):
             flash("Please enter a valid year.", "error")
-            return redirect(url_for('student.user_dashboard') if current_user.is_authenticated else url_for('auth.login'))
+            return redirect(
+                url_for('student.user_dashboard')
+                if current_user.is_authenticated
+                else url_for('student.create_schedule', schedule_type='future')
+            )
 
         new_sched = Schedule(
             schedule_name=name,
@@ -230,10 +238,19 @@ def create_schedule():
                 "Could not create schedule. If this persists, ensure the database is migrated (flask db upgrade).",
                 "error",
             )
-            return redirect(url_for('student.user_dashboard') if current_user.is_authenticated else url_for('auth.login'))
+            return redirect(
+                url_for('student.user_dashboard')
+                if current_user.is_authenticated
+                else url_for('student.create_schedule', schedule_type='future')
+            )
         
         return redirect(url_for('student.edit_schedule', schedule_id=new_sched.id))
         
+    if current_user.is_authenticated:
+        requested_type = (request.args.get('schedule_type') or '').strip().lower()
+        if not requested_type:
+            return redirect(url_for('auth.choose_schedule_type'))
+
     current_year_setting = Setting.query.get('current_year')
     current_year = int(current_year_setting.value) if current_year_setting and current_year_setting.value.isdigit() else 2024
 
