@@ -3,64 +3,78 @@
 
 {% block content %}
 <div class="row justify-content-center">
-    <div class="col-lg-8">
+    <div class="col-xl-10">
         <div class="card shadow-sm border-0 ax-card mt-3">
-            <div class="card-body p-4">
-                <h3 class="fw-bold mb-4">Profile</h3>
+            <div class="card-body p-4 p-lg-5">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h3 class="fw-bold mb-0">Profile Settings</h3>
+                    <span class="small text-muted">Update your details and preferences</span>
+                </div>
+
                 <form method="POST" enctype="multipart/form-data">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label fw-bold text-muted">Name</label>
-                            <input class="form-control" name="full_name" value="{{ current_user.full_name or '' }}" required>
+                    <div class="row g-4">
+                        <div class="col-lg-4">
+                            <input id="profileImageInput" class="d-none" type="file" name="profile_image" accept=".png,.jpg,.jpeg,.webp,.gif">
+                            <label for="profileImageInput" class="profile-photo-card">
+                                <div class="profile-photo-wrap">
+                                    <img id="profilePreview" src="{{ url_for('student.profile_image') }}" alt="Profile Photo" class="profile-photo-img" onerror="this.style.display='none'; document.getElementById('profileFallback').style.display='flex';">
+                                    <div id="profileFallback" class="profile-photo-fallback" {% if current_user.profile_image_path %}style="display:none;"{% endif %}>
+                                        <svg class="ax-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                                    </div>
+                                    <div class="profile-photo-overlay">Change Photo</div>
+                                </div>
+                            </label>
                         </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label fw-bold text-muted">Email</label>
-                            <input class="form-control" type="email" name="email" value="{{ current_user.email or '' }}" required>
-                        </div>
-                    </div>
 
-                    <div class="mb-3">
-                        <label class="form-label fw-bold text-muted">Profile Image (optional)</label>
-                        <input class="form-control" type="file" name="profile_image" accept=".png,.jpg,.jpeg,.webp,.gif">
-                        {% if current_user.profile_image_path %}
-                        <div class="small text-muted mt-1">Current: {{ current_user.profile_image_path }}</div>
-                        {% endif %}
-                    </div>
+                        <div class="col-lg-8">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label fw-bold text-muted">Name</label>
+                                    <input class="form-control" name="full_name" value="{{ current_user.full_name or '' }}" required>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label fw-bold text-muted">Email</label>
+                                    <input class="form-control" type="email" name="email" value="{{ current_user.email or '' }}" required>
+                                </div>
+                            </div>
 
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label fw-bold text-muted">Major</label>
-                            <select name="major_subject_area_id" class="form-select" required>
-                                <option value="" disabled>Select Major</option>
-                                {% for major in majors %}
-                                <option value="{{ major.id }}" {% if current_user.major_subject_area_id == major.id %}selected{% endif %}>{{ major.name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label fw-bold text-muted">Minor</label>
-                            <select name="minor_subject_area_id" class="form-select" required>
-                                <option value="" disabled>Select Minor</option>
-                                {% for minor in minors %}
-                                <option value="{{ minor.id }}" {% if current_user.minor_subject_area_id == minor.id %}selected{% endif %}>{{ minor.name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                    </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label fw-bold text-muted">Major</label>
+                                    <select name="major_subject_area_id" class="form-select">
+                                        <option value="undeclared" {% if not current_user.major_subject_area_id and (major_optional_choice or 'undeclared') == 'undeclared' %}selected{% endif %}>Undeclared</option>
+                                        <option value="prefer_not_to_say" {% if not current_user.major_subject_area_id and (major_optional_choice or '') == 'prefer_not_to_say' %}selected{% endif %}>Prefer not to say</option>
+                                        {% for major in majors %}
+                                        <option value="{{ major.id }}" {% if current_user.major_subject_area_id == major.id %}selected{% endif %}>{{ major.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label fw-bold text-muted">Minor</label>
+                                    <select name="minor_subject_area_id" class="form-select">
+                                        <option value="undeclared" {% if not current_user.minor_subject_area_id and (minor_optional_choice or 'undeclared') == 'undeclared' %}selected{% endif %}>Undeclared</option>
+                                        <option value="prefer_not_to_say" {% if not current_user.minor_subject_area_id and (minor_optional_choice or '') == 'prefer_not_to_say' %}selected{% endif %}>Prefer not to say</option>
+                                        {% for minor in minors %}
+                                        <option value="{{ minor.id }}" {% if current_user.minor_subject_area_id == minor.id %}selected{% endif %}>{{ minor.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
 
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label fw-bold text-muted">Gender</label>
-                            <select name="gender" class="form-select">
-                                <option value="">Prefer not to say</option>
-                                <option value="Male" {% if current_user.gender == 'Male' %}selected{% endif %}>Male</option>
-                                <option value="Female" {% if current_user.gender == 'Female' %}selected{% endif %}>Female</option>
-                                <option value="Prefer not to say" {% if current_user.gender == 'Prefer not to say' %}selected{% endif %}>Prefer not to say</option>
-                            </select>
-                        </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label fw-bold text-muted">Career Interests</label>
-                            <input class="form-control" name="career_interests" value="{{ current_user.career_interests or '' }}">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label fw-bold text-muted">Gender</label>
+                                    <select name="gender" class="form-select">
+                                        <option value="Male" {% if current_user.gender == 'Male' %}selected{% endif %}>Male</option>
+                                        <option value="Female" {% if current_user.gender == 'Female' %}selected{% endif %}>Female</option>
+                                        <option value="Prefer not to say" {% if current_user.gender == 'Prefer not to say' or not current_user.gender %}selected{% endif %}>Prefer not to say</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label fw-bold text-muted">Career Interests</label>
+                                    <input class="form-control" name="career_interests" value="{{ current_user.career_interests or '' }}">
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -87,4 +101,25 @@
         </div>
     </div>
 </div>
+
+<script>
+    (() => {
+        const input = document.getElementById('profileImageInput');
+        const preview = document.getElementById('profilePreview');
+        const fallback = document.getElementById('profileFallback');
+        if (!input || !preview || !fallback) return;
+
+        input.addEventListener('change', () => {
+            const file = input.files && input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                preview.src = String(event.target?.result || '');
+                preview.style.display = 'block';
+                fallback.style.display = 'none';
+            };
+            reader.readAsDataURL(file);
+        });
+    })();
+</script>
 {% endblock %}

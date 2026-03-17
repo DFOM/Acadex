@@ -96,3 +96,85 @@
       padding-bottom: 1rem;
    }
 }
+
+.ax-beta-badge {
+   font-size: .66rem;
+   font-weight: 700;
+   letter-spacing: .03em;
+   text-transform: uppercase;
+   padding: .12rem .42rem;
+   border-radius: 999px;
+   background: color-mix(in srgb, var(--ax-primary) 18%, transparent);
+   color: var(--ax-primary);
+}
+
+.ax-user-dot {
+   width: .48rem;
+   height: .48rem;
+   border-radius: 999px;
+   background: var(--ax-primary);
+   display: inline-block;
+}
+
+.ax-user-menu {
+   min-width: 12rem;
+}
+
+.profile-photo-card {
+   width: 100%;
+   max-width: 260px;
+   display: block;
+   cursor: pointer;
+}
+
+.profile-photo-wrap {
+   position: relative;
+   width: 100%;
+   aspect-ratio: 1 / 1;
+   border-radius: 1rem;
+   overflow: hidden;
+   border: 1px solid var(--ax-border);
+   background: var(--ax-surface);
+   box-shadow: 0 10px 28px rgba(15, 23, 42, .08);
+}
+
+.profile-photo-img,
+.profile-photo-fallback {
+   width: 100%;
+   height: 100%;
+}
+
+.profile-photo-img {
+   object-fit: cover;
+   display: block;
+}
+
+.profile-photo-fallback {
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   color: var(--ax-muted);
+}
+
+.profile-photo-fallback .ax-icon {
+   width: 3rem;
+   height: 3rem;
+}
+
+.profile-photo-overlay {
+   position: absolute;
+   inset: 0;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   background: rgba(15, 23, 42, .42);
+   color: #fff;
+   font-weight: 600;
+   letter-spacing: .01em;
+   opacity: 0;
+   transition: opacity .2s ease;
+}
+
+.profile-photo-wrap:hover .profile-photo-overlay {
+   opacity: 1;
+}

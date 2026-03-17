@@ -1,5 +1,5 @@
 # Routes/student_routes.py
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session, current_app
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session, current_app, send_file
 from flask_login import login_required, current_user
 from sqlalchemy import text, or_, and_, inspect
 import uuid
@@ -1273,13 +1273,19 @@ def profile():
         or_(SubjectArea.area_type == 'minor', SubjectArea.area_type == 'both'),
     ).order_by(SubjectArea.name.asc()).all()
 
+    extra_profile = _safe_json_load_dict(getattr(current_user, 'extra_profile_json', None))
+    major_optional_choice = str(extra_profile.get('major_optional_choice') or 'undeclared').strip().lower()
+    minor_optional_choice = str(extra_profile.get('minor_optional_choice') or 'undeclared').strip().lower()
+
     if request.method == 'POST':
         full_name = (request.form.get('full_name') or '').strip()
         email = (request.form.get('email') or '').strip().lower()
         gender = (request.form.get('gender') or '').strip() or None
         career_interests = (request.form.get('career_interests') or '').strip() or None
-        major_subject_area_id = request.form.get('major_subject_area_id', type=int)
-        minor_subject_area_id = request.form.get('minor_subject_area_id', type=int)
+        major_raw = (request.form.get('major_subject_area_id') or '').strip().lower()
+        minor_raw = (request.form.get('minor_subject_area_id') or '').strip().lower()
+        major_subject_area_id = None if major_raw in {'', 'undeclared', 'prefer_not_to_say'} else request.form.get('major_subject_area_id', type=int)
+        minor_subject_area_id = None if minor_raw in {'', 'undeclared', 'prefer_not_to_say'} else request.form.get('minor_subject_area_id', type=int)
 
         if not full_name:
             flash('Name is required.', 'error')
@@ -1293,11 +1299,11 @@ def profile():
         existing_email = User.query.filter(User.email == email, User.id != current_user.id).first()
         if existing_email:
             flash('Email already in use by another account.', 'error')
-            return render_template('Student/profile.html', majors=majors, minors=minors)
+            return render_template('Student/profile.html', majors=majors, minors=minors, major_optional_choice=major_optional_choice, minor_optional_choice=minor_optional_choice)
 
-        if not major_subject_area_id or not minor_subject_area_id:
-            flash('Major and minor are required.', 'error')
-            return render_template('Student/profile.html', majors=majors, minors=minors)
+        if gender not in {None, 'Male', 'Female', 'Prefer not to say'}:
+            flash('Invalid gender value.', 'error')
+            return render_template('Student/profile.html', majors=majors, minors=minors, major_optional_choice=major_optional_choice, minor_optional_choice=minor_optional_choice)
 
         current_user.full_name = full_name
         current_user.email = email
@@ -1305,6 +1311,11 @@ def profile():
         current_user.career_interests = career_interests
         current_user.major_subject_area_id = major_subject_area_id
         current_user.minor_subject_area_id = minor_subject_area_id
+
+        updated_extra = _safe_json_load_dict(getattr(current_user, 'extra_profile_json', None))
+        updated_extra['major_optional_choice'] = major_raw if major_raw in {'undeclared', 'prefer_not_to_say'} else 'declared'
+        updated_extra['minor_optional_choice'] = minor_raw if minor_raw in {'undeclared', 'prefer_not_to_say'} else 'declared'
+        current_user.extra_profile_json = json.dumps(updated_extra)
 
         image_file = request.files.get('profile_image')
         if image_file and image_file.filename:
@@ -1331,20 +1342,35 @@ def profile():
         if new_password or confirm_new_password:
             if not old_password or not check_password_hash(current_user.password, old_password):
                 flash('Old password is incorrect.', 'error')
-                return render_template('Student/profile.html', majors=majors, minors=minors)
+                return render_template('Student/profile.html', majors=majors, minors=minors, major_optional_choice=major_optional_choice, minor_optional_choice=minor_optional_choice)
             if new_password != confirm_new_password:
                 flash('New passwords do not match.', 'error')
-                return render_template('Student/profile.html', majors=majors, minors=minors)
+                return render_template('Student/profile.html', majors=majors, minors=minors, major_optional_choice=major_optional_choice, minor_optional_choice=minor_optional_choice)
             if len(new_password) < 8:
                 flash('New password must be at least 8 characters.', 'error')
-                return render_template('Student/profile.html', majors=majors, minors=minors)
+                return render_template('Student/profile.html', majors=majors, minors=minors, major_optional_choice=major_optional_choice, minor_optional_choice=minor_optional_choice)
             current_user.password = generate_password_hash(new_password, method='pbkdf2:sha256')
 
         db.session.commit()
         flash('Profile updated successfully.', 'success')
         return redirect(url_for('student.profile'))
 
-    return render_template('Student/profile.html', majors=majors, minors=minors)
+    return render_template('Student/profile.html', majors=majors, minors=minors, major_optional_choice=major_optional_choice, minor_optional_choice=minor_optional_choice)
+
+
+@student_bp.route('/preferences', methods=['GET'])
+@login_required
+def preferences():
+    return render_template('Student/preferences.html')
+
+
+@student_bp.route('/profile/image', methods=['GET'])
+@login_required
+def profile_image():
+    image_path = str(getattr(current_user, 'profile_image_path', '') or '').strip()
+    if not image_path or not os.path.isfile(image_path):
+        return redirect(url_for('static', filename='img/acadex-icon.svg'))
+    return send_file(image_path)
 
 
 @student_bp.route('/notifications/<int:notif_id>/mark_read', methods=['POST'])

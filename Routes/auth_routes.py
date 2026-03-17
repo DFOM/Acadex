@@ -125,8 +125,8 @@ def register():
         expected_graduation_str = request.form.get('expected_graduation')
         major_raw = (request.form.get('major_subject_area_id') or '').strip().lower()
         minor_raw = (request.form.get('minor_subject_area_id') or '').strip().lower()
-        major_subject_area_id = None if major_raw in {'', 'undeclared'} else request.form.get('major_subject_area_id', type=int)
-        minor_subject_area_id = None if minor_raw in {'', 'undeclared'} else request.form.get('minor_subject_area_id', type=int)
+        major_subject_area_id = None if major_raw in {'', 'undeclared', 'prefer_not_to_say'} else request.form.get('major_subject_area_id', type=int)
+        minor_subject_area_id = None if minor_raw in {'', 'undeclared', 'prefer_not_to_say'} else request.form.get('minor_subject_area_id', type=int)
         
         expected_graduation = None
         if expected_graduation_str and expected_graduation_str.isdigit():
@@ -187,8 +187,13 @@ def register():
             value = (request.form.get(key) or '').strip()
             if not value:
                 continue
-            if key not in {'gender', 'career_interests'}:
+            if key not in {'gender', 'career_interests', 'major_subject_area_id', 'minor_subject_area_id'}:
                 extra_profile[key] = value
+
+        if major_raw in {'undeclared', 'prefer_not_to_say'}:
+            extra_profile['major_optional_choice'] = major_raw
+        if minor_raw in {'undeclared', 'prefer_not_to_say'}:
+            extra_profile['minor_optional_choice'] = minor_raw
 
         new_user = User(
             username=username,
