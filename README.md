@@ -45,21 +45,32 @@ This makes first-run bootstrapping easier on fresh hosts.
 ## Environment Variables
 
 Required:
-- `SECRET_KEY`
+- `SESSION_SECRET` (preferred; stable across deployments)
 - `DATABASE_URL` (recommended on Render: PostgreSQL connection string)
 
 Optional:
+- `SECRET_KEY` (legacy fallback if `SESSION_SECRET` is unset)
+- `JWT_SECRET` (used when JWT-based features are enabled)
 - `UPLOAD_FOLDER` (default: `uploads`)
 - `FLASK_ENV=production`
 - `STRICT_MIGRATIONS=true` (fail startup if migration upgrade fails)
 - `ADMIN_EMAIL` and `ADMIN_PASSWORD` (used to auto-bootstrap first admin if none exists)
 - `ADMIN_USERNAME` (default: `admin`, used with admin bootstrap)
+- `SESSION_COOKIE_SECURE=true|false` (default true in production)
+- `SESSION_COOKIE_SAMESITE=Lax|Strict|None` (default `Lax`)
+- `SESSION_COOKIE_DOMAIN` (optional; for multi-subdomain setups)
+- `SESSION_COOKIE_PATH` (default `/`)
+- `SESSION_COOKIE_NAME` (default `acadex_session`)
 
 Database URL behavior:
 - If `DATABASE_URL` starts with `postgres://`, the app rewrites it to `postgresql://` for SQLAlchemy compatibility.
 - If `DATABASE_URL` is not set:
-	- On Render (`RENDER` env var present), fallback is `sqlite:////tmp/acadex.db`.
+	- On Render (`RENDER` env var present), startup fails intentionally so you cannot run on ephemeral DB by mistake.
 	- Otherwise fallback is an app-local SQLite file under `instance/app.db`.
+
+Session persistence:
+- Server-side sessions are stored in the database (`user_sessions` table) via Flask-Session.
+- Keep `SESSION_SECRET` stable across deployments to avoid invalidating existing session cookies.
 
 ## Security & RBAC
 

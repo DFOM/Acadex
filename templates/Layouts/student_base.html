@@ -20,9 +20,11 @@
     <nav class="navbar navbar-expand-lg ax-navbar sticky-top">
         <div class="container ax-container py-2">
             <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="{{ url_for('main.landing_page') }}" style="color: var(--ax-text);">
-                <img src="{{ url_for('static', filename='img/acadex-icon.svg') }}" alt="Acadex" width="28" height="28">
+                <span class="ax-brand-logo-wrap" aria-hidden="true">
+                    <img src="{{ url_for('static', filename='img/acadex-icon.svg') }}" alt="Acadex" width="28" height="28">
+                    <span class="ax-beta-badge">Beta</span>
+                </span>
                 <span>Acadex</span>
-                <span class="ax-beta-badge">Beta</span>
             </a>
             
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">

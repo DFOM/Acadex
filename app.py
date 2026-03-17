@@ -1,12 +1,13 @@
 # app.py
 from flask import Flask, jsonify, request, session
 from flask_login import LoginManager, current_user
+from flask_session import Session
 import os
 import secrets
 import logging
 from collections import defaultdict, deque
 from pathlib import Path
-from datetime import timedelta
+from datetime import timedelta, datetime
 from werkzeug.security import generate_password_hash
 from models import db, User, Role, Permission, RegistrationField, RBAC_PERMISSION_KEYS
 from flask_migrate import Migrate, upgrade
@@ -18,6 +19,7 @@ from Routes.student_routes import student_bp
 from Routes.schedule_routes import schedule_bp
 
 app = Flask(__name__)
+session_manager = Session()
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -27,9 +29,18 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
-app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-change-me')
+def _env_str(name: str, default: str = '') -> str:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return str(value).strip()
+
+
+app.secret_key = _env_str('SESSION_SECRET') or _env_str('SECRET_KEY') or 'dev-secret-change-me'
 if os.environ.get('FLASK_ENV') == 'production' and app.secret_key == 'dev-secret-change-me':
-    raise RuntimeError('SECRET_KEY must be set in production.')
+    raise RuntimeError('SESSION_SECRET (or SECRET_KEY) must be set in production.')
+
+app.config['JWT_SECRET_KEY'] = _env_str('JWT_SECRET') or app.secret_key
 
 def _resolve_database_url() -> str:
     database_url = os.environ.get('DATABASE_URL')
@@ -39,7 +50,7 @@ def _resolve_database_url() -> str:
 
     if not database_url:
         if os.environ.get('RENDER'):
-            return 'sqlite:////tmp/acadex.db'
+            raise RuntimeError('DATABASE_URL must be configured on Render for persistent user/session data.')
         return f"sqlite:///{Path(app.instance_path) / 'app.db'}"
 
     if database_url.startswith('sqlite:///'):
@@ -58,12 +69,30 @@ app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER', 'uploads')
 app.config['PROFILE_UPLOAD_FOLDER'] = os.path.join(app.config['UPLOAD_FOLDER'], 'profile_images')
 app.config['STRICT_MIGRATIONS'] = _env_bool('STRICT_MIGRATIONS', default=False)
 app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('MAX_CONTENT_LENGTH_BYTES', 2 * 1024 * 1024))
+
+cookie_samesite = (_env_str('SESSION_COOKIE_SAMESITE', 'Lax') or 'Lax').strip().capitalize()
+if cookie_samesite not in {'Lax', 'Strict', 'None'}:
+    cookie_samesite = 'Lax'
+
 app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SAMESITE'] = cookie_samesite
 app.config['SESSION_COOKIE_SECURE'] = _env_bool('SESSION_COOKIE_SECURE', default=os.environ.get('FLASK_ENV') == 'production')
+app.config['SESSION_COOKIE_PATH'] = _env_str('SESSION_COOKIE_PATH', '/') or '/'
+app.config['SESSION_COOKIE_DOMAIN'] = _env_str('SESSION_COOKIE_DOMAIN', '') or None
+app.config['SESSION_COOKIE_NAME'] = _env_str('SESSION_COOKIE_NAME', 'acadex_session') or 'acadex_session'
+
+app.config['SESSION_TYPE'] = 'sqlalchemy'
+app.config['SESSION_SQLALCHEMY'] = db
+app.config['SESSION_SQLALCHEMY_TABLE'] = 'user_sessions'
+app.config['SESSION_USE_SIGNER'] = True
+app.config['SESSION_KEY_PREFIX'] = 'acadex:session:'
+app.config['SESSION_PERMANENT'] = True
+
 app.config['REMEMBER_COOKIE_HTTPONLY'] = True
-app.config['REMEMBER_COOKIE_SAMESITE'] = 'Lax'
+app.config['REMEMBER_COOKIE_SAMESITE'] = cookie_samesite
 app.config['REMEMBER_COOKIE_SECURE'] = app.config['SESSION_COOKIE_SECURE']
+app.config['REMEMBER_COOKIE_PATH'] = app.config['SESSION_COOKIE_PATH']
+app.config['REMEMBER_COOKIE_DOMAIN'] = app.config['SESSION_COOKIE_DOMAIN']
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)
 
 if not app.logger.handlers:
@@ -109,6 +138,10 @@ def _inject_csrf_token():
 
 @app.before_request
 def _security_before_request():
+    if not session.get('_session_started_at'):
+        session['_session_started_at'] = datetime.utcnow().isoformat()
+        app.logger.info('session_created path=%s ip=%s auth=%s session_sid=%s', request.path, _request_ip(), bool(getattr(current_user, 'is_authenticated', False)), getattr(session, 'sid', None))
+
     _csrf_token()
 
     if request.endpoint == 'static':
@@ -130,6 +163,14 @@ def _security_before_request():
         provided = (request.headers.get('X-CSRF-Token') or request.form.get('csrf_token') or '').strip()
         expected = str(session.get('_csrf_token') or '')
         if not expected or provided != expected:
+            app.logger.warning(
+                'csrf_mismatch path=%s method=%s ip=%s auth=%s session_sid=%s',
+                request.path,
+                request.method,
+                _request_ip(),
+                bool(getattr(current_user, 'is_authenticated', False)),
+                getattr(session, 'sid', None),
+            )
             wants_json = request.is_json or path.startswith('/admin/api/') or path.startswith('/student/api/')
             if wants_json:
                 return jsonify({'success': False, 'message': 'Invalid CSRF token.'}), 400
@@ -192,6 +233,7 @@ def _server_error(err):
     return 'Internal server error.', 500
 
 db.init_app(app)
+session_manager.init_app(app)
 migrate = Migrate(app, db)
 
 login_manager = LoginManager()

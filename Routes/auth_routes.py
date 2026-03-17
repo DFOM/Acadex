@@ -1,5 +1,5 @@
 # Routes/auth_routes.py
-from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, session
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 import re
@@ -84,21 +84,39 @@ def login():
         password = request.form.get('password')
         identity = username.lower()
         ip_address = _client_ip()
+        current_app.logger.info('auth_login_attempt identity=%s ip=%s', identity, ip_address)
 
         if _too_many_login_attempts(identity, ip_address):
+            current_app.logger.warning('auth_login_rate_limited identity=%s ip=%s', identity, ip_address)
             flash('Too many login attempts. Please wait and try again.', 'error')
             return render_template('Student/login.html')
 
-        user = User.query.filter(or_(User.username == username, User.email == identity)).first()
+        try:
+            user = User.query.filter(or_(User.username == username, User.email == identity)).first()
+            valid_credentials = bool(user and check_password_hash(user.password, password))
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.exception('auth_login_query_error identity=%s ip=%s error=%s', identity, ip_address, exc)
+            flash('Sign in is temporarily unavailable due to a server/session issue. Please try again.', 'error')
+            return render_template('Student/login.html')
 
-        if user and check_password_hash(user.password, password):
-            _record_login_attempt(identity, success=True)
-            login_user(user)
-            # FIXED: Pointed to the new student dashboard route
-            return redirect(url_for('student.user_dashboard'))
-        else:
-            _record_login_attempt(identity, success=False)
-            flash("Invalid username or password.", "error")
+        if valid_credentials:
+            try:
+                _record_login_attempt(identity, success=True)
+                login_user(user)
+                session.permanent = True
+                current_app.logger.info('auth_login_success user_id=%s identity=%s ip=%s session_sid=%s', user.id, identity, ip_address, getattr(session, 'sid', None))
+                # FIXED: Pointed to the new student dashboard route
+                return redirect(url_for('student.user_dashboard'))
+            except Exception as exc:
+                db.session.rollback()
+                current_app.logger.exception('auth_login_session_error user_id=%s identity=%s ip=%s error=%s', getattr(user, 'id', None), identity, ip_address, exc)
+                flash('Sign in failed due to a server/session error. Please try again.', 'error')
+                return render_template('Student/login.html')
+
+        _record_login_attempt(identity, success=False)
+        current_app.logger.warning('auth_login_invalid_credentials identity=%s ip=%s', identity, ip_address)
+        flash("Invalid username or password.", "error")
 
     return render_template('Student/login.html')
 
@@ -221,6 +239,7 @@ def register():
 @auth_bp.route('/logout')
 @login_required
 def logout():
+    current_app.logger.info('auth_logout user_id=%s session_sid=%s', current_user.id, getattr(session, 'sid', None))
     logout_user()
     flash("You have been logged out.", "success")
     return redirect(url_for('auth.login'))
