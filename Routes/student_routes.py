@@ -44,7 +44,7 @@ def search_courses():
         if current_user.is_authenticated:
             sched = Schedule.query.filter_by(id=schedule_id_int, user_id=current_user.id).first()
         else:
-            sched = Schedule.query.filter_by(id=schedule_id_int, session_id=session.get('guest_id')).first()
+            sched = Schedule.query.filter_by(id=schedule_id_int, session_id=get_guest_id()).first()
 
         if not sched:
             return jsonify([])
@@ -276,7 +276,11 @@ def edit_schedule(schedule_id):
     if current_user.is_authenticated:
         schedule = Schedule.query.filter_by(id=schedule_id, user_id=current_user.id).first_or_404()
     else:
-        schedule = Schedule.query.filter_by(id=schedule_id, session_id=session.get('guest_id')).first_or_404()
+        schedule = Schedule.query.filter_by(
+            id=schedule_id,
+            session_id=get_guest_id(),
+            schedule_type='future',
+        ).first_or_404()
         
     table_name, _ = get_best_course_table(schedule.year, schedule.semester)
     
@@ -333,7 +337,7 @@ def add_course():
     if current_user.is_authenticated:
         sched = Schedule.query.filter_by(id=sched_id, user_id=current_user.id).first()
     else:
-        sched = Schedule.query.filter_by(id=sched_id, session_id=session.get('guest_id')).first()
+        sched = Schedule.query.filter_by(id=sched_id, session_id=get_guest_id(), schedule_type='future').first()
         
     if not sched:
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
@@ -522,7 +526,9 @@ def remove_course(entry_id):
         if course_entry.schedule.user_id != current_user.id:
             return jsonify({'success': False, 'message': 'Unauthorized'}), 403
     else:
-        if course_entry.schedule.session_id != session.get('guest_id'):
+        if course_entry.schedule.schedule_type != 'future':
+            return jsonify({'success': False, 'message': 'Unauthorized'}), 403
+        if course_entry.schedule.session_id != get_guest_id():
             return jsonify({'success': False, 'message': 'Unauthorized'}), 403
 
     db.session.delete(course_entry)
@@ -581,6 +587,9 @@ def update_grade():
 
 @student_bp.route('/api/recommendations', methods=['GET'])
 def api_recommendations():
+    if not current_user.is_authenticated:
+        return jsonify({'success': False, 'error': 'Unauthorized', 'message': 'Unauthorized'}), 403
+
     sched_id = request.args.get('schedule_id')
     try:
         limit = int(request.args.get('limit', 10))
@@ -594,10 +603,7 @@ def api_recommendations():
     except Exception:
         return jsonify({'success': False, 'error': 'Invalid schedule_id', 'message': 'Invalid schedule_id'}), 400
 
-    if current_user.is_authenticated:
-        sched = Schedule.query.filter_by(id=sched_id_int, user_id=current_user.id).first()
-    else:
-        sched = Schedule.query.filter_by(id=sched_id_int, session_id=session.get('guest_id')).first()
+    sched = Schedule.query.filter_by(id=sched_id_int, user_id=current_user.id).first()
     if not sched:
         return jsonify({'success': False, 'error': 'Unauthorized', 'message': 'Unauthorized'}), 403
 
@@ -664,6 +670,9 @@ def api_recommendations():
 
 @student_bp.route('/api/generate_schedule', methods=['POST'])
 def api_generate_schedule():
+    if not current_user.is_authenticated:
+        return jsonify({'success': False, 'error': 'Unauthorized', 'message': 'Unauthorized'}), 403
+
     data = request.get_json(silent=True) or {}
     sched_id = data.get('schedule_id')
     target_count = data.get('target_count', 5)
@@ -679,10 +688,7 @@ def api_generate_schedule():
     except Exception:
         target_count = 5
 
-    if current_user.is_authenticated:
-        sched = Schedule.query.filter_by(id=sched_id_int, user_id=current_user.id).first()
-    else:
-        sched = Schedule.query.filter_by(id=sched_id_int, session_id=session.get('guest_id')).first()
+    sched = Schedule.query.filter_by(id=sched_id_int, user_id=current_user.id).first()
     if not sched:
         return jsonify({'success': False, 'error': 'Unauthorized', 'message': 'Unauthorized'}), 403
 
