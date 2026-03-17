@@ -190,41 +190,27 @@
                         <div class="card shadow-sm border-0 rounded-4 hover-card">
                             <div class="card-body p-4">
                                 <h4 class="fw-bold border-bottom pb-2 mb-3">{{ hi('book-open', 'ax-icon me-2') }}Course Catalogs</h4>
-                                <p class="text-muted small mb-3">Plan schedules using historical or upcoming course catalogs.</p>
+                                <p class="text-muted small mb-3">Plan schedules using available course catalogs.</p>
 
                                 {% if course_catalog_statuses %}
-                                    <div class="mb-3">
-                                        <div class="fw-bold mb-2">Status</div>
-                                        <div class="d-flex flex-column gap-2">
-                                            {% for s in course_catalog_statuses %}
-                                                <div class="d-flex justify-content-between align-items-center px-3 py-2 rounded-3" style="background: var(--ax-surface); border: 1px solid var(--ax-border);">
-                                                    <div class="fw-semibold">{{ s.term }}</div>
-                                                    {% if s.status == 'processing' %}
-                                                        <span class="badge bg-warning text-dark">Processing</span>
-                                                    {% else %}
-                                                        <span class="badge bg-success">Available</span>
-                                                    {% endif %}
-                                                </div>
-                                            {% endfor %}
-                                        </div>
+                                    <div class="d-flex flex-column gap-2">
+                                        {% for s in course_catalog_statuses %}
+                                            <div class="d-flex justify-content-between align-items-center px-3 py-2 rounded-3" style="background: var(--ax-surface); border: 1px solid var(--ax-border);">
+                                                <div class="fw-semibold">{{ s.term }}</div>
+                                                {% if s.status == 'processing' %}
+                                                    <span class="badge bg-warning text-dark">Processing</span>
+                                                {% else %}
+                                                    <span class="badge bg-success">Available</span>
+                                                {% endif %}
+                                            </div>
+                                        {% endfor %}
                                     </div>
-                                {% endif %}
-
-                                {% if available_tables %}
-                                <div class="d-flex flex-wrap gap-2">
-                                    {% for table in available_tables %}
-                                        <span class="badge bg-secondary bg-opacity-10 border border-secondary px-3 py-2" style="color: var(--ax-text);">
-                                            {{ hi('book', 'ax-icon me-1') }}{{ table.replace('.csv', '').replace('_', ' ') }}
-                                        </span>
-                                    {% endfor %}
-                                </div>
                                 {% else %}
-                                <div class="alert border mb-0" style="background: var(--ax-surface); border-color: var(--ax-border); color: var(--ax-text);">No course catalogs currently loaded.</div>
+                                    <div class="alert border mb-0" style="background: var(--ax-surface); border-color: var(--ax-border); color: var(--ax-text);">No course catalogs currently loaded.</div>
                                 {% endif %}
                             </div>
                         </div>
                     </div>
-
                     <div class="col-md-5">
                         <div class="position-sticky" style="top: 2rem;">
                             {% if not current_user.is_authenticated %}

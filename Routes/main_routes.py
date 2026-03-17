@@ -6,7 +6,13 @@ from typing import Optional
 import uuid
 
 from models import Announcement, Schedule, Setting, CatalogStatus
-from utils import get_course_data_tables, ensure_default_landing_sections, safe_json_loads, format_course_catalog_name
+from utils import (
+    get_course_data_tables,
+    ensure_default_landing_sections,
+    safe_json_loads,
+    format_course_catalog_name,
+    parse_course_catalog_metadata,
+)
 
 
 main_bp = Blueprint('main', __name__)
@@ -56,9 +62,25 @@ def landing_page():
     except Exception:
         catalog_status_map = {}
 
+    parsed_catalogs = []
+    for table_name in available_tables:
+        parsed = parse_course_catalog_metadata(table_name)
+        if not parsed:
+            continue
+        label = format_course_catalog_name(table_name)
+        if not label:
+            continue
+        parsed_catalogs.append({'label': label, **parsed})
+
+    parsed_catalogs.sort(key=lambda c: (int(c['year']), {'spring': 0, 'fall': 1, 'full': 2}.get(str(c['semester_type']), 9)), reverse=True)
+
+    seen_labels = set()
     course_catalog_statuses = []
-    for t in available_tables:
-        label = format_course_catalog_name(t)
+    for item in parsed_catalogs:
+        label = item['label']
+        if label in seen_labels:
+            continue
+        seen_labels.add(label)
         row = catalog_status_map.get(label)
         status = (row.status if row else 'available')
         updated_at = (row.updated_at if row else None)

@@ -27,10 +27,55 @@ def safe_json_dumps(value) -> str:
 
 
 def format_course_catalog_name(raw: str) -> str:
-    s = str(raw or '').strip()
-    if not s:
+    meta = parse_course_catalog_metadata(raw)
+    if not meta:
         return ''
-    return s.replace('.csv', '').replace('_', ' ')
+
+    year = int(meta['year'])
+    semester_type = str(meta['semester_type'])
+    if semester_type == 'spring':
+        return f"{year} Spring Only Course List"
+    if semester_type == 'fall':
+        return f"{year} Fall Only Course List"
+    return f"{year} Full Courses List"
+
+
+def parse_course_catalog_metadata(raw: str) -> dict | None:
+    """Parse dataset table/file names into normalized catalog metadata.
+
+    Returns:
+        {
+            'year': int,
+            'semester_type': 'full' | 'spring' | 'fall'
+        }
+        or None if the name does not represent a real course catalog dataset.
+    """
+    s = str(raw or '').strip().lower()
+    if not s:
+        return None
+
+    year_match = re.search(r'(?:19|20)\d{2}', s)
+    if not year_match:
+        return None
+
+    year = int(year_match.group(0))
+    has_spring = bool(re.search(r'(^|[_\-\s])(spring|sp)([_\-\s]|$)', s))
+    has_fall = bool(re.search(r'(^|[_\-\s])(fall|fa)([_\-\s]|$)', s))
+    has_full = bool(re.search(r'(^|[_\-\s])(full|all|all_courses|allcourses|catalog)([_\-\s]|$)', s))
+
+    if has_spring and not has_fall:
+        semester_type = 'spring'
+    elif has_fall and not has_spring:
+        semester_type = 'fall'
+    elif has_full or (has_spring and has_fall):
+        semester_type = 'full'
+    else:
+        return None
+
+    return {
+        'year': year,
+        'semester_type': semester_type,
+    }
 
 
 def ensure_default_landing_sections():
@@ -194,7 +239,11 @@ def format_display_course_number(raw: str) -> str:
     return s
 
 def get_course_data_tables():
-    """Dynamically finds all uploaded CSV tables, ignoring the core system tables."""
+    """Return only valid uploaded course catalog tables.
+
+    Excludes system/internal tables and any table that cannot be parsed
+    into a real course catalog term (year + semester type).
+    """
     try:
         inspector = inspect(db.engine)
         all_tables = inspector.get_table_names()
@@ -208,9 +257,19 @@ def get_course_data_tables():
             'notifications',
             'landing_page_sections',
             'catalog_statuses',
+            'roles',
+            'permissions',
+            'role_permissions',
+            'registration_fields',
+            'login_attempts',
         ]
-        
-        return [t for t in all_tables if t not in core_tables and not t.startswith('sqlite_')]
+
+        candidates = [
+            t for t in all_tables
+            if t not in core_tables and not t.startswith('sqlite_') and is_valid_table_name(t)
+        ]
+
+        return [t for t in candidates if parse_course_catalog_metadata(t) is not None]
     except Exception as e:
         print(f"Error inspecting tables: {e}")
         return []

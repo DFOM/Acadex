@@ -36,39 +36,63 @@
                 </button>
             </div>
 
+            <div class="mb-3">
+                <a class="btn btn-sm btn-outline-secondary w-100" href="{{ url_for('main.landing_page') }}">← Back to Site</a>
+            </div>
+
             <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">Dashboard</div>
             <ul class="nav flex-column mb-3">
                 <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.index') }}">📊 <span class="ax-sidebar-title">Overview</span></a></li>
             </ul>
 
-            <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">Management</div>
-            <ul class="nav flex-column mb-3">
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_courses') }}">📚 <span class="ax-sidebar-title">Courses</span></a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_datasets') }}">🗂️ <span class="ax-sidebar-title">Datasets</span></a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_subjects') }}">🎯 <span class="ax-sidebar-title">Subjects</span></a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_instructors') }}">👩‍🏫 <span class="ax-sidebar-title">Instructors</span></a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_periods') }}">🕒 <span class="ax-sidebar-title">Periods</span></a></li>
-            </ul>
+            {% if current_user.has_permission('edit_courses') or current_user.has_permission('manage_datasets') %}
+                <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">Management</div>
+                <ul class="nav flex-column mb-3">
+                    {% if current_user.has_permission('edit_courses') %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_courses') }}">📚 <span class="ax-sidebar-title">Courses</span></a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_subjects') }}">🎯 <span class="ax-sidebar-title">Subjects</span></a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_instructors') }}">👩‍🏫 <span class="ax-sidebar-title">Instructors</span></a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_periods') }}">🕒 <span class="ax-sidebar-title">Periods</span></a></li>
+                    {% endif %}
+                    {% if current_user.has_permission('manage_datasets') %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_datasets') }}">🗂️ <span class="ax-sidebar-title">Datasets</span></a></li>
+                    {% endif %}
+                </ul>
+            {% endif %}
 
-            <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">Users</div>
-            <ul class="nav flex-column mb-3">
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_users') }}">👥 <span class="ax-sidebar-title">Users List</span></a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_roles') }}">🔐 <span class="ax-sidebar-title">Roles & Permissions</span></a></li>
-            </ul>
+            {% if current_user.has_permission('manage_users') %}
+                <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">Users</div>
+                <ul class="nav flex-column mb-3">
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_users') }}">👥 <span class="ax-sidebar-title">Users List</span></a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_roles') }}">🔐 <span class="ax-sidebar-title">Roles & Permissions</span></a></li>
+                </ul>
+            {% endif %}
 
-            <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">AI & Analytics</div>
-            <ul class="nav flex-column mb-3">
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.ai_dashboard') }}">🤖 <span class="ax-sidebar-title">AI Control</span></a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.analytics') }}">📈 <span class="ax-sidebar-title">Analytics</span></a></li>
-            </ul>
+            {% if current_user.has_permission('control_ai') or current_user.has_permission('view_analytics') %}
+                <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">AI & Analytics</div>
+                <ul class="nav flex-column mb-3">
+                    {% if current_user.has_permission('control_ai') %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.ai_dashboard') }}">🤖 <span class="ax-sidebar-title">AI Control</span></a></li>
+                    {% endif %}
+                    {% if current_user.has_permission('view_analytics') %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.analytics') }}">📈 <span class="ax-sidebar-title">Analytics</span></a></li>
+                    {% endif %}
+                </ul>
+            {% endif %}
 
-            <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">System</div>
-            <ul class="nav flex-column mb-4">
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.index') }}">⚙️ <span class="ax-sidebar-title">Settings</span></a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.university_connection') }}">🏛️ <span class="ax-sidebar-title">University Integration</span></a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_landing') }}">🖼️ <span class="ax-sidebar-title">Landing Management</span></a></li>
-                <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_registration_fields') }}">🧾 <span class="ax-sidebar-title">Registration Fields</span></a></li>
-            </ul>
+            {% if current_user.has_permission('manage_users') or current_user.has_permission('edit_landing_page') %}
+                <div class="small text-uppercase fw-bold text-muted mb-2 ax-sidebar-title">System</div>
+                <ul class="nav flex-column mb-4">
+                    {% if current_user.has_permission('manage_users') %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.index') }}">⚙️ <span class="ax-sidebar-title">Settings</span></a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.university_connection') }}">🏛️ <span class="ax-sidebar-title">University Integration</span></a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_registration_fields') }}">🧾 <span class="ax-sidebar-title">Registration Fields</span></a></li>
+                    {% endif %}
+                    {% if current_user.has_permission('edit_landing_page') %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('admin.manage_landing') }}">🖼️ <span class="ax-sidebar-title">Landing Management</span></a></li>
+                    {% endif %}
+                </ul>
+            {% endif %}
 
             <a class="btn btn-outline-danger w-100" href="{{ url_for('admin.logout') }}">Logout</a>
         </aside>
