@@ -10,7 +10,7 @@ from pathlib import Path
 from datetime import timedelta, datetime
 from werkzeug.security import generate_password_hash
 from models import db, User, Role, Permission, RegistrationField, RBAC_PERMISSION_KEYS
-from flask_migrate import Migrate, upgrade
+from flask_migrate import Migrate, upgrade, stamp
 
 from Routes.auth_routes import auth_bp
 from Routes.admin_routes import admin_bp
@@ -68,6 +68,7 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['UPLOAD_FOLDER'] = os.environ.get('UPLOAD_FOLDER', 'uploads')
 app.config['PROFILE_UPLOAD_FOLDER'] = os.path.join(app.config['UPLOAD_FOLDER'], 'profile_images')
 app.config['STRICT_MIGRATIONS'] = _env_bool('STRICT_MIGRATIONS', default=False)
+app.config['ALEMBIC_AUTO_STAMP_ON_MISSING_REV'] = _env_bool('ALEMBIC_AUTO_STAMP_ON_MISSING_REV', default=True)
 app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get('MAX_CONTENT_LENGTH_BYTES', 2 * 1024 * 1024))
 
 cookie_samesite = (_env_str('SESSION_COOKIE_SAMESITE', 'Lax') or 'Lax').strip().capitalize()
@@ -273,9 +274,20 @@ def _bootstrap_database() -> None:
         try:
             upgrade()
         except Exception as exc:
-            if app.config.get('STRICT_MIGRATIONS', False):
+            message = str(exc)
+            if "Can't locate revision identified by" in message and app.config.get('ALEMBIC_AUTO_STAMP_ON_MISSING_REV', True):
+                app.logger.warning('Alembic revision mismatch detected. Attempting recovery by stamping to head. error=%s', message)
+                try:
+                    stamp(revision='head')
+                    app.logger.warning('Alembic recovery succeeded: stamped database to head revision.')
+                except Exception as stamp_exc:
+                    if app.config.get('STRICT_MIGRATIONS', False):
+                        raise
+                    app.logger.warning('Alembic stamp recovery failed: %s', stamp_exc)
+            elif app.config.get('STRICT_MIGRATIONS', False):
                 raise
-            app.logger.warning("Automatic migration upgrade skipped: %s", exc)
+            else:
+                app.logger.warning("Automatic migration upgrade skipped: %s", exc)
 
         try:
             _seed_security_defaults()
