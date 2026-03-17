@@ -8,12 +8,13 @@
 
 <div class="card shadow-sm">
     <div class="card-body">
-        <table class="table table-striped table-hover">
+        <table class="table table-striped table-hover smart-table">
             <thead>
                 <tr>
                     <th>ID</th>
+                    <th>Username</th>
                     <th>Gender</th>
-                    <th>Year of Study</th>
+                    <th>Expected Graduation</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -21,18 +22,19 @@
                 {% for user in users %}
                 <tr>
                     <td>{{ user.id }}</td>
-                    <td>{{ user.gender }}</td>
-                    <td>{{ user.year_of_study }}</td>
+                    <td>{{ user.username }}</td>
+                    <td>{{ user.gender or '—' }}</td>
+                    <td>{{ user.expected_graduation or '—' }}</td>
                     <td>
                         <button class="btn btn-sm btn-primary edit-user-btn" 
                                 data-id="{{ user.id }}" 
                                 data-gender="{{ user.gender }}" 
-                                data-year="{{ user.year_of_study }}">Edit</button>
+                                data-year="{{ user.expected_graduation or '' }}">Edit</button>
                         <button class="btn btn-sm btn-danger delete-user-btn" data-id="{{ user.id }}">Delete</button>
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="4" class="text-center">No users found.</td></tr>
+                <tr><td colspan="5" class="text-center">No users found.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -58,13 +60,8 @@
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label>Year of Study</label>
-                        <select id="edit_user_year" class="form-select">
-                            <option value="Freshman">Freshman</option>
-                            <option value="Sophomore">Sophomore</option>
-                            <option value="Junior">Junior</option>
-                            <option value="Senior">Senior</option>
-                        </select>
+                        <label>Expected Graduation</label>
+                        <input type="number" min="2000" max="2100" id="edit_user_year" class="form-control" placeholder="e.g. 2028">
                     </div>
                 </div>
                 <div class="modal-footer">

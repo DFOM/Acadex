@@ -1,33 +1,19 @@
-/* Project/static/css/admin.css */
-:root {
-    --admin-bg-color: #f9fafb;
-    --admin-card-bg: #ffffff;
-    --admin-border-color: #e5e7eb;
-    --admin-primary: #2563eb;
-    --admin-primary-dark: #1d4ed8;
-    --admin-text-main: #111827;
-    --admin-text-muted: #6b7280;
-}
-
-body {
-    font-family: 'Inter', sans-serif;
-    background-color: var(--admin-bg-color);
-    color: var(--admin-text-main);
-}
+/* Admin area: rely on static/css/design_system.css for tokens */
 
 /* DataTables Integration */
 .dataTables_wrapper .dataTables_filter input,
 .dataTables_wrapper .dataTables_length select {
-    border: 1px solid var(--admin-border-color);
+    border: 1px solid var(--ax-border);
     border-radius: 0.5rem;
     padding: 0.4rem 0.8rem;
-    background-color: var(--admin-card-bg);
+    background-color: var(--ax-surface);
+    color: var(--ax-text);
     outline: none;
     transition: border-color 0.2s;
 }
 
 .dataTables_wrapper .dataTables_filter input:focus {
-    border-color: var(--admin-primary);
+    border-color: var(--ax-primary);
 }
 
 /* Custom Table Styling */
@@ -38,44 +24,45 @@ body {
 }
 
 .admin-table thead th {
-    background-color: #f8fafc;
-    color: var(--admin-text-muted);
+    background-color: color-mix(in srgb, var(--ax-surface) 92%, var(--ax-bg));
+    color: var(--ax-muted);
     font-weight: 600;
     text-transform: uppercase;
     font-size: 0.75rem;
     letter-spacing: 0.05em;
     padding: 1rem;
-    border-bottom: 2px solid var(--admin-border-color);
+    border-bottom: 2px solid var(--ax-border);
 }
 
 .admin-table tbody td {
     padding: 1rem;
-    border-bottom: 1px solid var(--admin-border-color);
-    background-color: var(--admin-card-bg);
+    border-bottom: 1px solid var(--ax-border);
+    background-color: var(--ax-surface);
 }
 
 .admin-table tbody tr:hover td {
-    background-color: #f3f4f6;
+    background-color: rgba(var(--ax-primary-rgb), 0.06);
 }
 
 /* Form Controls */
 .admin-input {
     width: 100%;
     padding: 0.625rem;
-    background-color: #f9fafb;
-    border: 1px solid var(--admin-border-color);
+    background-color: var(--ax-surface);
+    border: 1px solid var(--ax-border);
     border-radius: 0.5rem;
     transition: all 0.2s;
+    color: var(--ax-text);
 }
 
 .admin-input:focus {
-    background-color: #fff;
-    border-color: var(--admin-primary);
-    ring: 2px var(--admin-primary);
+    background-color: var(--ax-surface);
+    border-color: var(--ax-primary);
+    box-shadow: 0 0 0 0.25rem var(--ax-ring);
 }
 
 .admin-btn-primary {
-    background-color: var(--admin-primary);
+    background-color: var(--ax-primary);
     color: white;
     padding: 0.625rem 1.25rem;
     border-radius: 0.5rem;
@@ -84,5 +71,5 @@ body {
 }
 
 .admin-btn-primary:hover {
-    background-color: var(--admin-primary-dark);
+    background-color: color-mix(in srgb, var(--ax-primary) 86%, black);
 }

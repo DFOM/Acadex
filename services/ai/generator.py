@@ -12,6 +12,8 @@ def generate_schedule_courses(
     *,
     target_count: int = 5,
     existing_day_and_period: Iterable[str] = (),
+    major_area: str | None = None,
+    minor_area: str | None = None,
 ) -> Tuple[List[Dict], List[str]]:
     """Generate a prereq-eligible set of courses.
 
@@ -19,7 +21,12 @@ def generate_schedule_courses(
     already guarantees prerequisites are met.
     """
 
-    eligible, errors = filter_courses_by_prereqs(catalog_courses, completed_passing_courses)
+    eligible, errors = filter_courses_by_prereqs(
+        catalog_courses,
+        completed_passing_courses,
+        major_name=major_area,
+        minor_name=minor_area,
+    )
     target = max(int(target_count), 0)
 
     occupied = set()

@@ -3,7 +3,7 @@ from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_required, current_user
 import re
 from sqlalchemy import text
-from models import db, Schedule, SubjectArea, Setting
+from models import db, Schedule, SubjectArea, Setting, ScheduleCourse, AIEvent, BehaviorEvent
 from utils import get_course_data_tables, calculate_gpa, is_valid_table_name
 
 schedule_bp = Blueprint('schedule', __name__)
@@ -154,7 +154,9 @@ def delete_schedule(schedule_id):
         # Verify ownership via ORM
         sched = Schedule.query.filter_by(id=schedule_id, user_id=current_user.id).first()
         if sched:
-            # SQLAlchemy automatically handles deleting the linked schedule_courses because of the cascade rule!
+            ScheduleCourse.query.filter_by(schedule_id=sched.id).delete(synchronize_session=False)
+            AIEvent.query.filter_by(schedule_id=sched.id).delete(synchronize_session=False)
+            BehaviorEvent.query.filter_by(schedule_id=sched.id).delete(synchronize_session=False)
             db.session.delete(sched)
             db.session.commit()
             flash('Schedule deleted successfully.', 'success')

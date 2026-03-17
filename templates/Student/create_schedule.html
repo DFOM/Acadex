@@ -1,13 +1,14 @@
 {% extends "Layouts/student_base.html" %}
+{% from 'partials/heroicons.html' import hi %}
 {% block title %}Create New Plan{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center align-items-center mt-5">
-    <div class="col-md-6 col-lg-5">
+<div class="row justify-content-center align-items-start mt-5 g-4">
+    <div class="col-md-7 col-lg-6">
         <div class="card shadow-lg border-0 rounded-4 overflow-hidden">
             <div class="card-header bg-primary text-white text-center py-4 border-0">
                 <h4 class="mb-0 fw-bold">
-                    <i class="bi {{ 'bi-clock-history' if schedule_type == 'past' else 'bi-calendar-plus' }}"></i> 
+                    {{ hi('clock' if schedule_type == 'past' else 'calendar', 'ax-icon me-2') }}
                     Create {{ schedule_type | capitalize }} Plan
                 </h4>
                 <p class="mb-0 small opacity-75">
@@ -19,7 +20,7 @@
                 </p>
             </div>
             
-            <div class="card-body p-4 bg-light">
+            <div class="card-body p-4">
                 <form method="POST" action="{{ url_for('student.create_schedule') }}">
                     <input type="hidden" name="schedule_type" value="{{ schedule_type }}">
 
@@ -43,7 +44,7 @@
                                 {% endfor %}
 
                                 {% if count.value == 0 %}
-                                    <option value="" disabled>No datasets available</option>
+                                    <option value="" disabled>No course catalogs available</option>
                                 {% endif %}
                             </select>
                         </div>
@@ -63,7 +64,7 @@
                                name="schedule_name" id="scheduleNameInput" 
                                placeholder="e.g. 2025 Spring Plan" required>
                         <small class="text-muted d-block mt-2">
-                            <i class="bi bi-magic text-warning"></i> Auto-generated, but feel free to edit!
+                            {{ hi('sparkles', 'ax-icon me-1 text-warning') }} Auto-generated, but feel free to edit!
                         </small>
                     </div>
 
@@ -85,6 +86,37 @@
             </div>
         </div>
     </div>
+
+    {% if current_user.is_authenticated and schedule_type == 'future' %}
+    <div class="col-md-5 col-lg-4">
+        <div class="card shadow-sm border-0 rounded-4">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <h6 class="mb-0 fw-bold">{{ hi('sparkles', 'ax-icon me-2 text-warning') }}AI Course Suggestions</h6>
+                <span class="badge bg-primary-subtle text-primary">Preview</span>
+            </div>
+            <div class="card-body">
+                <div class="small text-muted mb-2">
+                    Major: <span class="fw-bold">{{ user_area_names.major or 'Not set' }}</span>
+                    &middot; Minor: <span class="fw-bold">{{ user_area_names.minor or 'Not set' }}</span>
+                </div>
+
+                <div id="aiSuggestionStatus" class="alert alert-light border small mb-2">
+                    {% if ai_suggestions_allowed %}
+                    Select year and semester to preview suggestions.
+                    {% else %}
+                    {{ ai_suggestions_gate_message or 'Suggestions are unavailable right now.' }}
+                    {% endif %}
+                </div>
+
+                <div id="aiProgressHint" class="small text-muted mb-2"></div>
+
+                <div id="aiSuggestionList" class="list-group list-group-flush small">
+                    <div class="text-muted">No suggestions yet.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
 
 <script>
@@ -92,8 +124,14 @@ document.addEventListener('DOMContentLoaded', function() {
     const yearSelect = document.getElementById('yearSelect');
     const semesterSelect = document.getElementById('semesterSelect');
     const nameInput = document.getElementById('scheduleNameInput');
+    const suggestionStatus = document.getElementById('aiSuggestionStatus');
+    const suggestionList = document.getElementById('aiSuggestionList');
+    const progressHint = document.getElementById('aiProgressHint');
 
     const userName = "{{ current_user.username | default('Plan', true) }}".trim();
+    const isAuthenticated = {{ 'true' if current_user.is_authenticated else 'false' }};
+    const scheduleType = "{{ schedule_type }}";
+    const aiSuggestionsAllowed = {{ 'true' if ai_suggestions_allowed else 'false' }};
 
     function autoFillName() {
         const year = yearSelect.value;
@@ -105,8 +143,115 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    async function loadAiPreview() {
+        if (!isAuthenticated || !suggestionStatus || !suggestionList) return;
+        if (scheduleType !== 'future') return;
+        if (!aiSuggestionsAllowed) {
+            suggestionStatus.className = 'alert alert-secondary small mb-2';
+            suggestionStatus.textContent = "{{ ai_suggestions_gate_message or 'Suggestions require a declared major/minor or a completed past schedule.' }}";
+            suggestionList.innerHTML = '<div class="text-muted">No suggestions available.</div>';
+            return;
+        }
+
+        const year = yearSelect.value;
+        const semester = semesterSelect.value;
+        if (!year || !semester) return;
+
+        suggestionStatus.className = 'alert alert-light border small mb-2';
+        suggestionStatus.textContent = 'Loading suggestions...';
+
+        try {
+            const response = await fetch(`/student/api/recommendations_preview?year=${encodeURIComponent(year)}&semester=${encodeURIComponent(semester)}&schedule_type=${encodeURIComponent(scheduleType)}&limit=5`);
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                suggestionStatus.className = 'alert alert-warning small mb-2';
+                suggestionStatus.textContent = result.message || 'Could not load suggestions.';
+                suggestionList.innerHTML = '<div class="text-muted">No suggestions available.</div>';
+                return;
+            }
+
+            const recs = result.recommendations || [];
+            suggestionStatus.className = 'alert alert-success small mb-2';
+            suggestionStatus.textContent = `Loaded ${recs.length} recommendations for ${semester} ${year}.`;
+
+            const missing = (result.context && result.context.missing_credits_by_area) || {};
+            const missingParts = Object.entries(missing)
+                .slice(0, 2)
+                .map(([k, v]) => `${k}: ${Number(v).toFixed(1)}cr`);
+            const gradRemaining = Number((result.context && result.context.remaining_to_graduate) || 0).toFixed(1);
+            const gradRequired = Number((result.context && result.context.graduation_required_credits) || 124).toFixed(1);
+            const areaHint = missingParts.length ? `Priority gaps: ${missingParts.join(' · ')}` : 'No outstanding area credit gaps detected.';
+            progressHint.textContent = `${areaHint} Remaining to graduation (${gradRequired}): ${gradRemaining}cr.`;
+
+            if (!recs.length) {
+                suggestionList.innerHTML = '<div class="text-muted">No eligible recommendations found for this term.</div>';
+                return;
+            }
+
+            suggestionList.innerHTML = recs.map((c) => {
+                const title = c.display_title || c.Course_Title || '';
+                const area = c.Area_of_Study || 'General';
+                const credits = c.Credits || 0;
+                const reason = c.suggestion_reason || '';
+                const prereqStatus = c.prerequisite_status || {};
+                const prereqItems = Array.isArray(prereqStatus.items) ? prereqStatus.items : [];
+                const prereqState = prereqStatus.state || 'none';
+                const prereqPill = prereqState === 'satisfied'
+                    ? '<span class="badge bg-success-subtle text-success border border-success-subtle">Prereqs met</span>'
+                    : prereqState === 'warning'
+                        ? '<span class="badge bg-warning-subtle text-warning border border-warning-subtle">Prereq warning</span>'
+                        : '<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">No prereqs</span>';
+
+                const prereqItemsHtml = prereqItems.length
+                    ? `<div class="d-flex flex-wrap gap-1 mt-1">${prereqItems.map((item) => {
+                        const status = item.status || 'untrackable';
+                        const klass = status === 'satisfied'
+                            ? 'bg-success-subtle text-success border-success-subtle'
+                            : status === 'missing'
+                                ? 'bg-danger-subtle text-danger border-danger-subtle'
+                                : 'bg-secondary-subtle text-secondary border-secondary-subtle';
+                        const term = String(item.term || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                        const reasonText = String(item.reason || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                        return `<span class="badge ${klass} border rounded-pill" title="${reasonText}">${term}</span>`;
+                    }).join('')}</div>`
+                    : '';
+                return `
+                    <div class="list-group-item px-0 py-2">
+                        <div class="fw-bold">${title}</div>
+                        <div class="d-flex gap-2 mt-1">
+                            <span class="badge bg-primary-subtle text-primary">${area}</span>
+                            <span class="badge bg-light text-dark border">${credits} CR</span>
+                            ${prereqPill}
+                        </div>
+                        ${prereqItemsHtml}
+                        ${reason ? `<div class="small text-muted mt-1">${reason}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        } catch (err) {
+            suggestionStatus.className = 'alert alert-warning small mb-2';
+            suggestionStatus.textContent = 'Could not load suggestions right now.';
+            suggestionList.innerHTML = '<div class="text-muted">No suggestions available.</div>';
+        }
+    }
+
     yearSelect.addEventListener('change', autoFillName);
     semesterSelect.addEventListener('change', autoFillName);
+    yearSelect.addEventListener('change', loadAiPreview);
+    semesterSelect.addEventListener('change', loadAiPreview);
+
+    // Realtime refresh hooks: if course add/remove events happen in another tab,
+    // this page refreshes preview suggestions automatically.
+    window.addEventListener('storage', (e) => {
+        if (e.key === 'acadex-courses-updated') {
+            loadAiPreview();
+        }
+    });
+
+    setInterval(() => {
+        if (document.visibilityState === 'visible') loadAiPreview();
+    }, 15000);
 });
 </script>
 {% endblock %}

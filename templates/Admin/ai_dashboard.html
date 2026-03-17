@@ -1,0 +1,497 @@
+{% extends 'Layouts/admin_base.html' %}
+{% from 'partials/heroicons.html' import hi %}
+
+{% block title %}AI Dashboard{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+    <h2 class="mb-0">{{ hi('robot', 'ax-icon me-2') }}AI Dashboard</h2>
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin.ai_dashboard') }}">
+        {{ hi('refresh', 'ax-icon me-2') }}Refresh
+    </a>
+</div>
+
+<div class="alert alert-info">
+    Analytics on this page are computed from schedules and course catalogs, and are available to admins regardless of whether student-facing AI features are enabled.
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header fw-bold">AI Settings</div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('admin.ai_settings_update') }}" class="row g-3">
+                    <div class="col-12">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="ai_enabled_setting" name="ai_enabled_setting" {% if (ai_enabled_setting|string)|lower in ['1','true','yes','on'] %}checked{% endif %}>
+                            <label class="form-check-label" for="ai_enabled_setting">Enable student-facing AI features</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="ai_data_collection_enabled_setting" name="ai_data_collection_enabled_setting" {% if (ai_data_collection_enabled_setting|string)|lower in ['1','true','yes','on'] %}checked{% endif %}>
+                            <label class="form-check-label" for="ai_data_collection_enabled_setting">Enable AI event logging (opt-in only)</label>
+                        </div>
+
+                        <hr class="my-3">
+
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="ai_notifications_enabled_setting" name="ai_notifications_enabled_setting" {% if (ai_notifications_enabled_setting|string)|lower in ['1','true','yes','on'] %}checked{% endif %}>
+                            <label class="form-check-label" for="ai_notifications_enabled_setting">Enable AI notifications (delivery rules only)</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="ai_recommendations_enabled_setting" name="ai_recommendations_enabled_setting" {% if (ai_recommendations_enabled_setting|string)|lower in ['1','true','yes','on'] %}checked{% endif %}>
+                            <label class="form-check-label" for="ai_recommendations_enabled_setting">Enable AI recommendations</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="ai_predictive_analysis_enabled_setting" name="ai_predictive_analysis_enabled_setting" {% if (ai_predictive_analysis_enabled_setting|string)|lower in ['1','true','yes','on'] %}checked{% endif %}>
+                            <label class="form-check-label" for="ai_predictive_analysis_enabled_setting">Enable predictive analysis</label>
+                        </div>
+                        <div class="row g-2 align-items-end mt-1">
+                            <div class="col-md-7">
+                                <label class="form-label" for="ai_notifications_frequency_setting">Notification frequency</label>
+                                <select class="form-select" id="ai_notifications_frequency_setting" name="ai_notifications_frequency_setting">
+                                    {% set freq = (ai_notifications_frequency_setting|string)|lower %}
+                                    <option value="realtime" {% if freq == 'realtime' %}selected{% endif %}>Real-time</option>
+                                    <option value="daily" {% if freq == 'daily' or not freq %}selected{% endif %}>Daily digest</option>
+                                    <option value="weekly" {% if freq == 'weekly' %}selected{% endif %}>Weekly digest</option>
+                                </select>
+                                <div class="form-text">Applies to notification delivery cadence once notifications are implemented.</div>
+                            </div>
+                        </div>
+
+                        <hr class="my-3">
+
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="behavior_tracking_enabled_setting" name="behavior_tracking_enabled_setting" {% if (behavior_tracking_enabled_setting|string)|lower in ['1','true','yes','on'] %}checked{% endif %}>
+                            <label class="form-check-label" for="behavior_tracking_enabled_setting">Enable always-on behavior tracking</label>
+                        </div>
+                        <div class="row g-2 align-items-end mt-1">
+                            <div class="col-md-7">
+                                <label class="form-label" for="behavior_tracking_level_setting">Tracking level</label>
+                                <select class="form-select" id="behavior_tracking_level_setting" name="behavior_tracking_level_setting">
+                                    {% set lvl = (behavior_tracking_level_setting|string)|lower %}
+                                    <option value="minimal" {% if lvl == 'minimal' %}selected{% endif %}>Minimal</option>
+                                    <option value="standard" {% if lvl == 'standard' or not lvl %}selected{% endif %}>Standard</option>
+                                    <option value="detailed" {% if lvl == 'detailed' %}selected{% endif %}>Detailed</option>
+                                </select>
+                                <div class="form-text">Controls how much event detail is collected once tracking is implemented.</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 d-flex gap-2">
+                        <button class="btn btn-primary" type="submit">{{ hi('save', 'ax-icon me-2') }}Save</button>
+                        <a class="btn btn-outline-primary" href="{{ url_for('admin.ai_export_events_csv') }}">
+                            {{ hi('download', 'ax-icon me-2') }}Export AI Events CSV
+                        </a>
+                        <a class="btn btn-outline-primary" href="{{ url_for('admin.ai_export_behavior_events_csv') }}">
+                            {{ hi('download', 'ax-icon me-2') }}Export Behavior Events CSV
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header fw-bold">Filters</div>
+            <div class="card-body">
+                <form method="GET" action="{{ url_for('admin.ai_dashboard') }}" class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Year</label>
+                        <select class="form-select" name="year">
+                            <option value="">All</option>
+                            {% for y in years %}
+                                <option value="{{ y }}" {% if selected_year and selected_year|int == y %}selected{% endif %}>{{ y }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Semester</label>
+                        <select class="form-select" name="semester">
+                            <option value="">All</option>
+                            {% for s in semesters %}
+                                <option value="{{ s }}" {% if selected_semester == s %}selected{% endif %}>{{ s }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Schedule Type</label>
+                        <select class="form-select" name="schedule_type">
+                            <option value="">All</option>
+                            <option value="past" {% if selected_schedule_type == 'past' %}selected{% endif %}>Past</option>
+                            <option value="future" {% if selected_schedule_type == 'future' %}selected{% endif %}>Future</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Area (Major)</label>
+                        <select class="form-select" name="area">
+                            <option value="">All</option>
+                            {% for a in areas %}
+                                <option value="{{ a }}" {% if selected_area == a %}selected{% endif %}>{{ a }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="col-12 d-flex align-items-center justify-content-between">
+                        <div class="small text-muted">
+                            Schedules: <span class="fw-bold">{{ schedule_count }}</span> 
+                            &middot; Courses (rows): <span class="fw-bold">{{ included_course_rows }}</span>
+                            &middot; Unique courses: <span class="fw-bold">{{ unique_courses }}</span>
+                            &middot; Unique instructors: <span class="fw-bold">{{ unique_instructors }}</span>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-success" type="submit">{{ hi('filter', 'ax-icon me-2') }}Apply</button>
+                            <a class="btn btn-outline-secondary" href="{{ url_for('admin.ai_dashboard') }}">{{ hi('x-circle', 'ax-icon me-2') }}Clear</a>
+                        </div>
+                    </div>
+
+                    <div class="col-12 d-flex flex-wrap gap-2">
+                        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('admin.ai_dashboard', year=selected_year, semester=selected_semester, schedule_type=selected_schedule_type, area=selected_area, export='top_courses') }}">
+                            {{ hi('download', 'ax-icon me-2') }}Export Top Courses
+                        </a>
+                        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('admin.ai_dashboard', year=selected_year, semester=selected_semester, schedule_type=selected_schedule_type, area=selected_area, export='top_instructors') }}">
+                            {{ hi('download', 'ax-icon me-2') }}Export Top Instructors
+                        </a>
+                        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('admin.ai_dashboard', year=selected_year, semester=selected_semester, schedule_type=selected_schedule_type, area=selected_area, export='credits_by_area') }}">
+                            {{ hi('download', 'ax-icon me-2') }}Export Credits by Area
+                        </a>
+                        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('admin.ai_dashboard', year=selected_year, semester=selected_semester, schedule_type=selected_schedule_type, area=selected_area, export='heatmap') }}">
+                            {{ hi('download', 'ax-icon me-2') }}Export Heatmap
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header fw-bold">AI Event Usage (Anonymized)</div>
+            <div class="card-body">
+                <canvas id="aiUsageChart" height="110"></canvas>
+                <div class="small text-muted mt-2">Shows event volume by day from AI event logs.</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header fw-bold">Behavior Tracking Volume (Anonymized)</div>
+            <div class="card-body">
+                <canvas id="behaviorUsageChart" height="110"></canvas>
+                <div class="small text-muted mt-2">Shows behavior-event collection volume by day.</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header fw-bold">Top AI Event Types</div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Event Type</th>
+                                <th class="text-end">Count</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for r in ai_event_type_counts %}
+                            <tr>
+                                <td class="fw-bold">{{ r.event_type }}</td>
+                                <td class="text-end">{{ r.count }}</td>
+                            </tr>
+                            {% endfor %}
+                            {% if ai_event_type_counts|length == 0 %}
+                            <tr><td colspan="2" class="text-muted">No AI events recorded yet.</td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header fw-bold">Top Behavior Event Types</div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Event Type</th>
+                                <th class="text-end">Count</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for r in behavior_event_type_counts %}
+                            <tr>
+                                <td class="fw-bold">{{ r.event_type }}</td>
+                                <td class="text-end">{{ r.count }}</td>
+                            </tr>
+                            {% endfor %}
+                            {% if behavior_event_type_counts|length == 0 %}
+                            <tr><td colspan="2" class="text-muted">No behavior events recorded yet.</td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header fw-bold">GPA Trend (Past schedules)</div>
+            <div class="card-body">
+                <canvas id="gpaChart" height="120"></canvas>
+                <div class="small text-muted mt-2">Averages per term across selected schedules.</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header fw-bold">Credits by Area</div>
+            <div class="card-body">
+                <canvas id="creditsChart" height="120"></canvas>
+                <div class="small text-muted mt-2">Area is taken from course catalogs when present; otherwise inferred from course code prefix.</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-header fw-bold">Course Placement Heatmap (Day x Period)</div>
+    <div class="card-body">
+        {% if heat_rows|length == 0 %}
+            <div class="text-muted">No timed courses found for the selected filters.</div>
+        {% else %}
+            <div class="table-responsive">
+                <table class="table table-sm table-striped align-middle">
+                    <thead>
+                        <tr>
+                            <th style="width: 120px;">Period</th>
+                            {% for d in heat_days %}
+                                <th class="text-center">{{ d }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in heat_rows %}
+                            <tr>
+                                <td class="fw-bold">{{ r.period }}</td>
+                                {% for c in r.counts %}
+                                    <td>
+                                        <div class="d-flex align-items-center justify-content-between">
+                                            <span class="me-2">{{ c }}</span>
+                                            <div class="progress flex-grow-1" style="height: 8px;">
+                                                {% set pct = 0 %}
+                                                {% if heat_max and heat_max > 0 %}
+                                                    {% set pct = (c * 100 // heat_max) %}
+                                                {% endif %}
+                                                <div class="progress-bar" role="progressbar" data-pct="{{ pct }}" style="width: 0%"></div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header fw-bold">Top Courses</div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th class="text-end">Count</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for c in top_courses %}
+                                <tr>
+                                    <td class="fw-bold">{{ c.course_title }}</td>
+                                    <td class="text-end">{{ c.count }}</td>
+                                </tr>
+                            {% endfor %}
+                            {% if top_courses|length == 0 %}
+                                <tr><td colspan="2" class="text-muted">No data for the selected filters.</td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header fw-bold">Top Instructors</div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Instructor</th>
+                                <th class="text-end">Count</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for f in top_faculty %}
+                                <tr>
+                                    <td class="fw-bold">{{ f.instructor }}</td>
+                                    <td class="text-end">{{ f.count }}</td>
+                                </tr>
+                            {% endfor %}
+                            {% if top_faculty|length == 0 %}
+                                <tr><td colspan="2" class="text-muted">No data for the selected filters.</td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="application/json" id="gpaLabelsJson">{{ gpa_terms_json|safe }}</script>
+<script type="application/json" id="gpaDataJson">{{ gpa_series_json|safe }}</script>
+<script type="application/json" id="creditsLabelsJson">{{ credits_by_area_json|safe }}</script>
+<script type="application/json" id="creditsDataJson">{{ credits_series_json|safe }}</script>
+<script type="application/json" id="aiEventDaysJson">{{ ai_event_days_json|safe }}</script>
+<script type="application/json" id="aiEventCountsJson">{{ ai_event_counts_json|safe }}</script>
+<script type="application/json" id="behaviorEventDaysJson">{{ behavior_event_days_json|safe }}</script>
+<script type="application/json" id="behaviorEventCountsJson">{{ behavior_event_counts_json|safe }}</script>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/chart_theme.js') }}"></script>
+<script>
+    function readJsonScript(id, fallback) {
+        const el = document.getElementById(id);
+        if (!el) return fallback;
+        try { return JSON.parse(el.textContent || ''); } catch (e) { return fallback; }
+    }
+
+    // Heatmap progress bars
+    document.querySelectorAll('.progress-bar[data-pct]').forEach((el) => {
+        const pct = parseInt(el.getAttribute('data-pct') || '0', 10);
+        el.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+    });
+
+    const gpaLabels = readJsonScript('gpaLabelsJson', []);
+    const gpaData = readJsonScript('gpaDataJson', []);
+    const creditsLabels = readJsonScript('creditsLabelsJson', []);
+    const creditsData = readJsonScript('creditsDataJson', []);
+    const aiEventDays = readJsonScript('aiEventDaysJson', []);
+    const aiEventCounts = readJsonScript('aiEventCountsJson', []);
+    const behaviorEventDays = readJsonScript('behaviorEventDaysJson', []);
+    const behaviorEventCounts = readJsonScript('behaviorEventCountsJson', []);
+
+    if (window.AcadexCharts) {
+        AcadexCharts.applyChartDefaults();
+    }
+    const p = window.AcadexCharts ? AcadexCharts.palette() : null;
+
+    const gpaCtx = document.getElementById('gpaChart');
+    if (gpaCtx && Array.isArray(gpaLabels) && Array.isArray(gpaData)) {
+        new Chart(gpaCtx, {
+            type: 'line',
+            data: {
+                labels: gpaLabels,
+                datasets: [{
+                    label: 'Avg GPA',
+                    data: gpaData,
+                    borderWidth: 2,
+                    tension: 0.25,
+                    fill: false,
+                    borderColor: p ? p.primary : undefined,
+                    pointBackgroundColor: p ? p.primary : undefined,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: true } },
+                scales: { y: { suggestedMin: 0, suggestedMax: 4 } }
+            }
+        });
+    }
+
+    const creditsCtx = document.getElementById('creditsChart');
+    if (creditsCtx && Array.isArray(creditsLabels) && Array.isArray(creditsData)) {
+        new Chart(creditsCtx, {
+            type: 'bar',
+            data: {
+                labels: creditsLabels,
+                datasets: [{
+                    label: 'Credits',
+                    data: creditsData,
+                    borderWidth: 1,
+                    backgroundColor: p ? p.rgbaPrimary(0.85) : undefined,
+                    borderColor: p ? p.primary : undefined,
+                }]
+            },
+            options: { responsive: true, plugins: { legend: { display: true } } }
+        });
+    }
+
+    const aiUsageCtx = document.getElementById('aiUsageChart');
+    if (aiUsageCtx && Array.isArray(aiEventDays) && Array.isArray(aiEventCounts)) {
+        new Chart(aiUsageCtx, {
+            type: 'line',
+            data: {
+                labels: aiEventDays,
+                datasets: [{
+                    label: 'AI Events',
+                    data: aiEventCounts,
+                    borderWidth: 2,
+                    tension: 0.2,
+                    borderColor: p ? p.info : undefined,
+                    pointBackgroundColor: p ? p.info : undefined,
+                }]
+            },
+            options: { responsive: true, plugins: { legend: { display: true } } }
+        });
+    }
+
+    const behaviorUsageCtx = document.getElementById('behaviorUsageChart');
+    if (behaviorUsageCtx && Array.isArray(behaviorEventDays) && Array.isArray(behaviorEventCounts)) {
+        new Chart(behaviorUsageCtx, {
+            type: 'line',
+            data: {
+                labels: behaviorEventDays,
+                datasets: [{
+                    label: 'Behavior Events',
+                    data: behaviorEventCounts,
+                    borderWidth: 2,
+                    tension: 0.2,
+                    borderColor: p ? p.warning : undefined,
+                    pointBackgroundColor: p ? p.warning : undefined,
+                }]
+            },
+            options: { responsive: true, plugins: { legend: { display: true } } }
+        });
+    }
+
+    // If the user toggles theme while this page is open, re-apply defaults.
+    // (Existing charts keep rendering fine; this mainly improves tooltips/ticks for new charts.)
+    window.addEventListener('acadex:theme-changed', function () {
+        if (window.AcadexCharts) AcadexCharts.applyChartDefaults();
+    });
+</script>
+{% endblock %}

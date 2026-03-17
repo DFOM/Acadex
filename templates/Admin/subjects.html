@@ -2,45 +2,165 @@
 {% block title %}Manage Subject Areas{% endblock %}
 
 {% block content %}
-<h2 class="mb-4">Subject Areas & Benchmarks</h2>
-<p class="text-muted">Set the minimum credits required for graduation in each specific subject area.</p>
+<h2 class="mb-2">Areas of Study Configuration</h2>
+<p class="text-muted mb-4">Loaded dynamically from uploaded datasets. Configure role and credit rules per area.</p>
 
-<div class="card shadow-sm">
+<div class="card shadow-sm border-0 mb-3">
+    <div class="card-body py-3">
+        <div class="small text-muted">
+            - <strong>Counts as Area</strong> controls whether the area appears in student flows (registration, analytics, AI).
+            <br>
+            - Credit minimums are validated against total available credits in uploaded datasets.
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0">
     <div class="card-body">
-        <table class="table table-hover table-striped">
+        {% if not has_datasets %}
+        <div class="alert alert-warning mb-0">No dataset areas found. Upload course catalogs first.</div>
+        {% else %}
+        <table class="table table-hover align-middle">
             <thead>
                 <tr>
-                    <th>Subject ID</th>
-                    <th>Subject Area Name</th>
-                    <th>Credits Required (Benchmark)</th>
-                    <th>Actions</th>
+                    <th>Area Name</th>
+                    <th>Counts as Area</th>
+                    <th>Role</th>
+                    <th>Major Min Credits</th>
+                    <th>Minor Min Credits</th>
+                    <th>Available Credits</th>
+                    <th>Status</th>
                 </tr>
             </thead>
             <tbody>
-                {% for subject in subjects %}
-                <tr>
-                    <td class="align-middle">{{ subject.id }}</td>
-                    <td class="align-middle fw-bold">{{ subject.name }}</td>
-                    <td class="align-middle">
-                        <form method="POST" action="{{ url_for('admin.manage_subjects') }}" class="d-flex align-items-center">
-                            <input type="hidden" name="subject_id" value="{{ subject.id }}">
-                            <input type="number" name="min_depth_credits" class="form-control form-control-sm me-2" style="width: 80px;" value="{{ subject.min_depth_credits or 0 }}">
-                            <button type="submit" class="btn btn-sm btn-primary">Save</button>
-                        </form>
+                {% for subject in subjects_rows %}
+                <tr data-subject-id="{{ subject.id }}">
+                    <td class="fw-bold">{{ subject.name }}</td>
+                    <td>
+                        <input class="form-check-input subject-counts-toggle" type="checkbox" {% if subject.counts_as_area %}checked{% endif %}>
                     </td>
-                    <td class="align-middle">
-                        {% if subject.is_major %}
-                            <span class="badge bg-success">Major</span>
-                        {% else %}
-                            <span class="badge bg-secondary">Elective / Core</span>
-                        {% endif %}
+                    <td>
+                        <select class="form-select form-select-sm subject-role-select" style="min-width: 130px;">
+                            <option value="major" {% if subject.role == 'major' %}selected{% endif %}>Major</option>
+                            <option value="minor" {% if subject.role == 'minor' %}selected{% endif %}>Minor</option>
+                            <option value="both" {% if subject.role == 'both' %}selected{% endif %}>Both</option>
+                            <option value="generic" {% if subject.role == 'generic' %}selected{% endif %}>Generic / Area</option>
+                        </select>
+                    </td>
+                    <td>
+                        <input type="number" class="form-control form-control-sm subject-major-min" min="0" step="0.5" value="{{ subject.major_min_credits }}">
+                    </td>
+                    <td>
+                        <input type="number" class="form-control form-control-sm subject-minor-min" min="0" step="0.5" value="{{ subject.minor_min_credits }}">
+                    </td>
+                    <td>
+                        <span class="badge bg-light text-dark border">{{ subject.available_credits }} cr</span>
+                    </td>
+                    <td>
+                        <span class="small text-muted subject-status">Saved</span>
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="4" class="text-center">No subjects found. Upload a dataset to auto-populate this list.</td></tr>
+                <tr>
+                    <td colspan="7" class="text-center text-muted">No study areas found in uploaded datasets.</td>
+                </tr>
                 {% endfor %}
             </tbody>
         </table>
+        {% endif %}
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const rows = document.querySelectorAll('tr[data-subject-id]');
+
+    const setRowStatus = (row, message, ok = true) => {
+        const el = row.querySelector('.subject-status');
+        if (!el) return;
+        el.textContent = message;
+        el.className = ok ? 'small text-success subject-status' : 'small text-danger subject-status';
+    };
+
+    const applyRoleInputState = (row) => {
+        const role = row.querySelector('.subject-role-select')?.value;
+        const majorInput = row.querySelector('.subject-major-min');
+        const minorInput = row.querySelector('.subject-minor-min');
+        if (!majorInput || !minorInput) return;
+
+        majorInput.disabled = (role === 'minor');
+        minorInput.disabled = (role === 'major');
+        if (role === 'generic') {
+            majorInput.disabled = true;
+            minorInput.disabled = true;
+            majorInput.value = '0';
+            minorInput.value = '0';
+        }
+    };
+
+    const saveRow = async (row) => {
+        const subjectId = row.getAttribute('data-subject-id');
+        if (!subjectId) return;
+
+        const countsAsArea = row.querySelector('.subject-counts-toggle')?.checked || false;
+        const role = row.querySelector('.subject-role-select')?.value || 'major';
+        const majorMin = parseFloat(row.querySelector('.subject-major-min')?.value || '0');
+        const minorMin = parseFloat(row.querySelector('.subject-minor-min')?.value || '0');
+
+        setRowStatus(row, 'Saving...', true);
+        try {
+            const response = await fetch(`/admin/api/subjects/${subjectId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    counts_as_area: countsAsArea,
+                    role,
+                    major_min_credits: Number.isFinite(majorMin) ? majorMin : 0,
+                    minor_min_credits: Number.isFinite(minorMin) ? minorMin : 0,
+                }),
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) {
+                setRowStatus(row, result.message || 'Save failed', false);
+                return;
+            }
+
+            if (result.subject) {
+                const majorInput = row.querySelector('.subject-major-min');
+                const minorInput = row.querySelector('.subject-minor-min');
+                const roleSelect = row.querySelector('.subject-role-select');
+                if (majorInput) majorInput.value = result.subject.major_min_credits;
+                if (minorInput) minorInput.value = result.subject.minor_min_credits;
+                if (roleSelect) roleSelect.value = result.subject.role;
+            }
+
+            applyRoleInputState(row);
+            setRowStatus(row, 'Saved', true);
+        } catch (err) {
+            setRowStatus(row, 'Save failed', false);
+        }
+    };
+
+    rows.forEach((row) => {
+        applyRoleInputState(row);
+
+        const controls = [
+            row.querySelector('.subject-counts-toggle'),
+            row.querySelector('.subject-role-select'),
+            row.querySelector('.subject-major-min'),
+            row.querySelector('.subject-minor-min'),
+        ].filter(Boolean);
+
+        controls.forEach((control) => {
+            const eventName = control.classList.contains('subject-major-min') || control.classList.contains('subject-minor-min')
+                ? 'change'
+                : 'change';
+            control.addEventListener(eventName, () => {
+                applyRoleInputState(row);
+                saveRow(row);
+            });
+        });
+    });
+});
+</script>
 {% endblock %}

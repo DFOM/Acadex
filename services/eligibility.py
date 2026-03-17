@@ -32,12 +32,51 @@ def clean_prereq_string(prereq: Optional[str]) -> str:
     if prereq is None:
         return ""
     s = str(prereq).strip()
+    s = re.sub(r"\bAND/OR\b", " OR ", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s*&\s*", " AND ", s)
+    s = re.sub(r"\s*\|\s*", " OR ", s)
+    s = re.sub(r"\s+", " ", s).strip()
     return "" if s.lower() in _NONE_SENTINELS else s
+
+
+def _major_minor_gate(
+    prereq_str: str,
+    *,
+    major_name: Optional[str],
+    minor_name: Optional[str],
+) -> bool:
+    text = (prereq_str or '').strip().lower()
+    if not text:
+        return True
+
+    major = (major_name or '').strip().lower()
+    minor = (minor_name or '').strip().lower()
+
+    if 'major' in text:
+        if major and major in text:
+            pass
+        elif major:
+            pass
+        else:
+            return False
+
+    if 'minor' in text:
+        if minor and minor in text:
+            pass
+        elif minor:
+            pass
+        else:
+            return False
+
+    return True
 
 
 def prereqs_met(
     prereq: Optional[str],
     completed_passing_courses: Iterable[str],
+    *,
+    major_name: Optional[str] = None,
+    minor_name: Optional[str] = None,
 ) -> Tuple[bool, Optional[str]]:
     """Return (met, friendly_error).
 
@@ -59,4 +98,8 @@ def prereqs_met(
     completed_set.discard("")
 
     met = evaluate(expr, completed_set, normalizer=normalize_course_code_for_prereqs)
-    return (met, None)
+    if not met:
+        return (False, None)
+
+    major_minor_ok = _major_minor_gate(prereq_str, major_name=major_name, minor_name=minor_name)
+    return (bool(major_minor_ok), None)

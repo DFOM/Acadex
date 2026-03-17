@@ -5,35 +5,89 @@
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
         <h2 class="mb-0">Class Period Timings</h2>
-        <p class="text-muted">Adjusting these times will automatically update the student timetable grid and the Lunch Break calculation.</p>
+        <p class="text-muted">Changes here immediately affect the student schedule grid across all schedules.</p>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-header" style="background: var(--ax-surface);">
+        <strong>Lunch Break</strong>
+        <div class="text-muted small">Default 11:40–12:40 (60 minutes). Displayed after the period that ends at the lunch start time.</div>
+    </div>
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label">Lunch Start</label>
+                <input type="time" id="lunch_start_time" class="form-control" value="{{ lunch_start_time }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Duration (minutes)</label>
+                <input type="number" id="lunch_duration_minutes" class="form-control" value="{{ lunch_duration_minutes }}" min="1" max="240">
+            </div>
+            <div class="col-md-3">
+                <button class="btn btn-primary" id="saveLunchBtn">Save Lunch Settings</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-header" style="background: var(--ax-surface);">
+        <strong>Add Period</strong>
+        <div class="text-muted small">Default duration is 75 minutes.</div>
+    </div>
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label">Period #</label>
+                <input type="number" id="new_period_name" class="form-control" placeholder="e.g., 7" min="1">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Start Time</label>
+                <input type="time" id="new_period_start" class="form-control">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Duration (minutes)</label>
+                <input type="number" id="new_period_duration" class="form-control" value="75" min="1" max="240">
+            </div>
+            <div class="col-md-3">
+                <button class="btn btn-success" id="createPeriodBtn">Add Period</button>
+            </div>
+        </div>
     </div>
 </div>
 
 <div class="card shadow-sm border-0">
     <div class="card-body">
         <table class="table table-hover align-middle">
-            <thead class="table-light">
+            <thead style="background: var(--ax-surface);">
                 <tr>
-                    <th>Period Number</th>
-                    <th>Start Time</th>
-                    <th>End Time</th>
+                    <th style="width: 20%">Period</th>
+                    <th style="width: 20%">Start</th>
+                    <th style="width: 20%">Duration (min)</th>
+                    <th style="width: 20%">End</th>
                     <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
                 {% for period in periods %}
                 <tr>
-                    <td class="fw-bold fs-5 text-primary">Period {{ period.name }}</td>
+                    <td class="fw-bold fs-6 text-primary">Period <input type="number" class="form-control d-inline-block" style="width: 90px;" id="name_{{ period.id }}" value="{{ period.name }}"></td>
                     <td>
                         <input type="time" id="start_{{ period.id }}" class="form-control" value="{{ period.start_time }}">
                     </td>
                     <td>
-                        <input type="time" id="end_{{ period.id }}" class="form-control" value="{{ period.end_time }}">
+                        <input type="number" id="dur_{{ period.id }}" class="form-control" value="75" min="1" max="240">
+                        <div class="small text-muted">Computed from start→end</div>
                     </td>
                     <td>
-                        <button class="btn btn-success update-period-btn shadow-sm" data-id="{{ period.id }}">
-                            Save Times
-                        </button>
+                        <input type="time" id="end_{{ period.id }}" class="form-control" value="{{ period.end_time }}" disabled>
+                    </td>
+                    <td>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-success update-period-btn shadow-sm" data-id="{{ period.id }}">Save</button>
+                            <button class="btn btn-outline-danger delete-period-btn shadow-sm" data-id="{{ period.id }}">Delete</button>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
@@ -44,11 +98,99 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    const toMinutes = (hhmm) => {
+        if (!hhmm || !hhmm.includes(':')) return null;
+        const [h, m] = hhmm.split(':').map(x => parseInt(x, 10));
+        if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+        return h * 60 + m;
+    };
+    const toHHMM = (mins) => {
+        const total = ((mins % (24 * 60)) + (24 * 60)) % (24 * 60);
+        const h = Math.floor(total / 60);
+        const m = total % 60;
+        return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+    };
+
+    // Initialize duration inputs from start/end times
+    document.querySelectorAll('button.update-period-btn').forEach(btn => {
+        const id = btn.getAttribute('data-id');
+        const start = document.getElementById(`start_${id}`)?.value;
+        const end = document.getElementById(`end_${id}`)?.value;
+        const startM = toMinutes(start);
+        const endM = toMinutes(end);
+        if (startM != null && endM != null) {
+            let d = endM - startM;
+            if (d <= 0) d += 24 * 60;
+            const durEl = document.getElementById(`dur_${id}`);
+            if (durEl) durEl.value = String(d);
+        }
+    });
+
+    // Lunch save
+    const saveLunchBtn = document.getElementById('saveLunchBtn');
+    if (saveLunchBtn) {
+        saveLunchBtn.addEventListener('click', async () => {
+            const lunchStart = document.getElementById('lunch_start_time').value;
+            const lunchDur = document.getElementById('lunch_duration_minutes').value;
+            const originalText = saveLunchBtn.innerText;
+            saveLunchBtn.innerText = 'Saving...';
+            saveLunchBtn.disabled = true;
+            try {
+                const response = await fetch('/admin/api/lunch_settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lunch_start_time: lunchStart, lunch_duration_minutes: lunchDur })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    saveLunchBtn.innerText = 'Saved!';
+                    setTimeout(() => { saveLunchBtn.innerText = originalText; saveLunchBtn.disabled = false; }, 1000);
+                } else {
+                    alert(result.message || 'Update failed');
+                    saveLunchBtn.innerText = originalText;
+                    saveLunchBtn.disabled = false;
+                }
+            } catch (e) {
+                console.error(e);
+                saveLunchBtn.innerText = originalText;
+                saveLunchBtn.disabled = false;
+            }
+        });
+    }
+
+    // Create period
+    const createBtn = document.getElementById('createPeriodBtn');
+    if (createBtn) {
+        createBtn.addEventListener('click', async () => {
+            const name = document.getElementById('new_period_name').value;
+            const startTime = document.getElementById('new_period_start').value;
+            const durationMinutes = document.getElementById('new_period_duration').value;
+            createBtn.disabled = true;
+            const originalText = createBtn.innerText;
+            createBtn.innerText = 'Adding...';
+            try {
+                const response = await fetch('/admin/api/periods/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, start_time: startTime, duration_minutes: durationMinutes })
+                });
+                const result = await response.json();
+                if (result.success) window.location.reload();
+                else { alert(result.message || 'Create failed'); createBtn.disabled = false; createBtn.innerText = originalText; }
+            } catch (e) {
+                console.error(e);
+                createBtn.disabled = false;
+                createBtn.innerText = originalText;
+            }
+        });
+    }
+
     document.querySelectorAll('.update-period-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             const id = e.currentTarget.getAttribute('data-id');
+            const name = document.getElementById(`name_${id}`).value;
             const startTime = document.getElementById(`start_${id}`).value;
-            const endTime = document.getElementById(`end_${id}`).value;
+            const durationMinutes = document.getElementById(`dur_${id}`).value;
 
             // Simple visual feedback
             const originalText = e.currentTarget.innerText;
@@ -56,14 +198,22 @@ document.addEventListener('DOMContentLoaded', () => {
             e.currentTarget.classList.replace('btn-success', 'btn-secondary');
 
             try {
-                const response = await fetch('/admin/api/update_period', {
+                const response = await fetch(`/admin/api/periods/${id}/update`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: id, start_time: startTime, end_time: endTime })
+                    body: JSON.stringify({ name: name, start_time: startTime, duration_minutes: durationMinutes })
                 });
                 const result = await response.json();
                 
                 if (result.success) {
+                    // Update end time in UI
+                    const startM = toMinutes(startTime);
+                    const durM = parseInt(durationMinutes, 10);
+                    if (startM != null && Number.isFinite(durM)) {
+                        const end = toHHMM(startM + durM);
+                        const endEl = document.getElementById(`end_${id}`);
+                        if (endEl) endEl.value = end;
+                    }
                     e.currentTarget.innerText = "Saved!";
                     e.currentTarget.classList.replace('btn-secondary', 'btn-success');
                     setTimeout(() => e.currentTarget.innerText = originalText, 2000);
@@ -73,6 +223,21 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (err) {
                 console.error(err);
                 alert("Network error.");
+            }
+        });
+    });
+
+    document.querySelectorAll('.delete-period-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.currentTarget.getAttribute('data-id');
+            if (!confirm('Delete this period?')) return;
+            try {
+                const response = await fetch(`/admin/api/periods/${id}/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+                const result = await response.json();
+                if (result.success) window.location.reload();
+                else alert(result.message || 'Delete failed');
+            } catch (err) {
+                console.error(err);
             }
         });
     });

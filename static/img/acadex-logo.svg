@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 64" role="img" aria-label="Acadex">
+  <defs>
+    <linearGradient id="axg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#60A5FA"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Icon -->
+  <g transform="translate(0,0)">
+    <rect x="6" y="6" width="52" height="52" rx="14" fill="url(#axg)"/>
+    <rect x="18" y="18" width="10" height="28" rx="4" fill="#FFFFFF" opacity="0.95"/>
+    <rect x="30" y="24" width="10" height="22" rx="4" fill="#FFFFFF" opacity="0.95"/>
+    <rect x="42" y="14" width="10" height="32" rx="4" fill="#FFFFFF" opacity="0.95"/>
+    <path d="M16 46.5H52" stroke="#FFFFFF" stroke-width="3" opacity="0.55" stroke-linecap="round"/>
+  </g>
+
+  <!-- Wordmark -->
+  <g transform="translate(74,0)">
+    <text x="0" y="42" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="30" font-weight="600" fill="#111827">Acadex</text>
+    <text x="0" y="58" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="12" font-weight="600" fill="#6B7280">Academic planning + analytics</text>
+  </g>
+</svg>

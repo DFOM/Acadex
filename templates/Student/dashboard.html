@@ -1,18 +1,30 @@
 {% extends "Layouts/student_base.html" %}
+{% from 'partials/heroicons.html' import hi %}
 
 {% block title %}My Dashboard{% endblock %}
 
 {% block content %}
 <div class="container mt-4 mb-5">
+    {% if request.args.get('deleted') == '1' %}
+    <div class="alert alert-success shadow-sm" role="alert">
+        Schedule deleted successfully.
+    </div>
+    {% endif %}
     
     <div class="d-flex justify-content-between align-items-center mb-4 border-bottom pb-3">
         <div>
             <h2 class="fw-bold text-primary mb-0">Welcome to your Dashboard, {{ current_user.username }}!</h2>
             <p class="text-muted mt-1 mb-0">Track your progress, manage schedules, and plan your academic future.</p>
         </div>
+        {% if has_dataset_years %}
         <a href="{{ url_for('auth.choose_schedule_type') }}" class="btn btn-primary shadow-sm">
-            <i class="bi bi-plus-circle me-2"></i>Create New Schedule
+            {{ hi('plus-circle', 'ax-icon me-2') }}Create New Schedule
         </a>
+        {% else %}
+        <button class="btn btn-secondary shadow-sm" type="button" disabled>
+            {{ hi('plus-circle', 'ax-icon me-2') }}Create New Schedule
+        </button>
+        {% endif %}
     </div>
 
     <div class="row g-4 mb-5">
@@ -21,10 +33,12 @@
             
             <div class="row g-3 mb-4">
                 <div class="col-md-6">
-                    <div class="card shadow-sm border-0 bg-light h-100 border-start border-primary border-4">
+                    <div class="card shadow-sm border-0 h-100 border-start border-primary border-4 ax-card">
                         <div class="card-body">
-                            <h6 class="text-muted text-uppercase fw-bold mb-2">Total Earned Credits</h6>
-                            <h2 class="display-5 fw-bold text-dark mb-0">{{ total_credits }}</h2>
+                            <h6 class="text-muted text-uppercase fw-bold mb-2">Credit Progress</h6>
+                            <h2 class="display-5 fw-bold mb-0">{{ total_credits }}</h2>
+                            <small class="text-muted d-block">In Progress: {{ in_progress_credits }} &middot; Projected: {{ projected_credits }}</small>
+                            <small class="text-primary d-block">Remaining to {{ graduation_required_credits }}: {{ remaining_to_graduate }}</small>
                             {% if current_user.expected_graduation %}
                             <small class="text-success">Class of {{ current_user.expected_graduation }}</small>
                             {% endif %}
@@ -33,26 +47,26 @@
                 </div>
 
                 <div class="col-md-6">
-                    <div class="card shadow-sm border-0 bg-light h-100 border-start border-success border-4">
+                    <div class="card shadow-sm border-0 h-100 border-start border-success border-4 ax-card">
                         <div class="card-body">
                             <h6 class="text-muted text-uppercase fw-bold mb-2">Current Overall GPA</h6>
-                            <h2 class="display-5 fw-bold text-dark mb-0">{{ "%.2f"|format(overall_gpa) }}</h2>
+                            <h2 class="display-5 fw-bold mb-0">{{ "%.2f"|format(overall_gpa) }}</h2>
                         </div>
                     </div>
                 </div>
 
                 <div class="col-md-6">
-                    <div class="card shadow-sm border-0 bg-light h-100 border-start border-info border-4">
+                    <div class="card shadow-sm border-0 h-100 border-start border-info border-4 ax-card">
                         <div class="card-body">
                             <h6 class="text-muted text-uppercase fw-bold mb-2">Predictive GPA</h6>
-                            <h2 class="display-5 fw-bold text-dark mb-0">{{ "%.2f"|format(predictive_gpa) }}</h2>
+                            <h2 class="display-5 fw-bold mb-0">{{ "%.2f"|format(predictive_gpa) }}</h2>
                             <small class="text-muted">Includes planned future grades</small>
                         </div>
                     </div>
                 </div>
                 
                 <div class="col-md-6">
-                    <div class="card shadow-sm border-0 bg-light h-100 border-start border-warning border-4">
+                    <div class="card shadow-sm border-0 h-100 border-start border-warning border-4 ax-card">
                         <div class="card-body">
                             <h6 class="text-muted text-uppercase fw-bold mb-2">Fun Facts</h6>
                             <p class="mb-1"><strong>Most frequent prof:</strong> <span class="text-primary">{{ favorite_faculty }}</span></p>
@@ -86,31 +100,125 @@
 
         <div class="col-lg-4">
             <h4 class="mb-3 text-secondary">My Schedules</h4>
+
+            <div class="card shadow-sm border-0 mb-3">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <h6 class="fw-bold mb-0">{{ hi('inbox', 'ax-icon me-2') }}Inbox</h6>
+                        {% if unread_notifications_count and unread_notifications_count > 0 %}
+                            <span class="badge bg-primary">{{ unread_notifications_count }} unread</span>
+                        {% endif %}
+                    </div>
+
+                    {% if notifications and notifications|length > 0 %}
+                        <div class="list-group list-group-flush">
+                            {% for n in notifications %}
+                                <div class="list-group-item px-0">
+                                    <div class="d-flex justify-content-between align-items-start gap-2">
+                                        <div class="me-2 flex-grow-1">
+                                            <div class="{% if not n.is_read %}fw-bold{% endif %}">{{ n.title }}</div>
+                                            <div class="small text-muted">{{ n.body }}</div>
+                                        </div>
+                                        <div class="text-end">
+                                            <div class="small text-muted text-nowrap">
+                                                {{ n.created_at.strftime('%b %d') if n.created_at else '' }}
+                                            </div>
+                                            {% if not n.is_read %}
+                                                <form action="{{ url_for('student.mark_notification_read', notif_id=n.id) }}" method="POST" class="mt-1">
+                                                    <button type="submit" class="btn btn-sm btn-outline-secondary">Mark read</button>
+                                                </form>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+
+                        {% if unread_notifications_count and unread_notifications_count > 0 %}
+                            <form action="{{ url_for('student.mark_all_notifications_read') }}" method="POST" class="mt-2">
+                                <button type="submit" class="btn btn-sm btn-outline-secondary w-100">Mark all as read</button>
+                            </form>
+                        {% endif %}
+                    {% else %}
+                        <div class="text-muted small">No notifications yet.</div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card shadow-sm border-0 mb-3">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-2">Super Scheduler AI</h6>
+
+                    {% if not ai_enabled %}
+                        <div class="alert alert-warning mb-2" role="alert">
+                            AI features are currently disabled by an admin.
+                        </div>
+                    {% elif not current_user.ai_opt_in %}
+                        <div class="alert alert-info mb-2" role="alert">
+                            AI is available. Opt in to enable recommendations and schedule generation.
+                        </div>
+                        <form action="{{ url_for('student.ai_consent') }}" method="POST" class="d-grid">
+                            <input type="hidden" name="action" value="opt_in">
+                            <button type="submit" class="btn btn-sm btn-primary">Opt in to AI</button>
+                        </form>
+                    {% else %}
+                        <div class="alert alert-success mb-2" role="alert">
+                            You’re opted in to AI features.
+                        </div>
+                        <form action="{{ url_for('student.ai_consent') }}" method="POST" class="d-grid">
+                            <input type="hidden" name="action" value="opt_out">
+                            <button type="submit" class="btn btn-sm btn-outline-secondary">Opt out</button>
+                        </form>
+                    {% endif %}
+
+                    <div class="small text-muted mt-2">
+                        {% if ai_enabled and ai_data_collection_enabled and current_user.ai_opt_in %}
+                            Usage logging is enabled (opt-in).
+                        {% elif ai_enabled and current_user.ai_opt_in %}
+                            Usage logging is currently off.
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
             
             <div class="card shadow-sm border-0">
                 <div class="card-body p-0">
                     {% if schedules %}
-                        <div class="list-group list-group-flush">
+                        <div class="list-group list-group-flush" id="scheduleList">
                         {% for sched in schedules %}
-                            <a href="{{ url_for('student.edit_schedule', schedule_id=sched.id) }}" class="list-group-item list-group-item-action py-3 flex-column align-items-start">
-                                <div class="d-flex w-100 justify-content-between">
-                                    <h6 class="mb-1 fw-bold text-dark">{{ sched.schedule_name }}</h6>
-                                    <small class="text-muted">{{ sched.semester }} {{ sched.year }}</small>
+                            <div class="list-group-item py-3" data-schedule-id="{{ sched.id }}">
+                                <div class="d-flex w-100 justify-content-between align-items-start gap-2">
+                                    <div>
+                                        <a href="{{ url_for('student.edit_schedule', schedule_id=sched.id) }}" class="text-decoration-none">
+                                            <h6 class="mb-1 fw-bold">{{ sched.schedule_name }}</h6>
+                                        </a>
+                                        <small class="text-muted">{{ sched.semester }} {{ sched.year }}</small>
+                                    </div>
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-danger delete-schedule-btn"
+                                            data-schedule-id="{{ sched.id }}"
+                                            data-schedule-name="{{ sched.schedule_name }}">
+                                        {{ hi('trash', 'ax-icon me-1') }}Delete
+                                    </button>
                                 </div>
                                 <div class="mt-2">
                                     {% if sched.schedule_type == 'past' %}
-                                        <span class="badge bg-secondary"><i class="bi bi-clock-history me-1"></i>Completed</span>
+                                        <span class="badge bg-secondary">{{ hi('clock', 'ax-icon me-1') }}Completed</span>
                                     {% else %}
-                                        <span class="badge bg-success"><i class="bi bi-calendar-event me-1"></i>Future Plan</span>
+                                        <span class="badge bg-success">{{ hi('calendar', 'ax-icon me-1') }}Future Plan</span>
                                     {% endif %}
                                 </div>
-                            </a>
+                            </div>
                         {% endfor %}
                         </div>
                     {% else %}
-                        <div class="p-4 text-center text-muted border-bottom">
+                        <div class="p-4 text-center text-muted border-bottom" id="emptySchedulesState">
                             <p class="mb-3">You don't have any schedules yet.</p>
+                            {% if has_dataset_years %}
                             <a href="{{ url_for('auth.choose_schedule_type') }}" class="btn btn-sm btn-outline-primary w-100">Start Planning Now</a>
+                            {% else %}
+                            <button class="btn btn-sm btn-outline-secondary w-100" type="button" disabled>Start Planning Now</button>
+                            {% endif %}
                         </div>
                     {% endif %}
                 </div>
@@ -119,4 +227,58 @@
         </div>
     </div>
 </div>
+
+{% if not has_dataset_years %}
+<div class="alert alert-warning mt-3" role="alert">
+    No uploaded course datasets were found. Add a dataset in Admin before creating schedules.
+</div>
+{% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const scheduleList = document.getElementById('scheduleList');
+    if (!scheduleList) return;
+
+    document.addEventListener('click', async function (e) {
+        const btn = e.target.closest('.delete-schedule-btn');
+        if (!btn) return;
+
+        const scheduleId = btn.getAttribute('data-schedule-id');
+        const scheduleName = btn.getAttribute('data-schedule-name') || 'this schedule';
+        if (!scheduleId) return;
+
+        const confirmed = window.confirm(`Delete ${scheduleName}? This removes all schedule courses and related analytics references.`);
+        if (!confirmed) return;
+
+        btn.disabled = true;
+        try {
+            const response = await fetch(`/student/api/schedule/${scheduleId}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) {
+                alert(result.message || 'Unable to delete schedule right now.');
+                btn.disabled = false;
+                return;
+            }
+
+            const row = document.querySelector(`[data-schedule-id="${scheduleId}"]`);
+            if (row) row.remove();
+
+            if (!scheduleList.querySelector('[data-schedule-id]')) {
+                scheduleList.innerHTML = `
+                    <div class="p-4 text-center text-muted border-bottom" id="emptySchedulesState">
+                        <p class="mb-3">You don't have any schedules yet.</p>
+                        <a href="{{ url_for('auth.choose_schedule_type') }}" class="btn btn-sm btn-outline-primary w-100">Start Planning Now</a>
+                    </div>
+                `;
+            }
+        } catch (err) {
+            alert('Unable to delete schedule right now.');
+            btn.disabled = false;
+        }
+    });
+});
+</script>
 {% endblock %}

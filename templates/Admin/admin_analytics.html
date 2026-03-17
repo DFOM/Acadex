@@ -1,191 +1,715 @@
 {% extends "Layouts/admin_base.html" %}
-{% block title %}Platform Analytics{% endblock %}
+{% from 'partials/heroicons.html' import hi %}
+{% block title %}Academic Analytics{% endblock %}
 
 {% block content %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="{{ url_for('static', filename='js/chart_theme.js') }}"></script>
 
 <div class="d-flex justify-content-between align-items-center mb-4 mt-2">
     <div>
-        <h2 class="mb-0 fw-bold">Platform Analytics</h2>
-        <p class="text-muted mb-0">Monitor user demographics, popular courses, and platform engagement.</p>
+        <h2 class="mb-0 fw-bold">Academic Analytics</h2>
+        <p class="text-muted mb-0">Credit, GPA, course, faculty, behavior, and AI-oriented insights with live updates.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a id="exportCsvBtn" class="btn btn-outline-primary btn-sm" href="{{ url_for('admin.analytics_export') }}">Export CSV</a>
+        <a id="exportJsonBtn" class="btn btn-outline-secondary btn-sm" href="{{ url_for('admin.analytics_export', format='json') }}">Export JSON</a>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0 rounded-4 mb-4">
+    <div class="card-body">
+        <form id="analyticsFilters" class="row g-2 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label">Year</label>
+                <select class="form-select" name="year">
+                    <option value="">All</option>
+                    {% for y in payload.filters.options.years %}
+                    <option value="{{ y }}" {% if selected.year and selected.year|int == y %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Semester</label>
+                <select class="form-select" name="semester">
+                    <option value="">All</option>
+                    {% for s in payload.filters.options.semesters %}
+                    <option value="{{ s }}" {% if selected.semester == s %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Major</label>
+                <select class="form-select" name="major">
+                    <option value="">All</option>
+                    {% for m in payload.filters.options.majors %}
+                    <option value="{{ m }}" {% if selected.major == m %}selected{% endif %}>{{ m }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Minor</label>
+                <select class="form-select" name="minor">
+                    <option value="">All</option>
+                    {% for m in payload.filters.options.minors %}
+                    <option value="{{ m }}" {% if selected.minor == m %}selected{% endif %}>{{ m }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Gender</label>
+                <select class="form-select" name="gender">
+                    <option value="">All</option>
+                    {% for g in payload.filters.options.genders %}
+                    <option value="{{ g }}" {% if selected.gender == g %}selected{% endif %}>{{ g|capitalize }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Year of Study</label>
+                <select class="form-select" name="year_of_study">
+                    <option value="">All</option>
+                    {% for yos in payload.filters.options.year_of_study %}
+                    <option value="{{ yos }}" {% if selected.year_of_study == yos %}selected{% endif %}>{{ yos }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-12 d-flex gap-2 justify-content-end mt-2">
+                <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+                <a href="{{ url_for('admin.analytics') }}" class="btn btn-outline-secondary btn-sm">Clear</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="alert alert-info border-0 shadow-sm" id="genderNoteBanner">
+    Prefer not to say responses are included in General.
+</div>
+
+<div class="card shadow-sm border-0 rounded-4 mb-4">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="fw-bold mb-0">Admin Metric Overrides</h6>
+            <button type="button" id="saveOverridesBtn" class="btn btn-sm btn-outline-primary">Save Overrides</button>
+        </div>
+        <div class="small text-muted mb-2">Use JSON path overrides, e.g. <strong>gpa.avg_total_gpa.general</strong>: 3.25</div>
+        <textarea id="analyticsOverridesJson" class="form-control" rows="4" placeholder='{"gpa.avg_total_gpa.general": 3.25}'></textarea>
+        <div id="analyticsOverridesStatus" class="small text-muted mt-2"></div>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0 rounded-4 mb-4">
+    <div class="card-body">
+        <h6 class="fw-bold mb-2">Metric Definitions</h6>
+        <div class="small text-muted">
+            <div><strong>Credit metrics</strong> are per-student averages from catalog credits on scheduled courses, grouped by semester/year/year-of-study and split by General, Male, and Female.</div>
+            <div class="mt-1"><strong>GPA metrics</strong> use weighted GPA: sum(grade points × credits) / sum(credits), where A=4, B=3, C=2, D=1, F=0.</div>
+            <div class="mt-1"><strong>Course/Faculty/Period-Day grade metrics</strong> are average grade points by dimension.</div>
+            <div class="mt-1"><strong>Insights</strong> include major/minor popularity, electives, retakes, faculty preference, demand trends, and AI-informed guidance.</div>
+            <div class="mt-1"><strong>Filters</strong> apply to Year, Semester, Major, Minor, Gender, and Year of Study; charts auto-refresh as data changes.</div>
+        </div>
     </div>
 </div>
 
 <div class="row mb-4">
-    <div class="col-md-4 mb-3">
+    <div class="col-md-3 mb-3">
         <div class="card shadow-sm h-100 border-0 bg-primary text-white rounded-4">
             <div class="card-body d-flex justify-content-between align-items-center p-4">
                 <div>
-                    <h6 class="text-uppercase letter-spacing-1 opacity-75 mb-1">Registered Users</h6>
-                    <h2 class="display-5 fw-bold mb-0">{{ total_users }}</h2>
+                    <h6 class="text-uppercase letter-spacing-1 opacity-75 mb-1">Students</h6>
+                    <h2 id="summaryStudents" class="display-6 fw-bold mb-0">0</h2>
                 </div>
-                <i class="bi bi-people-fill fs-1 opacity-50"></i>
+                {{ hi('users', 'ax-icon fs-1 opacity-50') }}
             </div>
         </div>
     </div>
-    <div class="col-md-4 mb-3">
+    <div class="col-md-3 mb-3">
         <div class="card shadow-sm h-100 border-0 bg-success text-white rounded-4">
             <div class="card-body d-flex justify-content-between align-items-center p-4">
                 <div>
-                    <h6 class="text-uppercase letter-spacing-1 opacity-75 mb-1">Schedules Built</h6>
-                    <h2 class="display-5 fw-bold mb-0">{{ total_schedules }}</h2>
+                    <h6 class="text-uppercase letter-spacing-1 opacity-75 mb-1">Schedules</h6>
+                    <h2 id="summarySchedules" class="display-6 fw-bold mb-0">0</h2>
                 </div>
-                <i class="bi bi-calendar-check-fill fs-1 opacity-50"></i>
+                {{ hi('calendar-check', 'ax-icon fs-1 opacity-50') }}
             </div>
         </div>
     </div>
-    <div class="col-md-4 mb-3">
+    <div class="col-md-3 mb-3">
         <div class="card shadow-sm h-100 border-0 bg-info text-white rounded-4">
             <div class="card-body d-flex justify-content-between align-items-center p-4">
                 <div>
-                    <h6 class="text-uppercase letter-spacing-1 opacity-75 mb-1">Course Enrollments</h6>
-                    <h2 class="display-5 fw-bold mb-0">{{ total_enrollments }}</h2>
+                    <h6 class="text-uppercase letter-spacing-1 opacity-75 mb-1">Enrollments</h6>
+                    <h2 id="summaryEnrollments" class="display-6 fw-bold mb-0">0</h2>
                 </div>
-                <i class="bi bi-journal-bookmark-fill fs-1 opacity-50"></i>
+                {{ hi('book', 'ax-icon fs-1 opacity-50') }}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <div class="card shadow-sm h-100 border-0 bg-dark text-white rounded-4">
+            <div class="card-body p-4">
+                <h6 class="text-uppercase letter-spacing-1 opacity-75 mb-1">General Avg</h6>
+                <div class="small opacity-75">Total Credits: <span id="summaryAvgCredits">0.00</span></div>
+                <div class="small opacity-75">Total GPA: <span id="summaryAvgGpa">0.00</span></div>
             </div>
         </div>
     </div>
 </div>
 
 <div class="row mb-4">
-    <div class="col-md-8 mb-3">
-        <div class="card shadow-sm border-0 h-100 rounded-4">
-            <div class="card-header bg-white border-0 pt-4 pb-0">
-                <h6 class="fw-bold text-dark mb-0">Users by Year of Study</h6>
-            </div>
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm h-100 border-0 rounded-4">
             <div class="card-body">
-                <div style="height: 300px;">
-                    <canvas id="yearChart"></canvas>
-                </div>
+                <h6 class="fw-bold mb-2">Credit Analytics: Avg Credits per Semester</h6>
+                <div style="height: 300px;"><canvas id="creditSemesterChart"></canvas></div>
             </div>
         </div>
     </div>
-    
-    <div class="col-md-4 mb-3">
-        <div class="card shadow-sm border-0 h-100 rounded-4">
-            <div class="card-header bg-white border-0 pt-4 pb-0">
-                <h6 class="fw-bold text-dark mb-0">Gender Distribution</h6>
-            </div>
-            <div class="card-body d-flex justify-content-center align-items-center">
-                <div style="height: 250px; width: 100%;">
-                    <canvas id="genderChart"></canvas>
-                </div>
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm h-100 border-0 rounded-4">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">Credit Analytics: Avg Credits per Year</h6>
+                <div style="height: 300px;"><canvas id="creditYearChart"></canvas></div>
             </div>
         </div>
     </div>
 </div>
 
-<div class="row mb-5">
+<div class="row mb-4">
+    <div class="col-md-12 mb-3">
+        <div class="card shadow-sm border-0 h-100 rounded-4">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">Credit Analytics: Avg Total Credits by Year of Study</h6>
+                <div style="height: 320px;"><canvas id="creditYearStudyChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm border-0 h-100 rounded-4">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">GPA Analytics: Avg GPA per Semester</h6>
+                <div style="height: 300px;"><canvas id="gpaSemesterChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm border-0 h-100 rounded-4">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">GPA Analytics: Avg GPA per Year</h6>
+                <div style="height: 300px;"><canvas id="gpaYearChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-12 mb-3">
+        <div class="card shadow-sm border-0 rounded-4">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">GPA Analytics: Avg GPA by Major</h6>
+                <div style="height: 340px;"><canvas id="gpaMajorChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-4 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">Course Analytics: Avg Grades per Course</h6>
+                <div style="height: 360px;"><canvas id="courseGradesChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">Faculty Analytics: Avg Grades per Faculty</h6>
+                <div style="height: 360px;"><canvas id="facultyGradesChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">Period/Day Analytics: Avg Grades</h6>
+                <div style="height: 360px;"><canvas id="periodGradesChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">Popularity: Most Chosen Course per Major</h6>
+                <div style="height: 340px;"><canvas id="popularMajorChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">Popularity: Most Chosen Course per Minor</h6>
+                <div style="height: 340px;"><canvas id="popularMinorChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-4 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">Preferred Faculty Trend (Enrollment + Grade)</h6>
+                <div style="height: 340px;"><canvas id="preferredFacultyChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">Most Common Electives by Year</h6>
+                <div style="height: 340px;"><canvas id="electiveYearChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">Retaken Courses & Performance Trend</h6>
+                <div style="height: 340px;"><canvas id="retakenCourseChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-4 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">AI Insight: Predicted Major Alignment</h6>
+                <div style="height: 300px;"><canvas id="aiAlignmentChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">AI Insight: Optimal Course Picks</h6>
+                <div style="height: 300px;"><canvas id="aiOptimalChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">AI Insight: Predicted GPA by Major</h6>
+                <div style="height: 300px;"><canvas id="aiPredictedGpaChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
     <div class="col-12">
         <div class="card shadow-sm border-0 rounded-4">
-            <div class="card-header bg-white border-0 pt-4 pb-0">
-                <h6 class="fw-bold text-dark mb-0">Top 10 Most Popular Courses</h6>
-                <small class="text-muted">Based on total appearances across all student schedules</small>
-            </div>
             <div class="card-body">
-                <div style="height: 400px;">
-                    <canvas id="popularCoursesChart"></canvas>
-                </div>
+                <h6 class="fw-bold mb-2">Future-Proof Metric: Course Demand Top Picks by Term</h6>
+                <div style="height: 320px;"><canvas id="demandTrendChart"></canvas></div>
             </div>
         </div>
     </div>
 </div>
 
-
-<script id="genderData" type="application/json">{{ gender_trends | tojson | safe }}</script>
-<script id="yearData" type="application/json">{{ year_trends | tojson | safe }}</script>
-<script id="topCoursesData" type="application/json">{{ top_courses | tojson | safe }}</script>
+<script id="initialAnalyticsPayload" type="application/json">{{ payload | tojson | safe }}</script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    
-    // Set global Chart.js styling
-    Chart.defaults.font.family = "'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
-    Chart.defaults.color = '#6c757d';
+    if (window.AcadexCharts) {
+        AcadexCharts.applyChartDefaults();
+    }
+    const p = window.AcadexCharts ? AcadexCharts.palette() : null;
+    const form = document.getElementById('analyticsFilters');
+    const exportCsvBtn = document.getElementById('exportCsvBtn');
+    const exportJsonBtn = document.getElementById('exportJsonBtn');
+    const overridesText = document.getElementById('analyticsOverridesJson');
+    const saveOverridesBtn = document.getElementById('saveOverridesBtn');
+    const overridesStatus = document.getElementById('analyticsOverridesStatus');
+    const compareGroups = ['general', 'male', 'female'];
+    const groupLabels = {
+        general: 'General',
+        male: 'Male',
+        female: 'Female'
+    };
 
-    // 1. GENDER DOUGHNUT CHART
-    const genderRaw = JSON.parse(document.getElementById('genderData').textContent);
-    if (genderRaw.length > 0) {
-        const ctxGender = document.getElementById('genderChart').getContext('2d');
-        new Chart(ctxGender, {
-            type: 'doughnut',
-            data: {
-                labels: genderRaw.map(d => d.gender),
-                datasets: [{
-                    data: genderRaw.map(d => d.count),
-                    backgroundColor: ['#0d6efd', '#d63384', '#0dcaf0', '#ffc107', '#6c757d'],
-                    borderWidth: 0,
-                    hoverOffset: 4
-                }]
-            },
-            options: {
+    const charts = {};
+    const lineColors = {
+        general: p ? p.primary : '#0d6efd',
+        male: p ? p.info : '#0dcaf0',
+        female: p ? p.danger : '#dc3545'
+    };
+
+    function toNum(value) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+    }
+
+    function getQuery() {
+        const params = new URLSearchParams(new FormData(form));
+        for (const [k, v] of Array.from(params.entries())) {
+            if (!v) params.delete(k);
+        }
+        return params.toString();
+    }
+
+    function updateExportLinks() {
+        const qs = getQuery();
+        exportCsvBtn.href = `{{ url_for('admin.analytics_export') }}${qs ? '?' + qs : ''}`;
+        exportJsonBtn.href = `{{ url_for('admin.analytics_export') }}?format=json${qs ? '&' + qs : ''}`;
+    }
+
+    function compareDatasets(rows) {
+        return compareGroups.map(group => ({
+            label: groupLabels[group],
+            data: rows.map(r => toNum(r[group])),
+            borderColor: lineColors[group],
+            backgroundColor: lineColors[group],
+            borderWidth: 2,
+            spanGaps: true,
+            tension: 0.2,
+        }));
+    }
+
+    function upsertChart(id, type, labels, datasets, extraOptions = {}, drill = null) {
+        const canvas = document.getElementById(id);
+        if (!canvas) return;
+        if (charts[id]) {
+            charts[id].data.labels = labels;
+            charts[id].data.datasets = datasets;
+            charts[id].$drill = drill;
+            charts[id].update();
+            return;
+        }
+        charts[id] = new Chart(canvas.getContext('2d'), {
+            type,
+            data: { labels, datasets },
+            options: Object.assign({
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: 'bottom', labels: { boxWidth: 12, padding: 15 } }
+                onClick: function(evt, elements) {
+                    if (!elements || !elements.length) return;
+                    const active = charts[id] && charts[id].$drill;
+                    if (!active || !active.key) return;
+                    const idx = elements[0].index;
+                    const value = active.values && active.values[idx] ? active.values[idx] : labels[idx];
+                    if (!value) return;
+                    const target = form.querySelector(`[name="${active.key}"]`);
+                    if (!target) return;
+                    target.value = value;
+                    refreshFromApi();
                 },
-                cutout: '70%'
-            }
+                plugins: {
+                    tooltip: { enabled: true },
+                    legend: { position: 'bottom' }
+                },
+                scales: {
+                    y: { beginAtZero: true },
+                    x: { ticks: { autoSkip: true, maxTicksLimit: 12 } }
+                }
+            }, extraOptions)
         });
+        charts[id].$drill = drill;
     }
 
-    // 2. YEAR OF STUDY BAR CHART
-    const yearRaw = JSON.parse(document.getElementById('yearData').textContent);
-    if (yearRaw.length > 0) {
-        const ctxYear = document.getElementById('yearChart').getContext('2d');
-        new Chart(ctxYear, {
-            type: 'bar',
-            data: {
-                labels: yearRaw.map(d => d.year_of_study),
-                datasets: [{
-                    label: 'Number of Students',
-                    data: yearRaw.map(d => d.count),
-                    backgroundColor: 'rgba(25, 135, 84, 0.85)', // Success green
-                    borderRadius: 4
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: {
-                    y: { beginAtZero: true, grid: { borderDash: [4, 4] } },
-                    x: { grid: { display: false } }
-                }
-            }
-        });
+    function metricToBars(rows, title) {
+        return compareGroups.map(group => ({
+            label: groupLabels[group],
+            data: rows.map(r => toNum(r[group])),
+            backgroundColor: lineColors[group],
+            borderRadius: 4,
+        }));
     }
 
-    // 3. TOP COURSES HORIZONTAL BAR CHART
-    const topCoursesRaw = JSON.parse(document.getElementById('topCoursesData').textContent);
-    if (topCoursesRaw.length > 0) {
-        // Clean up the code display (remove section numbers for cleaner analytics)
-        const labels = topCoursesRaw.map(d => d.course_number.replace(/(-S\d+)?(-Sp|-Fa).*/i, ''));
-        const ctxPopular = document.getElementById('popularCoursesChart').getContext('2d');
-        
-        new Chart(ctxPopular, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Total Enrollments',
-                    data: topCoursesRaw.map(d => d.enrollments),
-                    backgroundColor: 'rgba(13, 110, 253, 0.85)', // Primary blue
-                    borderRadius: 4
-                }]
-            },
-            options: {
-                indexAxis: 'y', // Makes it horizontal
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
-                scales: {
-                    x: { beginAtZero: true, grid: { borderDash: [4, 4] } },
-                    y: { grid: { display: false } }
-                }
-            }
+    function applyPayload(data) {
+        const note = document.getElementById('genderNoteBanner');
+        if (note) note.textContent = (data.insights && data.insights.gender_note) || 'Prefer not to say responses are included in General.';
+
+        const summary = data.summary || {};
+        document.getElementById('summaryStudents').textContent = summary.student_count || 0;
+        document.getElementById('summarySchedules').textContent = summary.schedule_count || 0;
+        document.getElementById('summaryEnrollments').textContent = summary.enrollment_count || 0;
+
+        const avgCredits = toNum(data.credit?.avg_total_credits?.general) || 0;
+        const avgGpa = toNum(data.gpa?.avg_total_gpa?.general) || 0;
+        document.getElementById('summaryAvgCredits').textContent = avgCredits.toFixed(2);
+        document.getElementById('summaryAvgGpa').textContent = avgGpa.toFixed(2);
+
+        const creditSem = data.credit?.avg_credits_per_semester || [];
+        upsertChart('creditSemesterChart', 'line', creditSem.map(r => r.label), compareDatasets(creditSem));
+
+        const creditYear = data.credit?.avg_credits_per_year || [];
+        upsertChart('creditYearChart', 'bar', creditYear.map(r => r.label), metricToBars(creditYear), {}, {
+            key: 'year',
+            values: creditYear.map(r => r.label)
         });
+
+        const creditYos = data.credit?.avg_total_credits_by_year_of_study || [];
+        upsertChart('creditYearStudyChart', 'bar', creditYos.map(r => r.label), metricToBars(creditYos));
+
+        const gpaSem = data.gpa?.avg_gpa_per_semester || [];
+        upsertChart('gpaSemesterChart', 'line', gpaSem.map(r => r.label), compareDatasets(gpaSem), {
+            scales: { y: { beginAtZero: true, suggestedMax: 4.0 } }
+        });
+
+        const gpaYear = data.gpa?.avg_gpa_per_year || [];
+        upsertChart('gpaYearChart', 'bar', gpaYear.map(r => r.label), metricToBars(gpaYear), {
+            scales: { y: { beginAtZero: true, suggestedMax: 4.0 } }
+        }, {
+            key: 'year',
+            values: gpaYear.map(r => r.label)
+        });
+
+        const gpaMajor = data.gpa?.avg_gpa_by_major || [];
+        upsertChart('gpaMajorChart', 'bar', gpaMajor.map(r => r.label), metricToBars(gpaMajor), {
+            indexAxis: 'y',
+            scales: { x: { beginAtZero: true, suggestedMax: 4.0 } }
+        }, {
+            key: 'major',
+            values: gpaMajor.map(r => r.label)
+        });
+
+        const byCourse = data.course_faculty?.avg_grade_per_course || [];
+        upsertChart('courseGradesChart', 'bar', byCourse.map(r => r.label), metricToBars(byCourse), {
+            indexAxis: 'y',
+            scales: { x: { beginAtZero: true, suggestedMax: 4.0 } }
+        });
+
+        const byFaculty = data.course_faculty?.avg_grade_per_faculty || [];
+        upsertChart('facultyGradesChart', 'bar', byFaculty.map(r => r.label), metricToBars(byFaculty), {
+            indexAxis: 'y',
+            scales: { x: { beginAtZero: true, suggestedMax: 4.0 } }
+        });
+
+        const byPeriod = data.course_faculty?.avg_grade_by_period_day || [];
+        upsertChart('periodGradesChart', 'bar', byPeriod.map(r => r.label), metricToBars(byPeriod), {
+            scales: { y: { beginAtZero: true, suggestedMax: 4.0 } }
+        });
+
+        const majorPop = data.insights?.popular_courses_by_major || [];
+        upsertChart(
+            'popularMajorChart',
+            'bar',
+            majorPop.map(r => r.label),
+            [{
+                label: 'Enrollments',
+                data: majorPop.map(r => toNum(r.general)),
+                backgroundColor: p ? p.rgbaPrimary(0.85) : '#0d6efd',
+                borderRadius: 4
+            }],
+            {},
+            { key: 'major', values: majorPop.map(r => r.label) }
+        );
+
+        const minorPop = data.insights?.popular_courses_by_minor || [];
+        upsertChart(
+            'popularMinorChart',
+            'bar',
+            minorPop.map(r => r.label),
+            [{
+                label: 'Enrollments',
+                data: minorPop.map(r => toNum(r.general)),
+                backgroundColor: p ? p.rgbaInfo(0.85) : '#0dcaf0',
+                borderRadius: 4
+            }],
+            {},
+            { key: 'minor', values: minorPop.map(r => r.label) }
+        );
+
+        const facultyTrend = data.insights?.preferred_faculty_trends || [];
+        upsertChart(
+            'preferredFacultyChart',
+            'bar',
+            facultyTrend.map(r => r.label),
+            [{
+                label: 'Preference Score',
+                data: facultyTrend.map(r => toNum(r.score)),
+                backgroundColor: p ? p.rgbaSuccess(0.85) : '#198754',
+                borderRadius: 4
+            }],
+            { indexAxis: 'y' }
+        );
+
+        const electives = data.insights?.common_electives_by_year || [];
+        upsertChart(
+            'electiveYearChart',
+            'bar',
+            electives.map(r => `${r.label}: ${r.course_title}`),
+            [{
+                label: 'Selections',
+                data: electives.map(r => toNum(r.general)),
+                backgroundColor: p ? p.rgbaWarning(0.85) : '#ffc107',
+                borderRadius: 4
+            }],
+            {},
+            { key: 'year', values: electives.map(r => r.label) }
+        );
+
+        const retaken = data.insights?.retaken_courses || [];
+        upsertChart(
+            'retakenCourseChart',
+            'bar',
+            retaken.map(r => r.label),
+            [{
+                label: 'Retake Students',
+                data: retaken.map(r => toNum(r.retake_students)),
+                backgroundColor: p ? p.rgbaDanger(0.85) : '#dc3545',
+                borderRadius: 4
+            }],
+            { indexAxis: 'y' }
+        );
+
+        const aiAlignment = data.ai?.predicted_major_alignment || [];
+        upsertChart(
+            'aiAlignmentChart',
+            'doughnut',
+            aiAlignment.map(r => r.label),
+            [{
+                data: aiAlignment.map(r => toNum(r.value)),
+                backgroundColor: [
+                    p ? p.primary : '#0d6efd',
+                    p ? p.warning : '#ffc107',
+                    p ? p.secondary : '#6c757d'
+                ]
+            }],
+            { scales: {} }
+        );
+
+        const aiOptimal = data.ai?.optimal_schedule_courses || [];
+        upsertChart(
+            'aiOptimalChart',
+            'bar',
+            aiOptimal.map(r => r.label),
+            [{
+                label: 'AI Score',
+                data: aiOptimal.map(r => toNum(r.score)),
+                backgroundColor: p ? p.rgbaPrimary(0.85) : '#0d6efd',
+                borderRadius: 4
+            }],
+            { indexAxis: 'y' }
+        );
+
+        const aiPredicted = data.ai?.predicted_gpa_by_major || [];
+        upsertChart(
+            'aiPredictedGpaChart',
+            'bar',
+            aiPredicted.map(r => r.label),
+            [{
+                label: 'Predicted GPA',
+                data: aiPredicted.map(r => toNum(r.value)),
+                backgroundColor: p ? p.rgbaInfo(0.85) : '#0dcaf0',
+                borderRadius: 4
+            }],
+            { scales: { y: { beginAtZero: true, suggestedMax: 4.0 } } },
+            { key: 'major', values: aiPredicted.map(r => r.label) }
+        );
+
+        const demand = data.insights?.course_demand_top_by_term || [];
+        upsertChart(
+            'demandTrendChart',
+            'bar',
+            demand.map(r => `${r.label}: ${r.course_title}`),
+            [{
+                label: 'Demand',
+                data: demand.map(r => toNum(r.general)),
+                backgroundColor: p ? p.rgbaSecondary(0.85) : '#6c757d',
+                borderRadius: 4
+            }],
+            {},
+            { key: 'year', values: demand.map(r => String(r.label).split(' ')[0]) }
+        );
     }
+
+    async function refreshFromApi() {
+        const qs = getQuery();
+        updateExportLinks();
+        const res = await fetch(`{{ url_for('admin.analytics_data_api') }}${qs ? '?' + qs : ''}`, {
+            headers: { 'Accept': 'application/json' }
+        });
+        if (!res.ok) return;
+        const payload = await res.json();
+        if (payload && payload.success && payload.data) {
+            applyPayload(payload.data);
+        }
+    }
+
+    async function loadOverrides() {
+        if (!overridesText) return;
+        try {
+            const res = await fetch(`{{ url_for('admin.analytics_overrides_api') }}`, { headers: { 'Accept': 'application/json' } });
+            const result = await res.json();
+            if (res.ok && result.success) {
+                overridesText.value = JSON.stringify(result.overrides || {}, null, 2);
+                if (overridesStatus) overridesStatus.textContent = `${Object.keys(result.overrides || {}).length} override(s) loaded.`;
+            }
+        } catch (_) {
+            if (overridesStatus) overridesStatus.textContent = 'Could not load overrides.';
+        }
+    }
+
+    async function saveOverrides() {
+        if (!overridesText) return;
+        let parsed = {};
+        try {
+            parsed = JSON.parse(overridesText.value || '{}');
+        } catch (_) {
+            if (overridesStatus) overridesStatus.textContent = 'Invalid JSON format.';
+            return;
+        }
+
+        try {
+            const res = await fetch(`{{ url_for('admin.analytics_overrides_api') }}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ overrides: parsed })
+            });
+            const result = await res.json();
+            if (!res.ok || !result.success) {
+                if (overridesStatus) overridesStatus.textContent = result.message || 'Failed to save overrides.';
+                return;
+            }
+            if (overridesStatus) overridesStatus.textContent = `Saved ${result.count || 0} override(s).`;
+            await refreshFromApi();
+        } catch (_) {
+            if (overridesStatus) overridesStatus.textContent = 'Failed to save overrides.';
+        }
+    }
+
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const qs = getQuery();
+        window.history.replaceState({}, '', `${window.location.pathname}${qs ? '?' + qs : ''}`);
+        refreshFromApi();
+    });
+
+    const initial = JSON.parse(document.getElementById('initialAnalyticsPayload').textContent || '{}');
+    applyPayload(initial);
+    updateExportLinks();
+    loadOverrides();
+
+    if (saveOverridesBtn) {
+        saveOverridesBtn.addEventListener('click', saveOverrides);
+    }
+
+    window.setInterval(refreshFromApi, 30000);
+    document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'visible') refreshFromApi();
+    });
 });
 </script>
 {% endblock %}

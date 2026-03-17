@@ -10,6 +10,8 @@ def filter_courses_by_prereqs(
     completed_passing_courses: Iterable[str],
     *,
     prereq_field: str = "Prerequisite",
+    major_name: str | None = None,
+    minor_name: str | None = None,
 ) -> Tuple[List[Dict], List[str]]:
     """Return (eligible_courses, errors).
 
@@ -25,7 +27,12 @@ def filter_courses_by_prereqs(
 
     for c in courses:
         prereq = c.get(prereq_field)
-        met, err = prereqs_met(prereq, completed_passing_courses)
+        met, err = prereqs_met(
+            prereq,
+            completed_passing_courses,
+            major_name=major_name,
+            minor_name=minor_name,
+        )
         if err:
             course_num = c.get("Course_Number") or c.get("course_number") or "(unknown)"
             errors.append(f"Invalid prerequisite format for {course_num}")

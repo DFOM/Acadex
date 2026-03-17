@@ -8,8 +8,38 @@ import pandas as pd
 from functools import wraps
 from werkzeug.utils import secure_filename
 from sqlalchemy import inspect, text
-from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement
-from utils import get_course_data_tables, calculate_gpa, is_valid_table_name
+import sqlalchemy as sa
+from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification
+from utils import (
+    get_course_data_tables,
+    calculate_gpa,
+    is_valid_table_name,
+    ensure_default_landing_sections,
+    safe_json_loads,
+    safe_json_dumps,
+    format_course_catalog_name,
+)
+from flask import Response
+import json
+
+
+def _parse_hhmm_to_minutes(value: str):
+    try:
+        parts = str(value or '').strip().split(':')
+        if len(parts) != 2:
+            return None
+        h = int(parts[0])
+        m = int(parts[1])
+        if h < 0 or h > 23 or m < 0 or m > 59:
+            return None
+        return h * 60 + m
+    except Exception:
+        return None
+
+
+def _minutes_to_hhmm(total_minutes: int) -> str:
+    total_minutes = int(total_minutes) % (24 * 60)
+    return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -49,6 +79,155 @@ def update_app_setting(key, value):
         setting.value = value
     db.session.commit()
 
+
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def _setting_truthy(value: str) -> bool:
+    return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _normalize_area_type(value: str) -> str:
+    v = str(value or '').strip().lower()
+    if v in {'major_minor', 'minor_major'}:
+        return 'both'
+    if v not in {'major', 'minor', 'both', 'generic'}:
+        return 'generic'
+    return v
+
+
+def _area_type_flags(area_type: str) -> tuple[bool, bool]:
+    normalized = _normalize_area_type(area_type)
+    is_major = normalized in {'major', 'both'}
+    is_minor = normalized in {'minor', 'both'}
+    return is_major, is_minor
+
+
+def _area_type_from_form(form) -> str:
+    explicit = form.get('area_type')
+    if explicit:
+        return _normalize_area_type(explicit)
+
+    major_selected = ('is_major' in form)
+    minor_selected = ('is_minor' in form)
+    if major_selected and minor_selected:
+        return 'both'
+    if major_selected:
+        return 'major'
+    if minor_selected:
+        return 'minor'
+    return 'generic'
+
+
+def _sync_subject_areas_from_catalogs() -> int:
+    """Ensure subject_areas includes all Area_of_Study values from uploaded catalogs."""
+    tables = [t for t in get_course_data_tables() if is_valid_table_name(t)]
+    if not tables:
+        return 0
+
+    discovered = set()
+    insp = inspect(db.engine)
+    for table_name in tables:
+        try:
+            cols = {c['name'] for c in insp.get_columns(table_name)}
+            if 'Area_of_Study' not in cols:
+                continue
+            rows = db.session.execute(
+                text(f'''SELECT DISTINCT "Area_of_Study" as area FROM "{table_name}" WHERE "Area_of_Study" IS NOT NULL''')
+            ).fetchall()
+            for r in rows:
+                name = str(getattr(r, 'area', '') or '').strip()
+                if name:
+                    discovered.add(name)
+        except Exception:
+            db.session.rollback()
+            continue
+
+    if not discovered:
+        return 0
+
+    existing_rows = SubjectArea.query.all()
+    existing_by_lower = {(s.name or '').strip().lower(): s for s in existing_rows if (s.name or '').strip()}
+    created = 0
+    for name in sorted(discovered):
+        if name.strip().lower() in existing_by_lower:
+            continue
+        db.session.add(
+            SubjectArea(
+                name=name,
+                area_type='generic',
+                is_active=True,
+                is_required=False,
+                min_depth_credits=0.0,
+            )
+        )
+        created += 1
+
+    if created:
+        db.session.commit()
+    return created
+
+
+def _subject_area_credit_caps_from_catalogs() -> dict[str, float]:
+    """Return max available credits by area from uploaded catalogs.
+
+    Credits are summed by unique (area, course_number), using the maximum
+    observed credits for that course to avoid inflating across duplicate rows.
+    """
+    tables = [t for t in get_course_data_tables() if is_valid_table_name(t)]
+    if not tables:
+        return {}
+
+    try:
+        insp = inspect(db.engine)
+        course_credit_by_area: dict[tuple[str, str], float] = {}
+        area_case: dict[str, str] = {}
+
+        for table_name in tables:
+            cols = {c['name'] for c in insp.get_columns(table_name)}
+            if not {'Area_of_Study', 'Course_Number', 'Credits'}.issubset(cols):
+                continue
+
+            rows = db.session.execute(
+                text(
+                    f'''SELECT "Area_of_Study" as area, "Course_Number" as course_number, "Credits" as credits
+                        FROM "{table_name}"
+                        WHERE "Area_of_Study" IS NOT NULL
+                          AND TRIM("Area_of_Study") != ''
+                          AND "Course_Number" IS NOT NULL
+                          AND TRIM("Course_Number") != '' '''
+                )
+            ).fetchall()
+
+            for row in rows:
+                area_name = str(row.area or '').strip()
+                course_number = str(row.course_number or '').strip().upper()
+                if not area_name or not course_number:
+                    continue
+                try:
+                    credits = max(0.0, float(row.credits or 0.0))
+                except Exception:
+                    credits = 0.0
+
+                key = (area_name.lower(), course_number)
+                area_case.setdefault(area_name.lower(), area_name)
+                prev = float(course_credit_by_area.get(key, 0.0))
+                if credits > prev:
+                    course_credit_by_area[key] = credits
+
+        totals: dict[str, float] = {}
+        for (area_lower, _course), credits in course_credit_by_area.items():
+            totals[area_lower] = float(totals.get(area_lower, 0.0)) + float(credits)
+
+        return {area_case.get(k, k): round(v, 2) for k, v in totals.items()}
+    except Exception:
+        db.session.rollback()
+        return {}
+
 # Redirect old login to the new unified Auth login
 @admin_bp.route('/login', methods=['GET', 'POST'])
 def login():
@@ -81,7 +260,9 @@ def index():
                            all_schedules=[dict(row._mapping) for row in all_schedules],
                            current_year_setting=get_app_setting('current_year', '2025'), 
                            current_semester_setting=get_app_setting('current_semester', 'Spring'),
-                           graduation_credits_setting=get_app_setting('graduation_credits', '124'))
+                           graduation_credits_setting=get_app_setting('graduation_credits', '124'),
+                           ai_enabled_setting=get_app_setting('ai_enabled', 'false'),
+                           ai_data_collection_enabled_setting=get_app_setting('ai_data_collection_enabled', 'false'))
 
 # ==========================================
 # NEW: LANDING PAGE & ANNOUNCEMENT MANAGEMENT
@@ -90,20 +271,117 @@ def index():
 @login_required
 @admin_required
 def manage_landing():
+    sections = ensure_default_landing_sections()
+
+    def _get_section(name: str):
+        return next((s for s in sections if s.name == name), None)
+
+    hero_section = _get_section('hero')
+    features_section = _get_section('features')
+
     if request.method == 'POST':
-        update_app_setting('about_us', request.form.get('about_us', ''))
-        update_app_setting('creator_message', request.form.get('creator_message', ''))
-        flash("Landing page settings updated successfully.", "success")
+        action = request.form.get('_action') or 'static'
+
+        if action == 'static':
+            update_app_setting('about_us', request.form.get('about_us', ''))
+            update_app_setting('creator_message', request.form.get('creator_message', ''))
+            flash("Landing page content updated.", "success")
+            return redirect(url_for('admin.manage_landing'))
+
+        if action == 'sections':
+            order = (request.form.get('sections_order') or '').strip()
+            enabled_names = set(request.form.getlist('enabled_names'))
+            names = [n.strip() for n in order.split(',') if n.strip()]
+
+            # Assign display_order in increments so future inserts are easy.
+            for idx, name in enumerate(names):
+                s = LandingPageSection.query.filter_by(name=name).first()
+                if not s:
+                    continue
+                s.display_order = (idx + 1) * 10
+                s.enabled = name in enabled_names
+            db.session.commit()
+            flash("Landing sections updated.", "success")
+            return redirect(url_for('admin.manage_landing'))
+
+        if action == 'hero' and hero_section:
+            cfg = safe_json_loads(hero_section.content_json, {})
+            cfg['headline'] = request.form.get('headline', '').strip() or cfg.get('headline', '')
+            cfg['subtext'] = request.form.get('subtext', '').strip()
+            cfg['primary_label'] = request.form.get('primary_label', '').strip() or cfg.get('primary_label', 'Start Planning')
+            cfg['secondary_label'] = request.form.get('secondary_label', '').strip() or cfg.get('secondary_label', 'Register for Premium')
+            hero_section.content_json = safe_json_dumps(cfg)
+            db.session.commit()
+            flash("Hero section updated.", "success")
+            return redirect(url_for('admin.manage_landing'))
+
+        if action == 'features' and features_section:
+            features_json = (request.form.get('features_json') or '').strip()
+            cfg = safe_json_loads(features_json, None)
+            if not isinstance(cfg, dict):
+                flash("Features update failed: invalid JSON payload.", "error")
+                return redirect(url_for('admin.manage_landing'))
+            features_section.content_json = safe_json_dumps(cfg)
+            db.session.commit()
+            flash("Features section updated.", "success")
+            return redirect(url_for('admin.manage_landing'))
+
+        if action == 'catalog_status':
+            try:
+                terms = request.form.getlist('catalog_term')
+                statuses = request.form.getlist('catalog_status')
+                for term, status in zip(terms, statuses):
+                    t = (term or '').strip()
+                    s = (status or '').strip().lower()
+                    if not t:
+                        continue
+                    if s not in {'processing', 'available'}:
+                        s = 'available'
+                    row = CatalogStatus.query.filter_by(term=t).first()
+                    if not row:
+                        row = CatalogStatus(term=t, status=s)
+                        db.session.add(row)
+                    else:
+                        row.status = s
+                db.session.commit()
+                flash("Course catalog status updated.", "success")
+            except Exception:
+                db.session.rollback()
+                flash("Course catalog status update failed (database not migrated yet).", "error")
+            return redirect(url_for('admin.manage_landing'))
+
+        flash("Unsupported landing management action.", "error")
         return redirect(url_for('admin.manage_landing'))
-        
+
     about_us = get_app_setting('about_us', "Welcome to our dynamic scheduling platform.")
     creator_message = get_app_setting('creator_message', "")
     announcements = Announcement.query.order_by(Announcement.date_posted.desc()).all()
-    
-    return render_template('Admin/manage_landing.html', 
-                           about_us=about_us, 
-                           creator_message=creator_message,
-                           announcements=announcements)
+
+    hero_cfg = safe_json_loads(getattr(hero_section, 'content_json', None), {})
+    features_cfg = safe_json_loads(getattr(features_section, 'content_json', None), {})
+
+    # Suggest catalog terms from existing tables
+    discovered_terms = [format_course_catalog_name(t) for t in get_course_data_tables()]
+    try:
+        catalog_rows = CatalogStatus.query.order_by(CatalogStatus.term.asc()).all()
+    except Exception:
+        catalog_rows = []
+
+    existing_terms = {r.term for r in catalog_rows}
+    for term in discovered_terms:
+        if term and term not in existing_terms:
+            catalog_rows.append(CatalogStatus(term=term, status='available'))
+
+    return render_template(
+        'Admin/manage_landing.html',
+        about_us=about_us,
+        creator_message=creator_message,
+        announcements=announcements,
+        landing_sections=sections,
+        hero_cfg=hero_cfg,
+        features_cfg=features_cfg,
+        catalog_statuses=catalog_rows,
+    )
 
 @admin_bp.route('/announcement/create', methods=['POST'])
 @login_required
@@ -111,13 +389,39 @@ def manage_landing():
 def create_announcement():
     title = request.form.get('title')
     content = request.form.get('content')
+    ann_type = (request.form.get('ann_type') or 'info').strip().lower()
+    if ann_type not in {'info', 'update', 'warning'}:
+        ann_type = 'info'
     if title and content:
-        new_announcement = Announcement(title=title, content=content)
+        new_announcement = Announcement(title=title, content=content, ann_type=ann_type)
         db.session.add(new_announcement)
         db.session.commit()
         flash("Announcement created.", "success")
     else:
         flash("Title and content are required.", "error")
+    return redirect(url_for('admin.manage_landing'))
+
+
+@admin_bp.route('/announcement/edit/<int:announcement_id>', methods=['POST'])
+@login_required
+@admin_required
+def edit_announcement(announcement_id):
+    ann = Announcement.query.get_or_404(announcement_id)
+    title = (request.form.get('title') or '').strip()
+    content = (request.form.get('content') or '').strip()
+    ann_type = (request.form.get('ann_type') or 'info').strip().lower()
+    if ann_type not in {'info', 'update', 'warning'}:
+        ann_type = 'info'
+
+    if not title or not content:
+        flash('Title and content are required.', 'error')
+        return redirect(url_for('admin.manage_landing'))
+
+    ann.title = title
+    ann.content = content
+    ann.ann_type = ann_type
+    db.session.commit()
+    flash('Announcement updated.', 'success')
     return redirect(url_for('admin.manage_landing'))
 
 @admin_bp.route('/announcement/toggle/<int:announcement_id>', methods=['POST'])
@@ -168,12 +472,25 @@ def upload_dataset():
     table_name = filename.replace('.csv', '')
     table_name = re.sub(r'[^A-Za-z0-9_]', '_', table_name)
     if not is_valid_table_name(table_name):
-        flash('Invalid dataset name after sanitization. Please rename the CSV file.', 'error')
+        flash('Invalid course catalog name after sanitization. Please rename the CSV file.', 'error')
         return redirect(url_for('admin.manage_datasets'))
     upload_path = os.path.join('uploads', filename)
     
     if not os.path.exists('uploads'): os.makedirs('uploads')
     file.save(upload_path)
+
+    # Best-effort status update (safe if migrations haven't run yet).
+    catalog_term = format_course_catalog_name(table_name)
+    try:
+        row = CatalogStatus.query.filter_by(term=catalog_term).first()
+        if not row:
+            row = CatalogStatus(term=catalog_term, status='processing')
+            db.session.add(row)
+        else:
+            row.status = 'processing'
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
     try:
         processed_rows = []
@@ -228,9 +545,52 @@ def upload_dataset():
 
         df = pd.DataFrame(processed_rows)
         df.to_sql(table_name, con=db.engine, if_exists='replace', index=False)
-        
-        flash(f'Dataset "{table_name}" uploaded and parsed successfully!', 'success')
+
+        try:
+            row = CatalogStatus.query.filter_by(term=catalog_term).first()
+            if not row:
+                row = CatalogStatus(term=catalog_term, status='available')
+                db.session.add(row)
+            else:
+                row.status = 'available'
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        # Notifications MVP: create an in-app notification for all registered users.
+        try:
+            if _setting_truthy(get_app_setting('ai_notifications_enabled', 'false')):
+                insp = inspect(db.engine)
+                if insp.has_table('notifications'):
+                    title = 'New Course Catalog Available'
+                    body = f'The {catalog_term} Course Catalog is now available.'
+
+                    # 1) Broadcast notification (visible to guest sessions via API)
+                    db.session.add(Notification(user_id=None, session_id=None, notif_type='catalog', title=title, body=body))
+
+                    # 2) Per-user notifications for authenticated inboxes
+                    user_ids = [r[0] for r in db.session.query(User.id).all()]
+                    if user_ids:
+                        notifications = [
+                            Notification(user_id=uid, session_id=None, notif_type='catalog', title=title, body=body)
+                            for uid in user_ids
+                        ]
+                        db.session.bulk_save_objects(notifications)
+
+                    db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"Catalog upload notification creation failed: {e}")
+
+        flash(f'Course Catalog "{table_name}" uploaded and parsed successfully!', 'success')
     except Exception as e:
+        try:
+            row = CatalogStatus.query.filter_by(term=catalog_term).first()
+            if row:
+                row.status = 'processing'
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
         flash(f'Upload failed: {e}', 'error')
 
     return redirect(url_for('admin.manage_datasets'))
@@ -241,11 +601,19 @@ def upload_dataset():
 def delete_dataset(table_name):
     try:
         if not is_valid_table_name(table_name) or table_name not in get_course_data_tables():
-            flash('Invalid dataset table name.', 'error')
+            flash('Invalid course catalog table name.', 'error')
             return redirect(url_for('admin.manage_datasets'))
         db.session.execute(text(f'DROP TABLE "{table_name}"'))
         db.session.commit()
-        flash(f'Dataset "{table_name}" deleted.', 'success')
+
+        # Best-effort cleanup of status row
+        try:
+            CatalogStatus.query.filter_by(term=format_course_catalog_name(table_name)).delete()
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        flash(f'Course Catalog "{table_name}" deleted.', 'success')
     except Exception as e:
         db.session.rollback()
         flash(f'Error: {e}', 'error')
@@ -257,7 +625,17 @@ def delete_dataset(table_name):
 def update_app_settings_route():
     update_app_setting('current_year', request.form.get('current_year_setting'))
     update_app_setting('current_semester', request.form.get('current_semester_setting'))
-    update_app_setting('graduation_credits', request.form.get('graduation_credits_setting'))
+
+    grad_credits = _safe_float(request.form.get('graduation_credits_setting'), 124.0)
+    if grad_credits <= 0:
+        grad_credits = 124.0
+    update_app_setting('graduation_credits', str(grad_credits))
+
+    ai_enabled = 'ai_enabled_setting' in request.form
+    ai_data_collection_enabled = 'ai_data_collection_enabled_setting' in request.form
+    update_app_setting('ai_enabled', 'true' if ai_enabled else 'false')
+    update_app_setting('ai_data_collection_enabled', 'true' if ai_data_collection_enabled else 'false')
+
     flash("System settings updated.", "success")
     return redirect(url_for('admin.index'))
 
@@ -266,23 +644,57 @@ def update_app_settings_route():
 @admin_required
 def manage_periods():
     periods = Period.query.order_by(Period.name.asc()).all()
-    return render_template('Admin/periods.html', periods=periods)
+    return render_template(
+        'Admin/periods.html',
+        periods=periods,
+        lunch_start_time=get_app_setting('lunch_start_time', '11:40'),
+        lunch_duration_minutes=get_app_setting('lunch_duration_minutes', '60'),
+    )
 
 @admin_bp.route('/users')
 @login_required
 @admin_required
 def manage_users():
-    users = db.session.execute(text('SELECT id, gender, year_of_study, username FROM users ORDER BY id ASC')).fetchall()
-    return render_template('Admin/manage_users.html', users=[dict(row._mapping) for row in users])
+    users = User.query.order_by(User.id.asc()).all()
+    return render_template('Admin/manage_users.html', users=users)
 
 @admin_bp.route('/api/update_user_demographics', methods=['POST'])
 @login_required
 @admin_required
 def update_user_demographics():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
+    user_id = data.get('id')
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'success': False, 'message': 'User not found'}), 404
+
+    gender = (data.get('gender') or '').strip() or None
+    expected_graduation = data.get('expected_graduation')
+
+    if expected_graduation in (None, ''):
+        expected_graduation = None
+    else:
+        try:
+            expected_graduation = int(expected_graduation)
+        except Exception:
+            return jsonify({'success': False, 'message': 'Expected graduation must be a year.'}), 400
+
     try:
-        db.session.execute(text('UPDATE users SET gender = :g, year_of_study = :y WHERE id = :id'), 
-                     {'g': data.get('gender'), 'y': data.get('year_of_study'), 'id': data.get('id')})
+        user.gender = gender
+        user.expected_graduation = expected_graduation
+
+        # Backward-compatible best-effort update for databases that still have year_of_study.
+        try:
+            insp = inspect(db.engine)
+            user_cols = {c['name'] for c in insp.get_columns('users')}
+            if 'year_of_study' in user_cols:
+                db.session.execute(
+                    text('UPDATE users SET year_of_study = :y WHERE id = :id'),
+                    {'y': expected_graduation, 'id': user.id},
+                )
+        except Exception:
+            pass
+
         db.session.commit()
         return jsonify({'success': True})
     except Exception as e:
@@ -308,41 +720,216 @@ def delete_user(user_id):
 @login_required
 @admin_required
 def manage_subjects():
-    if request.method == 'POST':
-        subject_id = request.form.get('subject_id')
-        new_benchmark = request.form.get('min_depth_credits')
+    try:
+        _sync_subject_areas_from_catalogs()
+    except Exception:
+        db.session.rollback()
+
+    caps = _subject_area_credit_caps_from_catalogs()
+    cap_by_lower = {k.strip().lower(): float(v or 0.0) for k, v in caps.items()}
+
+    rows = SubjectArea.query.order_by(SubjectArea.name.asc()).all()
+    if cap_by_lower:
+        rows = [r for r in rows if (r.name or '').strip().lower() in cap_by_lower]
+
+    subjects_rows = []
+    for row in rows:
+        role = _normalize_area_type(getattr(row, 'area_type', 'generic'))
+        if role not in {'major', 'minor', 'both', 'generic'}:
+            role = 'generic'
+
+        major_min = float(getattr(row, 'min_major_credits', 0.0) or 0.0)
+        minor_min = float(getattr(row, 'min_minor_credits', 0.0) or 0.0)
+        depth_min = float(getattr(row, 'min_depth_credits', 0.0) or 0.0)
+
+        if major_min <= 0 and role in {'major', 'both'}:
+            major_min = depth_min
+        if minor_min <= 0 and role in {'minor', 'both'}:
+            minor_min = depth_min
+
+        cap = float(cap_by_lower.get((row.name or '').strip().lower(), 0.0))
+        subjects_rows.append(
+            {
+                'id': row.id,
+                'name': row.name,
+                'counts_as_area': bool(getattr(row, 'is_active', True)),
+                'role': role,
+                'major_min_credits': round(max(0.0, major_min), 2),
+                'minor_min_credits': round(max(0.0, minor_min), 2),
+                'available_credits': round(max(0.0, cap), 2),
+            }
+        )
+
+    return render_template('Admin/subjects.html', subjects_rows=subjects_rows, has_datasets=bool(cap_by_lower))
+
+
+@admin_bp.route('/api/subjects/<int:subject_id>', methods=['POST'])
+@login_required
+@admin_required
+def api_update_subject_area(subject_id: int):
+    payload = request.get_json(silent=True) or {}
+    subject = SubjectArea.query.get(subject_id)
+    if not subject:
+        return jsonify({'success': False, 'message': 'Study area not found.'}), 404
+
+    try:
+        counts_as_area = bool(payload.get('counts_as_area', getattr(subject, 'is_active', True)))
+        role = _normalize_area_type(payload.get('role') or getattr(subject, 'area_type', 'major'))
+        if role not in {'major', 'minor', 'both', 'generic'}:
+            return jsonify({'success': False, 'message': 'Role must be Major, Minor, Both, or Generic.'}), 400
+
         try:
-            db.session.execute(text('UPDATE subject_areas SET min_depth_credits = :val WHERE id = :id'), 
-                               {'val': new_benchmark, 'id': subject_id})
-            db.session.commit()
-            flash('Subject benchmark updated.', 'success')
-        except Exception as e:
-            db.session.rollback()
-            flash(f'Error updating benchmark: {e}', 'error')
-            
-    subjects = SubjectArea.query.order_by(SubjectArea.name).all()
-    return render_template('Admin/subjects.html', subjects=subjects)
+            major_min = float(payload.get('major_min_credits', getattr(subject, 'min_major_credits', 0.0)) or 0.0)
+            minor_min = float(payload.get('minor_min_credits', getattr(subject, 'min_minor_credits', 0.0)) or 0.0)
+        except Exception:
+            return jsonify({'success': False, 'message': 'Credit minimums must be numeric.'}), 400
+
+        if major_min < 0 or minor_min < 0:
+            return jsonify({'success': False, 'message': 'Credit minimums cannot be negative.'}), 400
+
+        caps = _subject_area_credit_caps_from_catalogs()
+        caps_lower = {k.strip().lower(): float(v or 0.0) for k, v in caps.items()}
+        cap = float(caps_lower.get((subject.name or '').strip().lower(), 0.0) or 0.0)
+
+        if role == 'major':
+            minor_min = 0.0
+        elif role == 'minor':
+            major_min = 0.0
+        elif role == 'generic':
+            major_min = 0.0
+            minor_min = 0.0
+
+        if major_min > cap or minor_min > cap:
+            return jsonify(
+                {
+                    'success': False,
+                    'message': f'Credit minimum cannot exceed available dataset credits ({round(cap, 2)}).',
+                }
+            ), 400
+
+        subject.is_active = counts_as_area
+        subject.area_type = role if counts_as_area else 'generic'
+        subject.min_major_credits = round(max(0.0, major_min), 2)
+        subject.min_minor_credits = round(max(0.0, minor_min), 2)
+
+        effective_major = subject.min_major_credits if role in {'major', 'both'} else 0.0
+        effective_minor = subject.min_minor_credits if role in {'minor', 'both'} else 0.0
+        subject.min_depth_credits = round(max(effective_major, effective_minor), 2)
+
+        db.session.commit()
+        return jsonify(
+            {
+                'success': True,
+                'message': 'Study area updated.',
+                'subject': {
+                    'id': subject.id,
+                    'counts_as_area': bool(subject.is_active),
+                    'role': role,
+                    'major_min_credits': subject.min_major_credits,
+                    'minor_min_credits': subject.min_minor_credits,
+                    'available_credits': round(cap, 2),
+                },
+            }
+        )
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 @admin_bp.route('/instructors')
 @login_required
 @admin_required
 def manage_instructors():
     try:
-        instructors = db.session.execute(text("SELECT id, name FROM instructors ORDER BY name")).fetchall()
-        return render_template('Admin/instructors.html', instructors=[dict(row._mapping) for row in instructors])
-    except:
+        course_tables = [t for t in get_course_data_tables() if is_valid_table_name(t)]
+        if not course_tables:
+            return render_template('Admin/instructors.html', instructors=[])
+
+        union_parts = [
+            f'''SELECT "Instructor" as instructor_name, COUNT(*) as course_count
+                FROM "{t}"
+                WHERE "Instructor" IS NOT NULL AND TRIM("Instructor") != ''
+                GROUP BY "Instructor"'''
+            for t in course_tables
+        ]
+        sql = " UNION ALL ".join(union_parts)
+        rows = db.session.execute(
+            text(
+                f'''SELECT instructor_name as name, SUM(course_count) as course_count
+                    FROM ({sql}) x
+                    GROUP BY instructor_name
+                    ORDER BY instructor_name ASC'''
+            )
+        ).fetchall()
+
+        instructors = []
+        for idx, row in enumerate(rows, 1):
+            instructors.append({'id': idx, 'name': row.name, 'course_count': int(row.course_count or 0)})
+
+        return render_template('Admin/instructors.html', instructors=instructors)
+    except Exception:
         return render_template('Admin/instructors.html', instructors=[])
 
 @admin_bp.route('/api/update_instructor/<int:instructor_id>', methods=['POST'])
 @login_required
 @admin_required
 def api_update_instructor(instructor_id):
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
+    old_name = (data.get('old_name') or '').strip()
+    new_name = (data.get('name') or '').strip()
+    if not old_name:
+        return jsonify({'success': False, 'message': 'Current instructor name is required.'}), 400
+    if not new_name:
+        return jsonify({'success': False, 'message': 'New instructor name is required.'}), 400
+
+    if old_name == new_name:
+        return jsonify({'success': True, 'updated_rows': 0})
+
     try:
-        db.session.execute(text("UPDATE instructors SET name = :name WHERE id = :id"), 
-                           {'name': data.get('name'), 'id': instructor_id})
+        updated_rows = 0
+        for table_name in [t for t in get_course_data_tables() if is_valid_table_name(t)]:
+            res = db.session.execute(
+                text(f'''UPDATE "{table_name}"
+                         SET "Instructor" = :new_name
+                         WHERE "Instructor" = :old_name'''),
+                {'new_name': new_name, 'old_name': old_name},
+            )
+            updated_rows += int(getattr(res, 'rowcount', 0) or 0)
+
         db.session.commit()
-        return jsonify({'success': True})
+        return jsonify({'success': True, 'updated_rows': updated_rows})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@admin_bp.route('/api/instructors/delete', methods=['POST'])
+@login_required
+@admin_required
+def api_delete_instructor():
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    reassign_to = (data.get('reassign_to') or '').strip()
+
+    if not name:
+        return jsonify({'success': False, 'message': 'Instructor name is required.'}), 400
+
+    replacement = reassign_to or 'TBA'
+    if replacement == name:
+        return jsonify({'success': False, 'message': 'Replacement instructor must be different.'}), 400
+
+    try:
+        updated_rows = 0
+        for table_name in [t for t in get_course_data_tables() if is_valid_table_name(t)]:
+            res = db.session.execute(
+                text(f'''UPDATE "{table_name}"
+                         SET "Instructor" = :replacement
+                         WHERE "Instructor" = :name'''),
+                {'replacement': replacement, 'name': name},
+            )
+            updated_rows += int(getattr(res, 'rowcount', 0) or 0)
+
+        db.session.commit()
+        return jsonify({'success': True, 'updated_rows': updated_rows})
     except Exception as e:
         db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -360,6 +947,32 @@ def manage_courses():
     
     courses = db.session.execute(text(f"SELECT * FROM ({full_query})")).fetchall()
     return render_template('Admin/courses.html', courses=[dict(row._mapping) for row in courses])
+
+
+@admin_bp.route('/university_connection', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def university_connection():
+    if request.method == 'POST':
+        endpoint = (request.form.get('endpoint') or '').strip()
+        api_key = (request.form.get('api_key') or '').strip()
+        client_id = (request.form.get('client_id') or '').strip()
+        sync_enabled = 'sync_enabled' in request.form
+
+        update_app_setting('university_connection_endpoint', endpoint)
+        update_app_setting('university_connection_api_key', api_key)
+        update_app_setting('university_connection_client_id', client_id)
+        update_app_setting('university_connection_sync_enabled', 'true' if sync_enabled else 'false')
+        flash('University Connection placeholder settings saved.', 'success')
+        return redirect(url_for('admin.university_connection'))
+
+    return render_template(
+        'Admin/university_connection.html',
+        endpoint=get_app_setting('university_connection_endpoint', ''),
+        api_key=get_app_setting('university_connection_api_key', ''),
+        client_id=get_app_setting('university_connection_client_id', ''),
+        sync_enabled=get_app_setting('university_connection_sync_enabled', 'false'),
+    )
 
 @admin_bp.route('/api/update_course', methods=['POST'])
 @login_required
@@ -386,8 +999,8 @@ def update_period():
     try:
         period = Period.query.get(data['id'])
         if period:
-            period.start_time = data['start_time']
-            period.end_time = data['end_time']
+            period.start_time = data.get('start_time')
+            period.end_time = data.get('end_time')
             db.session.commit()
             return jsonify({'success': True})
         return jsonify({'success': False, 'message': 'Period not found'})
@@ -395,107 +1008,1375 @@ def update_period():
         db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
 
+
+@admin_bp.route('/api/periods/create', methods=['POST'])
+@login_required
+@admin_required
+def api_create_period():
+    data = request.get_json(silent=True) or {}
+    name = str(data.get('name') or '').strip()
+    start_time = str(data.get('start_time') or '').strip()
+    duration_minutes = data.get('duration_minutes', 75)
+
+    if not name or not name.isdigit():
+        return jsonify({'success': False, 'message': 'Period name must be a number (e.g., 1, 2, 3).'}), 400
+    if Period.query.filter_by(name=name).first():
+        return jsonify({'success': False, 'message': f'Period {name} already exists.'}), 400
+
+    start_mins = _parse_hhmm_to_minutes(start_time)
+    try:
+        duration_int = int(duration_minutes)
+    except Exception:
+        duration_int = 75
+
+    if start_mins is None:
+        return jsonify({'success': False, 'message': 'Invalid start time.'}), 400
+    if duration_int <= 0 or duration_int > 24 * 60:
+        return jsonify({'success': False, 'message': 'Invalid duration.'}), 400
+
+    end_time = _minutes_to_hhmm(start_mins + duration_int)
+
+    period = Period(name=name, start_time=start_time, end_time=end_time)
+    try:
+        db.session.add(period)
+        db.session.commit()
+        return jsonify({'success': True, 'period': {'id': period.id, 'name': period.name, 'start_time': period.start_time, 'end_time': period.end_time}})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@admin_bp.route('/api/periods/<int:period_id>/update', methods=['POST'])
+@login_required
+@admin_required
+def api_update_period_full(period_id: int):
+    data = request.get_json(silent=True) or {}
+    name = str(data.get('name') or '').strip()
+    start_time = str(data.get('start_time') or '').strip()
+    duration_minutes = data.get('duration_minutes', 75)
+
+    period = Period.query.get(period_id)
+    if not period:
+        return jsonify({'success': False, 'message': 'Period not found'}), 404
+
+    if not name or not name.isdigit():
+        return jsonify({'success': False, 'message': 'Period name must be a number (e.g., 1, 2, 3).'}), 400
+
+    other = Period.query.filter(Period.name == name, Period.id != period_id).first()
+    if other:
+        return jsonify({'success': False, 'message': f'Period {name} already exists.'}), 400
+
+    start_mins = _parse_hhmm_to_minutes(start_time)
+    try:
+        duration_int = int(duration_minutes)
+    except Exception:
+        duration_int = 75
+
+    if start_mins is None:
+        return jsonify({'success': False, 'message': 'Invalid start time.'}), 400
+    if duration_int <= 0 or duration_int > 24 * 60:
+        return jsonify({'success': False, 'message': 'Invalid duration.'}), 400
+
+    period.name = name
+    period.start_time = start_time
+    period.end_time = _minutes_to_hhmm(start_mins + duration_int)
+
+    try:
+        db.session.commit()
+        return jsonify({'success': True, 'period': {'id': period.id, 'name': period.name, 'start_time': period.start_time, 'end_time': period.end_time}})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@admin_bp.route('/api/periods/<int:period_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def api_delete_period(period_id: int):
+    period = Period.query.get(period_id)
+    if not period:
+        return jsonify({'success': False, 'message': 'Period not found'}), 404
+    try:
+        db.session.delete(period)
+        db.session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@admin_bp.route('/api/lunch_settings', methods=['POST'])
+@login_required
+@admin_required
+def api_update_lunch_settings():
+    data = request.get_json(silent=True) or {}
+    lunch_start_time = str(data.get('lunch_start_time') or '').strip()
+    duration_minutes = data.get('lunch_duration_minutes', 60)
+
+    start_mins = _parse_hhmm_to_minutes(lunch_start_time)
+    try:
+        duration_int = int(duration_minutes)
+    except Exception:
+        duration_int = 60
+
+    if start_mins is None:
+        return jsonify({'success': False, 'message': 'Invalid lunch start time.'}), 400
+    if duration_int <= 0 or duration_int > 24 * 60:
+        return jsonify({'success': False, 'message': 'Invalid lunch duration.'}), 400
+
+    update_app_setting('lunch_start_time', lunch_start_time)
+    update_app_setting('lunch_duration_minutes', str(duration_int))
+    return jsonify({'success': True})
+
 @admin_bp.route('/analytics')
 @login_required
 @admin_required
 def analytics():
-    tables = get_course_data_tables()
-    from utils import is_valid_table_name
-    validated_tables = [t for t in tables if is_valid_table_name(t)]
-    
-    total_users = User.query.count()
-    total_schedules = Schedule.query.count()
+    selected = {
+        'year': (request.args.get('year') or '').strip(),
+        'semester': (request.args.get('semester') or '').strip(),
+        'major': (request.args.get('major') or '').strip(),
+        'minor': (request.args.get('minor') or '').strip(),
+        'gender': (request.args.get('gender') or '').strip().lower(),
+        'year_of_study': (request.args.get('year_of_study') or '').strip(),
+    }
+    payload = _build_admin_analytics_payload(selected)
+    return render_template('Admin/admin_analytics.html', selected=selected, payload=payload)
 
-    user_data = db.session.execute(text('SELECT id, gender, year_of_study FROM users')).fetchall()
-    gpa_by_gender = {"Male": [], "Female": [], "Other/Prefer not to say": []}
-    gpa_by_year = {"1": [], "2": [], "3": [], "4": []}
-    overall_gpas = []
 
-    for user in user_data:
+def _normalize_gender_bucket(value: str) -> str:
+    raw = str(value or '').strip().lower()
+    if raw in {'m', 'male', 'man', 'boy'}:
+        return 'male'
+    if raw in {'f', 'female', 'woman', 'girl'}:
+        return 'female'
+    if raw in {'prefer not to say', 'prefer_not_to_say', 'prefer-not-to-say', 'none', 'n/a'}:
+        return 'prefer_not_to_say'
+    if not raw:
+        return 'unspecified'
+    return raw.replace(' ', '_')
+
+
+def _year_of_study_label(expected_graduation) -> str:
+    try:
+        value = int(expected_graduation)
+    except Exception:
+        value = None
+    mapping = {1: '1st Year', 2: '2nd Year', 3: '3rd Year', 4: '4th Year'}
+    if value in mapping:
+        return mapping[value]
+    if value is None:
+        return 'Unspecified'
+    return str(value)
+
+
+def _round_metric(value: float, digits: int = 2):
+    if value is None:
+        return None
+    try:
+        return round(float(value), digits)
+    except Exception:
+        return None
+
+
+def _mean(values):
+    vals = [float(v) for v in values if v is not None]
+    return (sum(vals) / len(vals)) if vals else None
+
+
+def _group_value(values_by_group: dict, group: str):
+    vals = values_by_group.get(group, [])
+    return _round_metric(_mean(vals), 2)
+
+
+def _load_analytics_metric_overrides() -> dict:
+    raw = get_app_setting('analytics_metric_overrides_json', '{}')
+    try:
+        parsed = json.loads(raw or '{}')
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _apply_payload_override(payload: dict, path: str, value):
+    if not path or not isinstance(path, str):
+        return
+    parts = [p for p in path.split('.') if p]
+    if not parts:
+        return
+
+    cursor = payload
+    for key in parts[:-1]:
+        if isinstance(cursor, dict) and key in cursor:
+            cursor = cursor[key]
+        else:
+            return
+
+    leaf = parts[-1]
+    if isinstance(cursor, dict) and leaf in cursor:
+        cursor[leaf] = value
+
+
+def _gpa_bucket_value(bucket: dict):
+    credits = float(bucket.get('credits') or 0.0)
+    if credits <= 0:
+        return None
+    return (float(bucket.get('points') or 0.0) / credits)
+
+
+def _subject_area_options_by_type():
+    majors = set()
+    minors = set()
+    for area in SubjectArea.query.order_by(SubjectArea.name.asc()).all():
+        normalized = _normalize_area_type(getattr(area, 'area_type', 'generic'))
+        name = (area.name or '').strip()
+        if not name:
+            continue
+        if normalized in {'major', 'both'}:
+            majors.add(name)
+        if normalized in {'minor', 'both'}:
+            minors.add(name)
+    return sorted(majors), sorted(minors)
+
+
+def _build_admin_catalog_index():
+    catalog = {}
+    course_tables = [t for t in get_course_data_tables() if is_valid_table_name(t)]
+    if not course_tables:
+        return catalog
+
+    try:
+        inspector = inspect(db.engine)
+        union_parts = []
+        for table_name in course_tables:
+            cols = {c['name'] for c in inspector.get_columns(table_name)}
+            course_number_expr = '"Course_Number"' if 'Course_Number' in cols else 'NULL'
+            title_expr = '"Course_Title"' if 'Course_Title' in cols else 'NULL'
+            credits_expr = '"Credits"' if 'Credits' in cols else '0'
+            instructor_expr = '"Instructor"' if 'Instructor' in cols else 'NULL'
+            area_expr = '"Area_of_Study"' if 'Area_of_Study' in cols else 'NULL'
+            day_expr = '"Day"' if 'Day' in cols else 'NULL'
+            period_expr = '"Period"' if 'Period' in cols else 'NULL'
+            union_parts.append(
+                f'''SELECT {course_number_expr} AS course_number,
+                           {title_expr} AS course_title,
+                           {credits_expr} AS credits,
+                           {instructor_expr} AS instructor,
+                           {area_expr} AS area_of_study,
+                           {day_expr} AS day,
+                           {period_expr} AS period
+                    FROM "{table_name}"'''
+            )
+        if not union_parts:
+            return catalog
+        rows = db.session.execute(text(f'SELECT * FROM ({" UNION ALL ".join(union_parts)})')).fetchall()
+        for row in rows:
+            mapped = dict(row._mapping)
+            course_number = (mapped.get('course_number') or '').strip()
+            if not course_number or course_number in catalog:
+                continue
+            catalog[course_number] = {
+                'course_title': (mapped.get('course_title') or '').strip() or course_number,
+                'credits': _safe_float(mapped.get('credits'), 0.0),
+                'instructor': (mapped.get('instructor') or 'TBA').strip() or 'TBA',
+                'area_of_study': (mapped.get('area_of_study') or '').strip(),
+                'day': (mapped.get('day') or '').strip(),
+                'period': (mapped.get('period') or '').strip(),
+            }
+    except Exception:
+        db.session.rollback()
+    return catalog
+
+
+def _build_admin_analytics_payload(selected: dict):
+    selected_year = (selected.get('year') or '').strip()
+    selected_semester = (selected.get('semester') or '').strip()
+    selected_major = (selected.get('major') or '').strip()
+    selected_minor = (selected.get('minor') or '').strip()
+    selected_gender = (selected.get('gender') or '').strip().lower()
+    selected_year_of_study = (selected.get('year_of_study') or '').strip()
+
+    schedules_q = Schedule.query
+    if selected_year:
         try:
-            if validated_tables:
-                c_union = " UNION ".join([f'SELECT Course_Number, Credits FROM "{t}"' for t in validated_tables])
-                courses = db.session.execute(text(f'''
-                    SELECT sc.grade, c.Credits 
-                    FROM schedule_courses sc 
-                    JOIN ({c_union}) c 
-                    ON sc.course_number = c.Course_Number 
-                    WHERE sc.grade IS NOT NULL AND sc.grade != "" 
-                    AND sc.schedule_id IN (SELECT id FROM schedules WHERE user_id = :uid)
-                '''), {'uid': user.id}).fetchall()
+            schedules_q = schedules_q.filter(Schedule.year == int(selected_year))
+        except Exception:
+            pass
+    if selected_semester:
+        schedules_q = schedules_q.filter(Schedule.semester == selected_semester)
 
-                if courses:
-                    gpa = calculate_gpa([dict(row._mapping) for row in courses])
-                    overall_gpas.append(gpa)
+    schedules = schedules_q.all()
+    schedule_ids = [s.id for s in schedules]
+    schedule_by_id = {s.id: s for s in schedules}
+    user_ids = sorted({s.user_id for s in schedules if s.user_id})
 
-                    gen = user.gender if getattr(user, 'gender', None) in gpa_by_gender else "Other/Prefer not to say"
-                    gpa_by_gender[gen].append(gpa)
+    users = []
+    if user_ids:
+        users = User.query.filter(User.id.in_(user_ids)).all()
+    user_by_id = {u.id: u for u in users}
 
-                    yr = str(getattr(user, 'year_of_study', ''))
-                    if yr in gpa_by_year: gpa_by_year[yr].append(gpa)
+    major_name_by_id = {a.id: a.name for a in SubjectArea.query.all()}
+
+    eligible_user_ids = set(user_ids)
+    if selected_major:
+        eligible_user_ids = {
+            uid for uid in eligible_user_ids
+            if (major_name_by_id.get(getattr(user_by_id.get(uid), 'major_subject_area_id', None), '') or '') == selected_major
+        }
+    if selected_minor:
+        eligible_user_ids = {
+            uid for uid in eligible_user_ids
+            if (major_name_by_id.get(getattr(user_by_id.get(uid), 'minor_subject_area_id', None), '') or '') == selected_minor
+        }
+    if selected_year_of_study:
+        eligible_user_ids = {
+            uid for uid in eligible_user_ids
+            if _year_of_study_label(getattr(user_by_id.get(uid), 'expected_graduation', None)) == selected_year_of_study
+        }
+    if selected_gender in {'male', 'female'}:
+        eligible_user_ids = {
+            uid for uid in eligible_user_ids
+            if _normalize_gender_bucket(getattr(user_by_id.get(uid), 'gender', None)) == selected_gender
+        }
+
+    schedules = [s for s in schedules if not s.user_id or s.user_id in eligible_user_ids]
+    schedule_ids = [s.id for s in schedules]
+    schedule_by_id = {s.id: s for s in schedules}
+
+    users = [u for u in users if u.id in eligible_user_ids]
+    user_by_id = {u.id: u for u in users}
+
+    years = [r[0] for r in db.session.query(Schedule.year).distinct().order_by(Schedule.year.desc()).all() if r[0] is not None]
+    semesters = [r[0] for r in db.session.query(Schedule.semester).distinct().order_by(Schedule.semester.asc()).all() if r[0]]
+    majors, minors = _subject_area_options_by_type()
+    year_of_study_options = ['1st Year', '2nd Year', '3rd Year', '4th Year']
+    gender_options = ['general', 'male', 'female']
+
+    schedule_courses = []
+    if schedule_ids:
+        try:
+            schedule_courses = db.session.execute(
+                text(
+                    '''SELECT sc.schedule_id, sc.course_number, sc.grade
+                       FROM schedule_courses sc
+                       WHERE sc.schedule_id IN :schedule_ids'''
+                ).bindparams(sa.bindparam('schedule_ids', expanding=True)),
+                {'schedule_ids': schedule_ids},
+            ).fetchall()
+        except Exception:
+            db.session.rollback()
+
+    catalog = _build_admin_catalog_index()
+
+    tracked_genders = ['male', 'female', 'prefer_not_to_say']
+    all_groups = ['general'] + tracked_genders + ['unspecified']
+    group_labels = {
+        'general': 'General',
+        'male': 'Male',
+        'female': 'Female',
+        'prefer_not_to_say': 'Prefer not to say',
+        'unspecified': 'Unspecified',
+    }
+
+    credits_totals = {g: [] for g in all_groups}
+    credits_per_semester = {}
+    credits_per_year = {}
+    credits_total_by_year_of_study = {}
+
+    gpa_total = {g: [] for g in all_groups}
+    gpa_by_semester = {}
+    gpa_by_year = {}
+    gpa_by_major = {}
+
+    grades_by_course = {}
+    grades_by_faculty = {}
+    grades_by_period_day = {}
+    popular_courses_by_major = {}
+    popular_courses_by_minor = {}
+    preferred_faculty = {}
+    electives_by_year = {}
+    retake_tracker = {}
+    area_credits_by_user = {}
+    course_demand_by_term = {}
+
+    user_credit_total = {}
+    user_credit_by_semester = {}
+    user_credit_by_year = {}
+
+    user_gpa_total = {}
+    user_gpa_by_semester = {}
+    user_gpa_by_year = {}
+
+    enrollment_count = 0
+
+    for row in schedule_courses:
+        sched = schedule_by_id.get(row.schedule_id)
+        if not sched or not sched.user_id:
+            continue
+        user = user_by_id.get(sched.user_id)
+        if not user:
+            continue
+
+        course_meta = catalog.get(row.course_number, {})
+        course_title = (course_meta.get('course_title') or '').strip() or 'Untitled Course'
+        course_area = (course_meta.get('area_of_study') or '').strip()
+        instructor_name = (course_meta.get('instructor') or 'TBA').strip() or 'TBA'
+        major_name = (major_name_by_id.get(getattr(user, 'major_subject_area_id', None), 'Undeclared') or 'Undeclared').strip() or 'Undeclared'
+        minor_name = (major_name_by_id.get(getattr(user, 'minor_subject_area_id', None), 'Undeclared') or 'Undeclared').strip() or 'Undeclared'
+
+        enrollment_count += 1
+
+        gender_group = _normalize_gender_bucket(getattr(user, 'gender', None))
+        groups = ['general', gender_group if gender_group in all_groups else 'unspecified']
+
+        credits = max(_safe_float(course_meta.get('credits'), 0.0), 0.0)
+        semester_key = f"{sched.year} {sched.semester}".strip()
+        year_key = str(sched.year)
+        year_of_study_label = _year_of_study_label(getattr(user, 'expected_graduation', None))
+        course_demand_by_term[(semester_key, course_title)] = int(course_demand_by_term.get((semester_key, course_title), 0)) + 1
+
+        if course_area:
+            key = (user.id, course_area)
+            area_credits_by_user[key] = float(area_credits_by_user.get(key, 0.0)) + credits
+
+        if course_area and course_area not in {major_name, minor_name}:
+            electives_by_year[(year_key, course_title)] = int(electives_by_year.get((year_key, course_title), 0)) + 1
+
+        retake_key = (user.id, course_title)
+        tracker = retake_tracker.setdefault(retake_key, {'attempts': 0, 'grades': []})
+        tracker['attempts'] = int(tracker.get('attempts', 0)) + 1
+
+        for group in groups:
+            user_credit_total.setdefault((group, user.id), 0.0)
+            user_credit_total[(group, user.id)] += credits
+
+            user_credit_by_semester.setdefault((group, semester_key, user.id), 0.0)
+            user_credit_by_semester[(group, semester_key, user.id)] += credits
+
+            user_credit_by_year.setdefault((group, year_key, user.id), 0.0)
+            user_credit_by_year[(group, year_key, user.id)] += credits
+
+            credits_total_by_year_of_study.setdefault((group, year_of_study_label), {})
+            credits_total_by_year_of_study[(group, year_of_study_label)].setdefault(user.id, 0.0)
+            credits_total_by_year_of_study[(group, year_of_study_label)][user.id] += credits
+
+            popular_courses_by_major[(group, major_name, course_title)] = int(popular_courses_by_major.get((group, major_name, course_title), 0)) + 1
+            popular_courses_by_minor[(group, minor_name, course_title)] = int(popular_courses_by_minor.get((group, minor_name, course_title), 0)) + 1
+
+            fac_bucket = preferred_faculty.setdefault((group, instructor_name), {'enrollments': 0, 'points': 0.0, 'graded_count': 0})
+            fac_bucket['enrollments'] = int(fac_bucket.get('enrollments', 0)) + 1
+
+        grade = (row.grade or '').strip().upper()
+        grade_points = {'A': 4.0, 'B': 3.0, 'C': 2.0, 'D': 1.0, 'F': 0.0}
+        points = grade_points.get(grade)
+        if points is None or credits <= 0:
+            continue
+
+        tracker['grades'].append(points)
+
+        for group in groups:
+            user_gpa_total.setdefault((group, user.id), {'points': 0.0, 'credits': 0.0})
+            user_gpa_total[(group, user.id)]['points'] += points * credits
+            user_gpa_total[(group, user.id)]['credits'] += credits
+
+            user_gpa_by_semester.setdefault((group, semester_key, user.id), {'points': 0.0, 'credits': 0.0})
+            user_gpa_by_semester[(group, semester_key, user.id)]['points'] += points * credits
+            user_gpa_by_semester[(group, semester_key, user.id)]['credits'] += credits
+
+            user_gpa_by_year.setdefault((group, year_key, user.id), {'points': 0.0, 'credits': 0.0})
+            user_gpa_by_year[(group, year_key, user.id)]['points'] += points * credits
+            user_gpa_by_year[(group, year_key, user.id)]['credits'] += credits
+
+            gpa_by_major.setdefault((group, major_name), {})
+            gpa_by_major[(group, major_name)].setdefault(user.id, {'points': 0.0, 'credits': 0.0})
+            gpa_by_major[(group, major_name)][user.id]['points'] += points * credits
+            gpa_by_major[(group, major_name)][user.id]['credits'] += credits
+
+            grades_by_course.setdefault((group, course_title), {'points': 0.0, 'count': 0})
+            grades_by_course[(group, course_title)]['points'] += points
+            grades_by_course[(group, course_title)]['count'] += 1
+
+            grades_by_faculty.setdefault((group, instructor_name), {'points': 0.0, 'count': 0})
+            grades_by_faculty[(group, instructor_name)]['points'] += points
+            grades_by_faculty[(group, instructor_name)]['count'] += 1
+
+            fac_bucket = preferred_faculty.setdefault((group, instructor_name), {'enrollments': 0, 'points': 0.0, 'graded_count': 0})
+            fac_bucket['points'] = float(fac_bucket.get('points', 0.0)) + points
+            fac_bucket['graded_count'] = int(fac_bucket.get('graded_count', 0)) + 1
+
+            day = (course_meta.get('day') or '').strip()
+            period = (course_meta.get('period') or '').strip()
+            period_day_label = f"{day}{period}".strip() if (day or period) else 'Unspecified'
+            grades_by_period_day.setdefault((group, period_day_label), {'points': 0.0, 'count': 0})
+            grades_by_period_day[(group, period_day_label)]['points'] += points
+            grades_by_period_day[(group, period_day_label)]['count'] += 1
+
+    for (group, uid), value in user_credit_total.items():
+        credits_totals.setdefault(group, []).append(value)
+
+    for (group, semester_key, uid), value in user_credit_by_semester.items():
+        credits_per_semester.setdefault(semester_key, {}).setdefault(group, []).append(value)
+
+    for (group, year_key, uid), value in user_credit_by_year.items():
+        credits_per_year.setdefault(year_key, {}).setdefault(group, []).append(value)
+
+    for (group, uid), bucket in user_gpa_total.items():
+        gpa_value = _gpa_bucket_value(bucket)
+        if gpa_value is not None:
+            gpa_total.setdefault(group, []).append(gpa_value)
+
+    for (group, semester_key, uid), bucket in user_gpa_by_semester.items():
+        gpa_value = _gpa_bucket_value(bucket)
+        if gpa_value is not None:
+            gpa_by_semester.setdefault(semester_key, {}).setdefault(group, []).append(gpa_value)
+
+    for (group, year_key, uid), bucket in user_gpa_by_year.items():
+        gpa_value = _gpa_bucket_value(bucket)
+        if gpa_value is not None:
+            gpa_by_year.setdefault(year_key, {}).setdefault(group, []).append(gpa_value)
+
+    credit_series_semester = []
+    for label in sorted(credits_per_semester.keys()):
+        row = {'label': label}
+        for group in all_groups:
+            row[group] = _group_value(credits_per_semester.get(label, {}), group)
+        credit_series_semester.append(row)
+
+    credit_series_year = []
+    for label in sorted(credits_per_year.keys(), key=lambda x: int(x) if str(x).isdigit() else 9999):
+        row = {'label': label}
+        for group in all_groups:
+            row[group] = _group_value(credits_per_year.get(label, {}), group)
+        credit_series_year.append(row)
+
+    credit_totals_by_year_study = []
+    year_order = ['1st Year', '2nd Year', '3rd Year', '4th Year']
+    seen_year_study = set([y for _, y in credits_total_by_year_of_study.keys()])
+    ordered_year_study = year_order + sorted([y for y in seen_year_study if y not in set(year_order)])
+    for label in ordered_year_study:
+        row = {'label': label}
+        for group in all_groups:
+            user_map = credits_total_by_year_of_study.get((group, label), {})
+            row[group] = _round_metric(_mean(list(user_map.values())), 2)
+        if any(row.get(g) is not None for g in all_groups):
+            credit_totals_by_year_study.append(row)
+
+    gpa_series_semester = []
+    for label in sorted(gpa_by_semester.keys()):
+        row = {'label': label}
+        for group in all_groups:
+            row[group] = _group_value(gpa_by_semester.get(label, {}), group)
+        gpa_series_semester.append(row)
+
+    gpa_series_year = []
+    for label in sorted(gpa_by_year.keys(), key=lambda x: int(x) if str(x).isdigit() else 9999):
+        row = {'label': label}
+        for group in all_groups:
+            row[group] = _group_value(gpa_by_year.get(label, {}), group)
+        gpa_series_year.append(row)
+
+    gpa_major_series = []
+    major_labels = sorted({label for _, label in gpa_by_major.keys()})
+    for label in major_labels:
+        row = {'label': label}
+        for group in all_groups:
+            per_user = gpa_by_major.get((group, label), {})
+            values = [_gpa_bucket_value(bucket) for bucket in per_user.values()]
+            row[group] = _round_metric(_mean([v for v in values if v is not None]), 2)
+        if any(row.get(g) is not None for g in all_groups):
+            gpa_major_series.append(row)
+
+    def _build_grade_series(source_map, limit=12):
+        labels_by_volume = {}
+        for (group, label), aggregate in source_map.items():
+            if group != 'general':
+                continue
+            labels_by_volume[label] = aggregate.get('count', 0)
+        top_labels = [label for label, _ in sorted(labels_by_volume.items(), key=lambda x: x[1], reverse=True)[:limit]]
+        rows = []
+        for label in top_labels:
+            row = {'label': label}
+            for group in all_groups:
+                agg = source_map.get((group, label), {'points': 0.0, 'count': 0})
+                count = int(agg.get('count') or 0)
+                row[group] = _round_metric((float(agg.get('points') or 0.0) / count), 2) if count > 0 else None
+            rows.append(row)
+        return rows
+
+    def _build_popular_path_series(source_map, path_index: int, limit=12):
+        paths = sorted({k[path_index] for k in source_map.keys() if k[path_index] and k[path_index] != 'Undeclared'})
+        rows = []
+        for path in paths:
+            top_course = None
+            top_count = -1
+            for (group, path_name, course_title), count in source_map.items():
+                if group == 'general' and path_name == path and int(count) > top_count:
+                    top_count = int(count)
+                    top_course = course_title
+            if not top_course:
+                continue
+            row = {'label': path, 'course_title': top_course}
+            for group in ['general', 'male', 'female']:
+                row[group] = int(source_map.get((group, path, top_course), 0))
+            rows.append(row)
+        rows.sort(key=lambda x: x.get('general', 0), reverse=True)
+        return rows[:limit]
+
+    preferred_faculty_rows = []
+    general_faculty = []
+    for (group, faculty), stats in preferred_faculty.items():
+        if group != 'general':
+            continue
+        enrollments = int(stats.get('enrollments') or 0)
+        graded_count = int(stats.get('graded_count') or 0)
+        avg_grade = (float(stats.get('points') or 0.0) / graded_count) if graded_count > 0 else None
+        score = ((avg_grade or 0.0) * 0.7) + (min(4.0, enrollments / 20.0) * 0.3)
+        general_faculty.append((faculty, enrollments, _round_metric(avg_grade, 2), _round_metric(score, 2)))
+    general_faculty.sort(key=lambda x: (x[3] or 0.0, x[1]), reverse=True)
+    for faculty, enrollments, avg_grade, score in general_faculty[:12]:
+        preferred_faculty_rows.append({'label': faculty, 'enrollments': enrollments, 'avg_grade': avg_grade, 'score': score})
+
+    electives_rows = []
+    elective_years = sorted({k[0] for k in electives_by_year.keys()}, key=lambda x: int(x) if str(x).isdigit() else 9999)
+    for year_label in elective_years:
+        best_course = None
+        best_count = -1
+        for (y, title), count in electives_by_year.items():
+            if y == year_label and int(count) > best_count:
+                best_course = title
+                best_count = int(count)
+        if best_course:
+            electives_rows.append({'label': year_label, 'course_title': best_course, 'general': best_count})
+
+    retake_by_course = {}
+    for (_uid, title), tracker in retake_tracker.items():
+        attempts = int(tracker.get('attempts') or 0)
+        grades = tracker.get('grades') or []
+        if attempts <= 1:
+            continue
+        bucket = retake_by_course.setdefault(title, {'students': 0, 'attempts': 0, 'first': [], 'latest': []})
+        bucket['students'] += 1
+        bucket['attempts'] += attempts
+        if grades:
+            bucket['first'].append(float(grades[0]))
+            bucket['latest'].append(float(grades[-1]))
+
+    retaken_rows = []
+    for title, bucket in retake_by_course.items():
+        students = int(bucket.get('students') or 0)
+        attempts = int(bucket.get('attempts') or 0)
+        retaken_rows.append(
+            {
+                'label': title,
+                'retake_students': students,
+                'avg_attempts': _round_metric((attempts / students) if students > 0 else 0.0, 2),
+                'first_avg_grade': _round_metric(_mean(bucket.get('first') or []), 2),
+                'latest_avg_grade': _round_metric(_mean(bucket.get('latest') or []), 2),
+                'general': students,
+            }
+        )
+    retaken_rows.sort(key=lambda x: x.get('retake_students', 0), reverse=True)
+    retaken_rows = retaken_rows[:12]
+
+    predicted_major_alignment = {'aligned': 0, 'switch_likely': 0, 'unknown': 0}
+    for uid in user_by_id.keys():
+        user = user_by_id.get(uid)
+        if not user:
+            continue
+        per_area = [(area, credits) for (u, area), credits in area_credits_by_user.items() if u == uid]
+        if not per_area:
+            predicted_major_alignment['unknown'] += 1
+            continue
+        predicted_area = max(per_area, key=lambda x: x[1])[0]
+        declared_major = (major_name_by_id.get(getattr(user, 'major_subject_area_id', None), '') or '').strip()
+        if not declared_major:
+            predicted_major_alignment['unknown'] += 1
+        elif declared_major == predicted_area:
+            predicted_major_alignment['aligned'] += 1
+        else:
+            predicted_major_alignment['switch_likely'] += 1
+
+    ai_optimal_courses = []
+    course_enroll_counts = {
+        label: int(aggregate.get('count', 0))
+        for (group, label), aggregate in grades_by_course.items()
+        if group == 'general'
+    }
+    for row in _build_grade_series(grades_by_course, limit=20):
+        title = row.get('label')
+        avg_grade = _safe_float(row.get('general'), 0.0)
+        enroll_count = int(course_enroll_counts.get(title, 0))
+        score = _round_metric((avg_grade * 0.8) + min(2.0, enroll_count / 25.0), 2)
+        ai_optimal_courses.append({'label': title, 'score': score, 'avg_grade': _round_metric(avg_grade, 2), 'enrollments': enroll_count})
+    ai_optimal_courses.sort(key=lambda x: (x.get('score') or 0.0, x.get('enrollments') or 0), reverse=True)
+    ai_optimal_courses = ai_optimal_courses[:12]
+
+    gpa_major_general = []
+    for row in gpa_major_series:
+        raw_value = row.get('general')
+        if raw_value is None:
+            continue
+        value = _safe_float(raw_value, 0.0)
+        gpa_major_general.append({'label': row.get('label'), 'value': _round_metric(value, 2)})
+    gpa_major_general.sort(key=lambda x: x.get('value', 0), reverse=True)
+
+    course_demand_rows = []
+    term_labels = sorted({term for (term, _title) in course_demand_by_term.keys()})
+    for term in term_labels:
+        best = None
+        best_count = -1
+        for (t, title), count in course_demand_by_term.items():
+            if t == term and int(count) > best_count:
+                best = title
+                best_count = int(count)
+        if best:
+            course_demand_rows.append({'label': term, 'course_title': best, 'general': best_count})
+
+    payload = {
+        'summary': {
+            'student_count': len(users),
+            'schedule_count': len(schedules),
+            'enrollment_count': int(enrollment_count),
+        },
+        'filters': {
+            'options': {
+                'years': years,
+                'semesters': semesters,
+                'majors': majors,
+                'minors': minors,
+                'genders': gender_options,
+                'year_of_study': year_of_study_options,
+            },
+            'selected': {
+                'year': selected_year,
+                'semester': selected_semester,
+                'major': selected_major,
+                'minor': selected_minor,
+                'gender': selected_gender,
+                'year_of_study': selected_year_of_study,
+            },
+        },
+        'groups': {
+            'keys': all_groups,
+            'labels': group_labels,
+            'primary_compare': ['general', 'male', 'female'],
+        },
+        'credit': {
+            'avg_total_credits': {group: _round_metric(_mean(credits_totals.get(group, [])), 2) for group in all_groups},
+            'avg_credits_per_semester': credit_series_semester,
+            'avg_credits_per_year': credit_series_year,
+            'avg_total_credits_by_year_of_study': credit_totals_by_year_study,
+        },
+        'gpa': {
+            'avg_total_gpa': {group: _round_metric(_mean(gpa_total.get(group, [])), 2) for group in all_groups},
+            'avg_gpa_per_semester': gpa_series_semester,
+            'avg_gpa_per_year': gpa_series_year,
+            'avg_gpa_by_major': gpa_major_series,
+        },
+        'course_faculty': {
+            'avg_grade_per_course': _build_grade_series(grades_by_course, limit=12),
+            'avg_grade_per_faculty': _build_grade_series(grades_by_faculty, limit=12),
+            'avg_grade_by_period_day': _build_grade_series(grades_by_period_day, limit=12),
+        },
+        'insights': {
+            'gender_note': 'Prefer not to say responses are included in General.',
+            'popular_courses_by_major': _build_popular_path_series(popular_courses_by_major, 1, limit=12),
+            'popular_courses_by_minor': _build_popular_path_series(popular_courses_by_minor, 1, limit=12),
+            'preferred_faculty_trends': preferred_faculty_rows,
+            'common_electives_by_year': electives_rows,
+            'retaken_courses': retaken_rows,
+            'course_demand_top_by_term': course_demand_rows,
+        },
+        'ai': {
+            'predicted_major_alignment': [
+                {'label': 'Aligned', 'value': int(predicted_major_alignment.get('aligned', 0))},
+                {'label': 'Switch Likely', 'value': int(predicted_major_alignment.get('switch_likely', 0))},
+                {'label': 'Unknown', 'value': int(predicted_major_alignment.get('unknown', 0))},
+            ],
+            'optimal_schedule_courses': ai_optimal_courses,
+            'predicted_gpa_by_major': gpa_major_general[:12],
+            'recommended_credit_load_by_year_of_study': [
+                {'label': row.get('label'), 'value': row.get('general')}
+                for row in credit_totals_by_year_study
+                if row.get('general') is not None
+            ],
+        },
+        'future_ready': {
+            'course_demand_trends_available': True,
+            'student_progression_trends_available': True,
+            'ai_performance_prediction_hooks': True,
+            'difficulty_faculty_success_correlation_ready': True,
+        },
+    }
+
+    overrides = _load_analytics_metric_overrides()
+    for path, value in overrides.items():
+        _apply_payload_override(payload, str(path), value)
+    payload['overrides'] = {'count': len(overrides), 'items': overrides}
+
+    return payload
+
+
+@admin_bp.route('/api/analytics/data')
+@login_required
+@admin_required
+def analytics_data_api():
+    selected = {
+        'year': (request.args.get('year') or '').strip(),
+        'semester': (request.args.get('semester') or '').strip(),
+        'major': (request.args.get('major') or '').strip(),
+        'minor': (request.args.get('minor') or '').strip(),
+        'gender': (request.args.get('gender') or '').strip().lower(),
+        'year_of_study': (request.args.get('year_of_study') or '').strip(),
+    }
+    return jsonify({'success': True, 'data': _build_admin_analytics_payload(selected)})
+
+
+@admin_bp.route('/api/analytics/overrides', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def analytics_overrides_api():
+    if request.method == 'GET':
+        overrides = _load_analytics_metric_overrides()
+        return jsonify({'success': True, 'overrides': overrides})
+
+    payload = request.get_json(silent=True) or {}
+    overrides = payload.get('overrides')
+    if not isinstance(overrides, dict):
+        return jsonify({'success': False, 'message': 'Invalid overrides payload; expected object.'}), 400
+
+    cleaned = {}
+    for path, value in overrides.items():
+        key = str(path or '').strip()
+        if not key:
+            continue
+        cleaned[key] = value
+
+    update_app_setting('analytics_metric_overrides_json', json.dumps(cleaned))
+    return jsonify({'success': True, 'message': 'Analytics overrides saved.', 'count': len(cleaned)})
+
+
+@admin_bp.route('/analytics/export')
+@login_required
+@admin_required
+def analytics_export():
+    selected = {
+        'year': (request.args.get('year') or '').strip(),
+        'semester': (request.args.get('semester') or '').strip(),
+        'major': (request.args.get('major') or '').strip(),
+        'minor': (request.args.get('minor') or '').strip(),
+        'gender': (request.args.get('gender') or '').strip().lower(),
+        'year_of_study': (request.args.get('year_of_study') or '').strip(),
+    }
+    payload = _build_admin_analytics_payload(selected)
+
+    export_format = (request.args.get('format') or 'csv').strip().lower()
+    if export_format == 'json':
+        return Response(
+            json.dumps(payload, indent=2),
+            mimetype='application/json',
+            headers={'Content-Disposition': 'attachment; filename=acadex_analytics.json'},
+        )
+
+    rows = []
+    compare_groups = payload.get('groups', {}).get('primary_compare', ['general', 'male', 'female', 'prefer_not_to_say'])
+
+    def add_series(section, metric, series):
+        for item in series:
+            row = {'section': section, 'metric': metric, 'label': item.get('label', '')}
+            for group in compare_groups:
+                row[group] = item.get(group)
+            rows.append(row)
+
+    overall_credit = {'label': 'Overall'}
+    overall_credit.update(payload.get('credit', {}).get('avg_total_credits', {}))
+    add_series('credit', 'avg_total_credits', [overall_credit])
+    add_series('credit', 'avg_credits_per_semester', payload.get('credit', {}).get('avg_credits_per_semester', []))
+    add_series('credit', 'avg_credits_per_year', payload.get('credit', {}).get('avg_credits_per_year', []))
+    add_series('credit', 'avg_total_credits_by_year_of_study', payload.get('credit', {}).get('avg_total_credits_by_year_of_study', []))
+
+    overall_gpa = {'label': 'Overall'}
+    overall_gpa.update(payload.get('gpa', {}).get('avg_total_gpa', {}))
+    add_series('gpa', 'avg_total_gpa', [overall_gpa])
+    add_series('gpa', 'avg_gpa_per_semester', payload.get('gpa', {}).get('avg_gpa_per_semester', []))
+    add_series('gpa', 'avg_gpa_per_year', payload.get('gpa', {}).get('avg_gpa_per_year', []))
+    add_series('gpa', 'avg_gpa_by_major', payload.get('gpa', {}).get('avg_gpa_by_major', []))
+
+    add_series('course_faculty', 'avg_grade_per_course', payload.get('course_faculty', {}).get('avg_grade_per_course', []))
+    add_series('course_faculty', 'avg_grade_per_faculty', payload.get('course_faculty', {}).get('avg_grade_per_faculty', []))
+    add_series('course_faculty', 'avg_grade_by_period_day', payload.get('course_faculty', {}).get('avg_grade_by_period_day', []))
+
+    import io
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=['section', 'metric', 'label'] + compare_groups)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+
+    return Response(
+        output.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename=acadex_analytics.csv'},
+    )
+
+
+@admin_bp.route('/ai', methods=['GET'])
+@login_required
+@admin_required
+def ai_dashboard():
+    # Filters
+    year = (request.args.get('year') or '').strip()
+    semester = (request.args.get('semester') or '').strip()
+    schedule_type = (request.args.get('schedule_type') or '').strip().lower()
+    area = (request.args.get('area') or '').strip()
+
+    if schedule_type and schedule_type not in {'past', 'future'}:
+        schedule_type = ''
+
+    schedules_q = Schedule.query
+    if year:
+        try:
+            schedules_q = schedules_q.filter(Schedule.year == int(year))
+        except Exception:
+            pass
+    if semester:
+        schedules_q = schedules_q.filter(Schedule.semester == semester)
+    if schedule_type:
+        schedules_q = schedules_q.filter(Schedule.schedule_type == schedule_type)
+
+    # Options for filter dropdowns
+    years = [r[0] for r in db.session.query(Schedule.year).distinct().order_by(Schedule.year.desc()).all()]
+    semesters = [r[0] for r in db.session.query(Schedule.semester).distinct().order_by(Schedule.semester.asc()).all()]
+
+    schedules = schedules_q.all()
+    schedule_ids = [s.id for s in schedules]
+
+    # Pull schedule_courses (optionally filtered by computed area)
+    sc_rows = []
+    if schedule_ids:
+        try:
+            sc_rows = db.session.execute(
+                text(
+                    '''
+                    SELECT sc.schedule_id, sc.course_number, sc.grade
+                    FROM schedule_courses sc
+                    WHERE sc.schedule_id IN :sched_ids
+                    '''
+                ).bindparams(sa.bindparam('sched_ids', expanding=True)),
+                {'sched_ids': schedule_ids},
+            ).fetchall()
         except Exception as e:
-            print(f"Analytics error for user {user.id}: {e}")
-            pass 
+            db.session.rollback()
+            print(f"AI dashboard schedule_courses query failed: {e}")
 
-    avg_gpa_overall = sum(overall_gpas)/len(overall_gpas) if overall_gpas else 0
-    gender_gpa_stats = {k: (sum(v)/len(v) if v else 0) for k, v in gpa_by_gender.items()}
-    year_gpa_stats = {k: (sum(v)/len(v) if v else 0) for k, v in gpa_by_year.items()}
+    # Build a union of dataset tables for metadata lookups, but only fetch metadata
+    # for course_numbers present in the selected schedules.
+    course_tables = [t for t in get_course_data_tables() if is_valid_table_name(t)]
+    catalog = {}
+    areas = set()
 
-    top_courses = []
-    top_areas = []
-    top_faculty = []
-    day_counts = {"Mon": 0, "Tue": 0, "Wed": 0, "Thu": 0, "Fri": 0}
-    period_counts = {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0, "6": 0}
+    course_numbers_needed = sorted({r.course_number for r in sc_rows if getattr(r, 'course_number', None)})
+    if course_tables and course_numbers_needed:
+        try:
+            insp = inspect(db.engine)
+            union_parts = []
+            for t in course_tables:
+                try:
+                    cols = {c['name'] for c in insp.get_columns(t)}
+                except Exception:
+                    cols = set()
 
-    if validated_tables:
-        table_union = " UNION ".join([f'SELECT Course_Number, Course_Title, Area_of_Study, Instructor, Day_and_Period FROM "{t}"' for t in validated_tables])
-        
-        top_courses = db.session.execute(text(f'''
-            SELECT m.Course_Title, COUNT(sc.id) as count 
-            FROM schedule_courses sc
-            JOIN ({table_union}) m ON sc.course_number = m.Course_Number
-            GROUP BY m.Course_Title ORDER BY count DESC LIMIT 10
-        ''')).fetchall()
+                # Some datasets may lack Area_of_Study; select NULL in that case.
+                area_expr = '"Area_of_Study"' if 'Area_of_Study' in cols else 'NULL'
+                union_parts.append(
+                    f'SELECT "Course_Number" as course_number, "Course_Title" as course_title, "Credits" as credits, "Instructor" as instructor, "Day_and_Period" as day_and_period, {area_expr} as area_of_study FROM "{t}"'
+                )
 
-        top_areas = db.session.execute(text(f'''
-            SELECT m.Area_of_Study, COUNT(sc.id) as count 
-            FROM schedule_courses sc
-            JOIN ({table_union}) m ON sc.course_number = m.Course_Number
-            WHERE m.Area_of_Study != "" AND m.Area_of_Study IS NOT NULL
-            GROUP BY m.Area_of_Study ORDER BY count DESC LIMIT 10
-        ''')).fetchall()
+            union_sql = " UNION ALL ".join(union_parts)
+            rows = db.session.execute(
+                text(f"SELECT * FROM ({union_sql}) WHERE course_number IN :course_numbers")
+                .bindparams(sa.bindparam('course_numbers', expanding=True)),
+                {'course_numbers': course_numbers_needed},
+            ).fetchall()
 
-        top_faculty = db.session.execute(text(f'''
-            SELECT m.Instructor, COUNT(sc.id) as count 
-            FROM schedule_courses sc
-            JOIN ({table_union}) m ON sc.course_number = m.Course_Number
-            WHERE m.Instructor != "" AND m.Instructor IS NOT NULL
-            GROUP BY m.Instructor ORDER BY count DESC LIMIT 10
-        ''')).fetchall()
+            for r in rows:
+                d = dict(r._mapping)
+                cn = d.get('course_number')
+                if not cn:
+                    continue
+                if cn not in catalog:
+                    catalog[cn] = d
+                a = (d.get('area_of_study') or '').strip()
+                if a:
+                    areas.add(a)
+        except Exception as e:
+            db.session.rollback()
+            print(f"AI dashboard catalog build failed: {e}")
 
-        all_time_slots = db.session.execute(text(f'''
-            SELECT m.Day_and_Period 
-            FROM schedule_courses sc
-            JOIN ({table_union}) m ON sc.course_number = m.Course_Number
-        ''')).fetchall()
+    # Aggregate stats
+    top_courses = {}
+    top_faculty = {}
+    credits_by_area = {}
+    day_period_counts = {}  # key: (day, period)
+    max_period = 0
+    included_course_rows = 0
 
-        for row in all_time_slots:
-            ts = row.Day_and_Period
-            if ts:
-                for day in day_counts.keys():
-                    if day in ts: day_counts[day] += 1
-                nums = re.findall(r'\d', ts)
-                for n in nums:
-                    if n in period_counts: period_counts[n] += 1
+    def infer_area(course_number: str) -> str:
+        import re as _re
+        m = _re.match(r'^([A-Za-z]{2,6})', str(course_number or '').strip())
+        return (m.group(1).upper() if m else 'General')
 
-    return render_template('Admin/admin_analytics.html', 
-                           total_users=total_users, 
-                           total_schedules=total_schedules,
-                           avg_gpa=round(avg_gpa_overall, 2),
-                           gender_gpa=gender_gpa_stats,
-                           year_gpa=year_gpa_stats,
-                           top_courses=[dict(row._mapping) for row in top_courses],
-                           top_areas=[dict(row._mapping) for row in top_areas],
-                           top_faculty=[dict(row._mapping) for row in top_faculty],
-                           day_counts=day_counts,
-                           period_counts=period_counts)
+    import re as _re
+    for row in sc_rows:
+        course_number = row.course_number
+        meta = catalog.get(course_number, {})
+        title = meta.get('course_title') or course_number
+        instructor = (meta.get('instructor') or '').strip() or 'TBA'
+        dp = meta.get('day_and_period') or ''
+
+        # Area filter (treated as "major")
+        effective_area = (meta.get('area_of_study') or '').strip() or infer_area(course_number)
+        if area and effective_area != area:
+            continue
+        included_course_rows += 1
+        credits_by_area[effective_area] = credits_by_area.get(effective_area, 0.0) + float(meta.get('credits') or 0 or 0)
+
+        top_courses[(course_number, title)] = top_courses.get((course_number, title), 0) + 1
+        top_faculty[instructor] = top_faculty.get(instructor, 0) + 1
+
+        # Day/period heatmap
+        if dp and str(dp).upper() != 'TBA':
+            tokens = str(dp).strip().split()
+            current_day = ''
+            for tok in tokens:
+                day_m = _re.search(r'(Mon|Tue|Wed|Thu|Fri)', tok, _re.I)
+                num_m = _re.search(r'(\d+)', tok)
+                if day_m:
+                    current_day = day_m.group(1).title()[:3]
+                if current_day and num_m:
+                    p = int(num_m.group(1))
+                    max_period = max(max_period, p)
+                    key = (current_day, str(p))
+                    day_period_counts[key] = day_period_counts.get(key, 0) + 1
+
+    # GPA trend by term (only past schedules with grades)
+    gpa_points = {'A': 4.0, 'B': 3.0, 'C': 2.0, 'D': 1.0, 'F': 0.0}
+    gpa_by_term = {}
+    for s in schedules:
+        if s.schedule_type != 'past':
+            continue
+        term_key = f"{s.semester} {s.year}"
+        # gather grades for this schedule
+        schedule_grades = [r for r in sc_rows if r.schedule_id == s.id and (r.grade or '').strip()]
+        if not schedule_grades:
+            continue
+
+        total_points = 0.0
+        total_credits = 0.0
+        for r in schedule_grades:
+            grade = (r.grade or '').strip().upper()
+            if grade not in gpa_points:
+                continue
+            meta = catalog.get(r.course_number, {})
+            try:
+                creds = float(meta.get('credits') or 0)
+            except Exception:
+                creds = 0.0
+            if creds <= 0:
+                continue
+            total_points += gpa_points[grade] * creds
+            total_credits += creds
+        if total_credits <= 0:
+            continue
+        gpa = total_points / total_credits
+        gpa_by_term.setdefault(term_key, []).append(gpa)
+
+    gpa_terms = list(gpa_by_term.keys())
+    # simple sort: year then semester
+    def _term_sort_key(t):
+        try:
+            sem, yr = t.split(' ', 1)
+            return (int(yr), sem)
+        except Exception:
+            return (0, t)
+    gpa_terms.sort(key=_term_sort_key)
+    gpa_series = [sum(gpa_by_term[t]) / len(gpa_by_term[t]) for t in gpa_terms]
+
+    # Prepare heatmap matrix
+    days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+    periods = [str(i) for i in range(1, max(1, max_period) + 1)]
+    heat_rows = []
+    heat_max = 0
+    for p in periods:
+        row_counts = []
+        for d in days:
+            c = day_period_counts.get((d, p), 0)
+            heat_max = max(heat_max, c)
+            row_counts.append(c)
+        heat_rows.append({'period': p, 'counts': row_counts})
+
+    top_courses_list = [
+        {'course_number': cn, 'course_title': title, 'count': count}
+        for (cn, title), count in sorted(top_courses.items(), key=lambda x: x[1], reverse=True)[:20]
+    ]
+    top_faculty_list = [
+        {'instructor': instr, 'count': count}
+        for instr, count in sorted(top_faculty.items(), key=lambda x: x[1], reverse=True)[:20]
+    ]
+
+    credits_by_area_list = [
+        {'area': a, 'credits': round(v, 2)}
+        for a, v in sorted(credits_by_area.items(), key=lambda x: x[1], reverse=True)[:20]
+    ]
+
+    # Anonymized AI/behavior usage summaries.
+    ai_event_type_counts = []
+    behavior_event_type_counts = []
+    ai_event_day_counts = []
+    behavior_event_day_counts = []
+    try:
+        insp = inspect(db.engine)
+        if insp.has_table('ai_events'):
+            ai_event_type_counts = db.session.execute(
+                text(
+                    '''SELECT event_type, COUNT(*) as count
+                       FROM ai_events
+                       GROUP BY event_type
+                       ORDER BY count DESC
+                       LIMIT 10'''
+                )
+            ).fetchall()
+            ai_event_day_counts = db.session.execute(
+                text(
+                    '''SELECT DATE(created_at) as day, COUNT(*) as count
+                       FROM ai_events
+                       GROUP BY DATE(created_at)
+                       ORDER BY day DESC
+                       LIMIT 30'''
+                )
+            ).fetchall()
+
+        if insp.has_table('behavior_events'):
+            behavior_event_type_counts = db.session.execute(
+                text(
+                    '''SELECT event_type, COUNT(*) as count
+                       FROM behavior_events
+                       GROUP BY event_type
+                       ORDER BY count DESC
+                       LIMIT 10'''
+                )
+            ).fetchall()
+            behavior_event_day_counts = db.session.execute(
+                text(
+                    '''SELECT DATE(created_at) as day, COUNT(*) as count
+                       FROM behavior_events
+                       GROUP BY DATE(created_at)
+                       ORDER BY day DESC
+                       LIMIT 30'''
+                )
+            ).fetchall()
+    except Exception:
+        db.session.rollback()
+
+    export_kind = (request.args.get('export') or '').strip().lower()
+    if export_kind:
+        import io
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        def _resp(name: str):
+            return Response(
+                output.getvalue(),
+                mimetype='text/csv',
+                headers={'Content-Disposition': f'attachment; filename={name}'},
+            )
+
+        if export_kind == 'top_courses':
+            writer.writerow(['course_number', 'course_title', 'count'])
+            for r in top_courses_list:
+                writer.writerow([r['course_number'], r['course_title'], r['count']])
+            return _resp('ai_top_courses.csv')
+
+        if export_kind == 'top_instructors':
+            writer.writerow(['instructor', 'count'])
+            for r in top_faculty_list:
+                writer.writerow([r['instructor'], r['count']])
+            return _resp('ai_top_instructors.csv')
+
+        if export_kind == 'credits_by_area':
+            writer.writerow(['area', 'credits'])
+            for r in credits_by_area_list:
+                writer.writerow([r['area'], r['credits']])
+            return _resp('ai_credits_by_area.csv')
+
+        if export_kind == 'heatmap':
+            writer.writerow(['period'] + days)
+            for r in heat_rows:
+                writer.writerow([r['period']] + r['counts'])
+            return _resp('ai_heatmap.csv')
+
+    ai_enabled_setting = get_app_setting('ai_enabled', 'false')
+    ai_data_collection_enabled_setting = get_app_setting('ai_data_collection_enabled', 'false')
+
+    # Admin controls (settings only; feature implementations may be separate)
+    ai_notifications_enabled_setting = get_app_setting('ai_notifications_enabled', 'false')
+    ai_notifications_frequency_setting = get_app_setting('ai_notifications_frequency', 'daily')
+    ai_recommendations_enabled_setting = get_app_setting('ai_recommendations_enabled', 'true')
+    ai_predictive_analysis_enabled_setting = get_app_setting('ai_predictive_analysis_enabled', 'true')
+    behavior_tracking_enabled_setting = get_app_setting('behavior_tracking_enabled', 'false')
+    behavior_tracking_level_setting = get_app_setting('behavior_tracking_level', 'standard')
+
+    # Provide area dropdown options (major-like)
+    if not areas:
+        areas = set([d['area'] for d in credits_by_area_list])
+
+    return render_template(
+        'Admin/ai_dashboard.html',
+        ai_enabled_setting=ai_enabled_setting,
+        ai_data_collection_enabled_setting=ai_data_collection_enabled_setting,
+        ai_notifications_enabled_setting=ai_notifications_enabled_setting,
+        ai_notifications_frequency_setting=ai_notifications_frequency_setting,
+        ai_recommendations_enabled_setting=ai_recommendations_enabled_setting,
+        ai_predictive_analysis_enabled_setting=ai_predictive_analysis_enabled_setting,
+        behavior_tracking_enabled_setting=behavior_tracking_enabled_setting,
+        behavior_tracking_level_setting=behavior_tracking_level_setting,
+        years=years,
+        semesters=semesters,
+        areas=sorted([a for a in areas if a]),
+        selected_year=year,
+        selected_semester=semester,
+        selected_schedule_type=schedule_type,
+        selected_area=area,
+        schedule_count=len(schedules),
+        included_course_rows=included_course_rows,
+        unique_courses=len(top_courses),
+        unique_instructors=len(top_faculty),
+        gpa_terms_json=json.dumps(gpa_terms),
+        gpa_series_json=json.dumps(gpa_series),
+        credits_by_area_json=json.dumps([d['area'] for d in credits_by_area_list]),
+        credits_series_json=json.dumps([d['credits'] for d in credits_by_area_list]),
+        heat_days=days,
+        heat_rows=heat_rows,
+        heat_max=heat_max,
+        top_courses=top_courses_list,
+        top_faculty=top_faculty_list,
+        ai_event_type_counts=[dict(r._mapping) for r in ai_event_type_counts],
+        behavior_event_type_counts=[dict(r._mapping) for r in behavior_event_type_counts],
+        ai_event_days_json=json.dumps([str(r.day) for r in ai_event_day_counts][::-1]),
+        ai_event_counts_json=json.dumps([int(r.count) for r in ai_event_day_counts][::-1]),
+        behavior_event_days_json=json.dumps([str(r.day) for r in behavior_event_day_counts][::-1]),
+        behavior_event_counts_json=json.dumps([int(r.count) for r in behavior_event_day_counts][::-1]),
+    )
+
+
+@admin_bp.route('/ai/settings', methods=['POST'])
+@login_required
+@admin_required
+def ai_settings_update():
+    ai_enabled = 'ai_enabled_setting' in request.form
+    ai_data_collection_enabled = 'ai_data_collection_enabled_setting' in request.form
+    update_app_setting('ai_enabled', 'true' if ai_enabled else 'false')
+    update_app_setting('ai_data_collection_enabled', 'true' if ai_data_collection_enabled else 'false')
+
+    ai_notifications_enabled = 'ai_notifications_enabled_setting' in request.form
+    ai_notifications_frequency = (request.form.get('ai_notifications_frequency_setting') or 'daily').strip().lower()
+    if ai_notifications_frequency not in {'realtime', 'daily', 'weekly'}:
+        ai_notifications_frequency = 'daily'
+    update_app_setting('ai_notifications_enabled', 'true' if ai_notifications_enabled else 'false')
+    update_app_setting('ai_notifications_frequency', ai_notifications_frequency)
+
+    ai_recommendations_enabled = 'ai_recommendations_enabled_setting' in request.form
+    ai_predictive_analysis_enabled = 'ai_predictive_analysis_enabled_setting' in request.form
+    update_app_setting('ai_recommendations_enabled', 'true' if ai_recommendations_enabled else 'false')
+    update_app_setting('ai_predictive_analysis_enabled', 'true' if ai_predictive_analysis_enabled else 'false')
+
+    behavior_tracking_enabled = 'behavior_tracking_enabled_setting' in request.form
+    behavior_tracking_level = (request.form.get('behavior_tracking_level_setting') or 'standard').strip().lower()
+    if behavior_tracking_level not in {'minimal', 'standard', 'detailed'}:
+        behavior_tracking_level = 'standard'
+    update_app_setting('behavior_tracking_enabled', 'true' if behavior_tracking_enabled else 'false')
+    update_app_setting('behavior_tracking_level', behavior_tracking_level)
+
+    flash('AI settings updated.', 'success')
+    return redirect(url_for('admin.ai_dashboard'))
+
+
+@admin_bp.route('/ai/export_events.csv', methods=['GET'])
+@login_required
+@admin_required
+def ai_export_events_csv():
+    # Optional export of AIEvent logs (if table exists). This export is for admins only.
+    try:
+        insp = inspect(db.engine)
+        if not insp.has_table('ai_events'):
+            return jsonify({'success': False, 'message': 'ai_events table not found'}), 404
+
+        rows = db.session.execute(
+            text('SELECT id, created_at, user_id, schedule_id, event_type, route, metadata_json FROM ai_events ORDER BY id DESC')
+        ).fetchall()
+
+        import csv
+        import io
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['id', 'created_at', 'user_id', 'schedule_id', 'event_type', 'route', 'metadata_json'])
+        for r in rows:
+            m = r._mapping
+            writer.writerow([m['id'], m['created_at'], m['user_id'], m['schedule_id'], m['event_type'], m['route'], m['metadata_json']])
+
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': 'attachment; filename=ai_events.csv'},
+        )
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@admin_bp.route('/ai/export_behavior_events.csv', methods=['GET'])
+@login_required
+@admin_required
+def ai_export_behavior_events_csv():
+    # Optional export of BehaviorEvent logs (if table exists). This export is for admins only.
+    try:
+        insp = inspect(db.engine)
+        if not insp.has_table('behavior_events'):
+            return jsonify({'success': False, 'message': 'behavior_events table not found'}), 404
+
+        rows = db.session.execute(
+            text(
+                'SELECT id, created_at, user_id, session_id, schedule_id, event_type, route, metadata_json '
+                'FROM behavior_events ORDER BY id DESC'
+            )
+        ).fetchall()
+
+        import csv
+        import io
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['id', 'created_at', 'user_id', 'session_id', 'schedule_id', 'event_type', 'route', 'metadata_json'])
+        for r in rows:
+            m = r._mapping
+            writer.writerow(
+                [
+                    m['id'],
+                    m['created_at'],
+                    m['user_id'],
+                    m['session_id'],
+                    m['schedule_id'],
+                    m['event_type'],
+                    m['route'],
+                    m['metadata_json'],
+                ]
+            )
+
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': 'attachment; filename=behavior_events.csv'},
+        )
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500

@@ -5,98 +5,344 @@
 {% block content %}
 <div class="container mt-4 mb-5">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2>Manage Landing Page Content</h2>
-    </div>
-    
-    <div class="card mb-5 shadow-sm">
-        <div class="card-header bg-primary text-white">
-            <h4 class="mb-0">Static Content</h4>
-        </div>
-        <div class="card-body">
-            <form action="{{ url_for('admin.manage_landing') }}" method="POST">
-                <div class="mb-4">
-                    <label for="about_us" class="form-label fw-bold">About Us</label>
-                    <textarea class="form-control" id="about_us" name="about_us" rows="5" placeholder="Write a description about this scheduling tool...">{{ about_us }}</textarea>
-                    <small class="text-muted">This will appear on the guest landing page.</small>
-                </div>
-                <div class="mb-4">
-                    <label for="creator_message" class="form-label fw-bold">Creator Message</label>
-                    <textarea class="form-control" id="creator_message" name="creator_message" rows="4" placeholder="Write a personal message or update...">{{ creator_message }}</textarea>
-                </div>
-                <button type="submit" class="btn btn-primary px-4">Save Changes</button>
-            </form>
+        <div>
+            <h2 class="mb-1">Landing Page Management</h2>
+            <div class="text-muted">Control section order, announcements, and course catalog status.</div>
         </div>
     </div>
 
-    <div class="card shadow-sm">
-        <div class="card-header bg-dark text-white">
-            <h4 class="mb-0">Announcements Feed</h4>
-        </div>
-        <div class="card-body">
-            
-            <form action="{{ url_for('admin.create_announcement') }}" method="POST" class="mb-5 pb-4 border-bottom">
-                <h5 class="mb-3 text-secondary">Create New Announcement</h5>
-                <div class="row">
-                    <div class="col-md-12 mb-3">
-                        <label for="title" class="form-label fw-bold">Title</label>
-                        <input type="text" class="form-control" id="title" name="title" placeholder="e.g., Fall 2026 Dataset Now Available!" required>
-                    </div>
-                    <div class="col-md-12 mb-3">
-                        <label for="content" class="form-label fw-bold">Content</label>
-                        <textarea class="form-control" id="content" name="content" rows="3" placeholder="Write your announcement details here..." required></textarea>
-                    </div>
-                </div>
-                <button type="submit" class="btn btn-success px-4">Post Announcement</button>
-            </form>
+    <div class="accordion" id="landingAccordion">
 
-            <h5 class="mb-3 text-secondary">Existing Announcements</h5>
-            {% if announcements %}
-            <div class="table-responsive">
-                <table class="table table-hover align-middle">
-                    <thead class="table-light">
-                        <tr>
-                            <th>Date Posted</th>
-                            <th>Title</th>
-                            <th>Content Snippet</th>
-                            <th>Status</th>
-                            <th class="text-end">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for ann in announcements %}
-                        <tr>
-                            <td>{{ ann.date_posted.strftime('%Y-%m-%d %H:%M') }}</td>
-                            <td class="fw-bold">{{ ann.title }}</td>
-                            <td class="text-muted">{{ ann.content[:50] }}{% if ann.content|length > 50 %}...{% endif %}</td>
-                            <td>
-                                {% if ann.is_active %}
-                                    <span class="badge bg-success">Active</span>
-                                {% else %}
-                                    <span class="badge bg-secondary">Hidden</span>
-                                {% endif %}
-                            </td>
-                            <td class="text-end">
-                                <form action="{{ url_for('admin.toggle_announcement', announcement_id=ann.id) }}" method="POST" class="d-inline">
-                                    <button type="submit" class="btn btn-sm btn-outline-warning">
-                                        {% if ann.is_active %}Hide{% else %}Show{% endif %}
-                                    </button>
-                                </form>
-                                <form action="{{ url_for('admin.delete_announcement', announcement_id=ann.id) }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to permanently delete this announcement?');">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-                                </form>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+        <div class="accordion-item">
+            <h2 class="accordion-header" id="headingSections">
+                <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSections">
+                    Sections (enable + reorder)
+                </button>
+            </h2>
+            <div id="collapseSections" class="accordion-collapse collapse show" data-bs-parent="#landingAccordion">
+                <div class="accordion-body">
+                    <form action="{{ url_for('admin.manage_landing') }}" method="POST" id="axSectionsForm">
+                        <input type="hidden" name="_action" value="sections">
+                        <input type="hidden" name="sections_order" id="axSectionsOrder" value="">
+
+                        <div class="text-muted small mb-3">Drag to reorder. Toggle visibility with the checkbox.</div>
+
+                        <ul class="list-group" id="axSectionsList">
+                            {% for s in landing_sections %}
+                            <li class="list-group-item d-flex align-items-center justify-content-between gap-3" draggable="true" data-name="{{ s.name }}">
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="text-muted" style="cursor: grab;">≡</span>
+                                    <div class="fw-semibold">{{ s.name.replace('_',' ').title() }}</div>
+                                    <span class="badge bg-secondary bg-opacity-10 border" style="color: var(--ax-text); border-color: var(--ax-border);">order {{ s.display_order }}</span>
+                                </div>
+                                <div class="form-check form-switch mb-0">
+                                    <input class="form-check-input" type="checkbox" role="switch" name="enabled_names" value="{{ s.name }}" id="enabled_{{ s.name }}" {% if s.enabled %}checked{% endif %}>
+                                    <label class="form-check-label" for="enabled_{{ s.name }}">Enabled</label>
+                                </div>
+                            </li>
+                            {% endfor %}
+                        </ul>
+
+                        <div class="mt-3">
+                            <button type="submit" class="btn btn-primary">Save Sections</button>
+                        </div>
+                    </form>
+                </div>
             </div>
-            {% else %}
-            <div class="alert alert-light text-center" role="alert">
-                No announcements have been posted yet.
-            </div>
-            {% endif %}
-            
         </div>
+
+        <div class="accordion-item">
+            <h2 class="accordion-header" id="headingHero">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseHero">
+                    Hero
+                </button>
+            </h2>
+            <div id="collapseHero" class="accordion-collapse collapse" data-bs-parent="#landingAccordion">
+                <div class="accordion-body">
+                    <form action="{{ url_for('admin.manage_landing') }}" method="POST">
+                        <input type="hidden" name="_action" value="hero">
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label fw-bold">Headline</label>
+                                <input class="form-control" name="headline" value="{{ hero_cfg.get('headline','') }}" placeholder="e.g., Master Your Academic Journey">
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label fw-bold">Subtext</label>
+                                <textarea class="form-control" name="subtext" rows="3" placeholder="Short supporting message">{{ hero_cfg.get('subtext','') }}</textarea>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Primary button</label>
+                                <input class="form-control" name="primary_label" value="{{ hero_cfg.get('primary_label','Start Planning') }}">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-bold">Secondary button</label>
+                                <input class="form-control" name="secondary_label" value="{{ hero_cfg.get('secondary_label','Register for Premium') }}">
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <button type="submit" class="btn btn-primary">Save Hero</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="accordion-item">
+            <h2 class="accordion-header" id="headingFeatures">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseFeatures">
+                    Features
+                </button>
+            </h2>
+            <div id="collapseFeatures" class="accordion-collapse collapse" data-bs-parent="#landingAccordion">
+                <div class="accordion-body">
+                    <form action="{{ url_for('admin.manage_landing') }}" method="POST" id="axFeaturesForm">
+                        <input type="hidden" name="_action" value="features">
+                        <input type="hidden" name="features_json" id="axFeaturesJson" value="">
+
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label fw-bold">Section title</label>
+                                <input class="form-control" id="axFeaturesTitle" value="{{ features_cfg.get('title','Why Acadex') }}">
+                            </div>
+                        </div>
+
+                        <div class="mt-3 d-flex align-items-center justify-content-between">
+                            <div class="fw-bold">Cards</div>
+                            <button class="btn btn-sm btn-outline-primary" type="button" id="axAddFeatureCard">Add card</button>
+                        </div>
+
+                        <div class="mt-2" id="axFeatureCards">
+                            {% for c in features_cfg.get('cards', []) %}
+                            <div class="card mb-3" data-feature-card>
+                                <div class="card-body">
+                                    <div class="row g-3">
+                                        <div class="col-md-3">
+                                            <label class="form-label fw-semibold">Icon</label>
+                                            <select class="form-select" data-icon>
+                                                {% set current = c.get('icon','sparkles') %}
+                                                {% for icon in ['calendar','sparkles','shield-check','chart-bar','bolt','book-open','megaphone','info'] %}
+                                                <option value="{{ icon }}" {% if icon == current %}selected{% endif %}>{{ icon }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label fw-semibold">Title</label>
+                                            <input class="form-control" data-title value="{{ c.get('title','') }}">
+                                        </div>
+                                        <div class="col-md-5">
+                                            <label class="form-label fw-semibold">Description</label>
+                                            <input class="form-control" data-description value="{{ c.get('description','') }}">
+                                        </div>
+                                    </div>
+                                    <div class="mt-3 text-end">
+                                        <button type="button" class="btn btn-sm btn-outline-danger" data-remove-card>Remove</button>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+
+                        <div class="mt-3">
+                            <button type="submit" class="btn btn-primary">Save Features</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="accordion-item">
+            <h2 class="accordion-header" id="headingCatalog">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseCatalog">
+                    Course Catalog Status
+                </button>
+            </h2>
+            <div id="collapseCatalog" class="accordion-collapse collapse" data-bs-parent="#landingAccordion">
+                <div class="accordion-body">
+                    <form action="{{ url_for('admin.manage_landing') }}" method="POST">
+                        <input type="hidden" name="_action" value="catalog_status">
+
+                        <div class="text-muted small mb-3">These statuses appear on the public landing page.</div>
+
+                        <div class="table-responsive">
+                            <table class="table align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Course Catalog</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in catalog_statuses %}
+                                    <tr>
+                                        <td>
+                                            <input class="form-control" name="catalog_term" value="{{ row.term }}">
+                                        </td>
+                                        <td style="max-width: 220px;">
+                                            <select class="form-select" name="catalog_status">
+                                                <option value="available" {% if row.status == 'available' %}selected{% endif %}>Available</option>
+                                                <option value="processing" {% if row.status == 'processing' %}selected{% endif %}>Processing</option>
+                                            </select>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="mt-3">
+                            <button type="submit" class="btn btn-primary">Save Status</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="accordion-item">
+            <h2 class="accordion-header" id="headingStatic">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseStatic">
+                    Static Text (About + Creator Message)
+                </button>
+            </h2>
+            <div id="collapseStatic" class="accordion-collapse collapse" data-bs-parent="#landingAccordion">
+                <div class="accordion-body">
+                    <form action="{{ url_for('admin.manage_landing') }}" method="POST">
+                        <input type="hidden" name="_action" value="static">
+
+                        <div class="mb-4">
+                            <label for="about_us" class="form-label fw-bold">About</label>
+                            <textarea class="form-control" id="about_us" name="about_us" rows="5" placeholder="Explain what Acadex does...">{{ about_us }}</textarea>
+                        </div>
+                        <div class="mb-4">
+                            <label for="creator_message" class="form-label fw-bold">Creator Message</label>
+                            <textarea class="form-control" id="creator_message" name="creator_message" rows="4" placeholder="Optional message shown on the landing page">{{ creator_message }}</textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Save Text</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="accordion-item">
+            <h2 class="accordion-header" id="headingAnnouncements">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseAnnouncements">
+                    Announcements
+                </button>
+            </h2>
+            <div id="collapseAnnouncements" class="accordion-collapse collapse" data-bs-parent="#landingAccordion">
+                <div class="accordion-body">
+
+                    <form action="{{ url_for('admin.create_announcement') }}" method="POST" class="mb-4 pb-4 border-bottom">
+                        <h5 class="mb-3">Create new</h5>
+                        <div class="row g-3">
+                            <div class="col-md-9">
+                                <label for="title" class="form-label fw-bold">Title</label>
+                                <input type="text" class="form-control" id="title" name="title" placeholder="e.g., Spring 2026 Course Catalog is now available" required>
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label fw-bold">Type</label>
+                                <select class="form-select" name="ann_type">
+                                    <option value="info">Info</option>
+                                    <option value="update">Update</option>
+                                    <option value="warning">Warning</option>
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label for="content" class="form-label fw-bold">Content</label>
+                                <textarea class="form-control" id="content" name="content" rows="3" placeholder="Write your announcement details here..." required></textarea>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <button type="submit" class="btn btn-success">Post</button>
+                        </div>
+                    </form>
+
+                    <h5 class="mb-3">Existing</h5>
+                    {% if announcements %}
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Title</th>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for ann in announcements %}
+                                <tr>
+                                    <td class="text-muted">{{ ann.date_posted.strftime('%Y-%m-%d %H:%M') }}</td>
+                                    <td class="fw-bold">{{ ann.title }}</td>
+                                    <td>
+                                        {% set t = (ann.ann_type or 'info')|lower %}
+                                        {% if t == 'warning' %}
+                                            <span class="badge bg-warning text-dark">Warning</span>
+                                        {% elif t == 'update' %}
+                                            <span class="badge bg-success">Update</span>
+                                        {% else %}
+                                            <span class="badge bg-primary">Info</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if ann.is_active %}
+                                            <span class="badge bg-success">Visible</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Hidden</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#editAnn{{ ann.id }}">Edit</button>
+                                        <form action="{{ url_for('admin.toggle_announcement', announcement_id=ann.id) }}" method="POST" class="d-inline">
+                                            <button type="submit" class="btn btn-sm btn-outline-warning">{% if ann.is_active %}Hide{% else %}Show{% endif %}</button>
+                                        </form>
+                                        <form action="{{ url_for('admin.delete_announcement', announcement_id=ann.id) }}" method="POST" class="d-inline" onsubmit="return confirm('Permanently delete this announcement?');">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                <tr class="collapse" id="editAnn{{ ann.id }}">
+                                    <td colspan="5">
+                                        <form action="{{ url_for('admin.edit_announcement', announcement_id=ann.id) }}" method="POST" class="p-3 rounded-3" style="background: var(--ax-surface); border: 1px solid var(--ax-border);">
+                                            <div class="row g-3">
+                                                <div class="col-md-9">
+                                                    <label class="form-label fw-bold">Title</label>
+                                                    <input class="form-control" name="title" value="{{ ann.title }}" required>
+                                                </div>
+                                                <div class="col-md-3">
+                                                    <label class="form-label fw-bold">Type</label>
+                                                    <select class="form-select" name="ann_type">
+                                                        <option value="info" {% if (ann.ann_type or 'info') == 'info' %}selected{% endif %}>Info</option>
+                                                        <option value="update" {% if ann.ann_type == 'update' %}selected{% endif %}>Update</option>
+                                                        <option value="warning" {% if ann.ann_type == 'warning' %}selected{% endif %}>Warning</option>
+                                                    </select>
+                                                </div>
+                                                <div class="col-12">
+                                                    <label class="form-label fw-bold">Content</label>
+                                                    <textarea class="form-control" name="content" rows="3" required>{{ ann.content }}</textarea>
+                                                </div>
+                                            </div>
+                                            <div class="mt-3 d-flex justify-content-end gap-2">
+                                                <button type="submit" class="btn btn-primary">Save</button>
+                                            </div>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="alert" style="background: var(--ax-surface); border: 1px solid var(--ax-border); color: var(--ax-text);">
+                        No announcements have been posted yet.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
     </div>
 </div>
+
+<script src="{{ url_for('static', filename='js/admin_landing.js') }}"></script>
 {% endblock %}

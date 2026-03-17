@@ -4,13 +4,14 @@
 {% block content %}
 <h2 class="mb-4">Manage Instructors</h2>
 
-<div class="card shadow-sm">
+<div class="card shadow-sm border-0">
     <div class="card-body">
-        <table class="table table-striped table-hover">
+        <table class="table table-striped table-hover smart-table">
             <thead>
                 <tr>
                     <th>ID</th>
                     <th>Name</th>
+                    <th>Courses Assigned</th>
                     <th>Actions</th>
                 </tr>
             </thead>
@@ -19,14 +20,17 @@
                 <tr>
                     <td>{{ instructor.id }}</td>
                     <td>{{ instructor.name }}</td>
+                    <td>{{ instructor.course_count or 0 }}</td>
                     <td>
                         <button class="btn btn-sm btn-primary edit-instructor-btn" 
                                 data-id="{{ instructor.id }}" 
-                                data-name="{{ instructor.name }}">Edit Name</button>
+                                data-name="{{ instructor.name }}">Edit</button>
+                        <button class="btn btn-sm btn-outline-danger delete-instructor-btn"
+                                data-name="{{ instructor.name }}">Delete</button>
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="3" class="text-center">No instructors found. Upload a dataset to populate this table.</td></tr>
+                <tr><td colspan="4" class="text-center">No instructors found. Upload a course catalog to populate this table.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -38,19 +42,48 @@
         <div class="modal-content">
             <form id="editInstructorForm">
                 <div class="modal-header">
-                    <h5 class="modal-title">Edit Instructor</h5>
+                    <h5 class="modal-title">Edit Instructor Name</h5>
                     <button type="button" class="btn-close close-modal"></button>
                 </div>
                 <div class="modal-body">
                     <input type="hidden" id="edit_instructor_id">
+                    <input type="hidden" id="edit_instructor_old_name">
                     <div class="mb-3">
-                        <label>Instructor Name</label>
+                        <label>Current Name</label>
+                        <input type="text" id="edit_instructor_current_name" class="form-control" disabled>
+                    </div>
+                    <div class="mb-3">
+                        <label>New Name</label>
                         <input type="text" id="edit_instructor_name" class="form-control" required>
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary modal-cancel-btn">Cancel</button>
                     <button type="submit" class="btn btn-success">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div id="deleteInstructorModal" class="modal" tabindex="-1" style="display: none; background: rgba(0,0,0,0.5); position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1050;">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form id="deleteInstructorForm">
+                <div class="modal-header">
+                    <h5 class="modal-title">Delete Instructor</h5>
+                    <button type="button" class="btn-close close-modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="delete_instructor_name">
+                    <p class="mb-2">You are removing: <strong id="delete_instructor_name_label"></strong></p>
+                    <label class="form-label">Reassign courses to (optional)</label>
+                    <input type="text" id="delete_instructor_reassign_to" class="form-control" placeholder="Leave empty to assign to TBA">
+                    <small class="text-muted">All courses for this instructor will be reassigned.</small>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary modal-cancel-btn">Cancel</button>
+                    <button type="submit" class="btn btn-danger">Delete & Reassign</button>
                 </div>
             </form>
         </div>

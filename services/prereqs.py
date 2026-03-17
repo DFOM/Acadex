@@ -184,8 +184,7 @@ class _Parser:
             )
 
         if tok.kind == _TOKEN_COURSE:
-            self._advance()
-            return Course(tok.value)
+            return Course(self._advance().value)
 
         if tok.kind == _TOKEN_LPAREN:
             self._advance()

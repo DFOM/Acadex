@@ -2,8 +2,10 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-import os
-from models import db, User
+import re
+from sqlalchemy import or_
+from models import db, User, SubjectArea, Setting
+from utils import get_available_dataset_years
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -31,44 +33,85 @@ def login():
 
 @auth_bp.route('/register', methods=['GET', 'POST'])
 def register():
+    majors = SubjectArea.query.filter(
+        SubjectArea.is_active.is_(True),
+        or_(SubjectArea.area_type == 'major', SubjectArea.area_type == 'both'),
+    ).order_by(SubjectArea.name.asc()).all()
+    minors = SubjectArea.query.filter(
+        SubjectArea.is_active.is_(True),
+        or_(SubjectArea.area_type == 'minor', SubjectArea.area_type == 'both'),
+    ).order_by(SubjectArea.name.asc()).all()
+
     if request.method == 'POST':
         username = request.form.get('username')
+        email = (request.form.get('email') or '').strip().lower()
         password = request.form.get('password')
         confirm_password = request.form.get('confirm_password')
-        
+
         gender = request.form.get('gender')
         expected_graduation_str = request.form.get('expected_graduation')
-        secret_code = (request.form.get('secret_code') or '').strip()
+        major_subject_area_id = request.form.get('major_subject_area_id', type=int)
+        minor_subject_area_id = request.form.get('minor_subject_area_id', type=int)
         
         expected_graduation = None
         if expected_graduation_str and expected_graduation_str.isdigit():
             expected_graduation = int(expected_graduation_str)
 
-        if not username or not password or not confirm_password:
+        if not username or not email or not password or not confirm_password:
             flash("Please fill out all required fields.", "error")
-            return redirect(url_for('auth.register'))
+            return render_template('Student/register.html', majors=majors, minors=minors)
+
+        email_regex = r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+        if not re.match(email_regex, email):
+            flash("Please provide a valid email address.", "error")
+            return render_template('Student/register.html', majors=majors, minors=minors)
 
         if password != confirm_password:
             flash("Passwords do not match.", "error")
-            return redirect(url_for('auth.register'))
+            return render_template('Student/register.html', majors=majors, minors=minors)
+
+        if not major_subject_area_id or not minor_subject_area_id:
+            flash("Please select both a major and a minor.", "error")
+            return render_template('Student/register.html', majors=majors, minors=minors)
+
+        major = SubjectArea.query.filter(
+            SubjectArea.id == major_subject_area_id,
+            SubjectArea.is_active.is_(True),
+            or_(SubjectArea.area_type == 'major', SubjectArea.area_type == 'both'),
+        ).first()
+        minor = SubjectArea.query.filter(
+            SubjectArea.id == minor_subject_area_id,
+            SubjectArea.is_active.is_(True),
+            or_(SubjectArea.area_type == 'minor', SubjectArea.area_type == 'both'),
+        ).first()
+        if not major or not minor:
+            flash("Invalid major/minor selection. Please choose active options.", "error")
+            return render_template('Student/register.html', majors=majors, minors=minors)
 
         existing_user = User.query.filter_by(username=username).first()
         if existing_user:
             flash("Username already exists. Please choose another one.", "error")
-            return redirect(url_for('auth.register'))
+            return render_template('Student/register.html', majors=majors, minors=minors)
+
+        existing_email = User.query.filter_by(email=email).first()
+        if existing_email:
+            flash("Email already registered. Please use another email.", "error")
+            return render_template('Student/register.html', majors=majors, minors=minors)
 
         hashed_password = generate_password_hash(password, method='pbkdf2:sha256')
 
-        admin_secret = (os.environ.get('ADMIN_SECRET_CODE') or '').strip()
-        make_admin = bool(admin_secret) and secret_code and secret_code == admin_secret
+        make_admin = False
 
         new_user = User(
             username=username, 
+            email=email,
             password=hashed_password, 
             role='admin' if make_admin else 'student',
             is_admin=make_admin,
             gender=gender,
-            expected_graduation=expected_graduation
+            expected_graduation=expected_graduation,
+            major_subject_area_id=major_subject_area_id,
+            minor_subject_area_id=minor_subject_area_id,
         )
         db.session.add(new_user)
         db.session.commit()
@@ -76,7 +119,7 @@ def register():
         flash("Registration successful! Please log in.", "success")
         return redirect(url_for('auth.login'))
 
-    return render_template('Student/register.html')
+    return render_template('Student/register.html', majors=majors, minors=minors)
 
 @auth_bp.route('/logout')
 @login_required
@@ -88,4 +131,19 @@ def logout():
 @auth_bp.route('/choose_schedule_type')
 @login_required
 def choose_schedule_type():
-    return render_template('Student/schedule_type.html')
+    dataset_years = get_available_dataset_years()
+    current_year_setting = Setting.query.get('current_year')
+    current_year = int(current_year_setting.value) if current_year_setting and str(current_year_setting.value).isdigit() else 2024
+
+    past_years = [y for y in dataset_years if y < current_year]
+    future_years = [y for y in dataset_years if y >= current_year]
+
+    return render_template(
+        'Student/schedule_type.html',
+        dataset_years=dataset_years,
+        has_dataset_years=bool(dataset_years),
+        has_past_years=bool(past_years),
+        has_future_years=bool(future_years),
+        past_years=past_years,
+        future_years=future_years,
+    )

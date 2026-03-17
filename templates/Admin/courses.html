@@ -10,7 +10,6 @@
             <thead class="table-light">
                 <tr>
                     <th>Source Table</th>
-                    <th>Course No.</th>
                     <th>Title</th>
                     <th>Credits</th>
                     <th>Instructor</th>
@@ -22,7 +21,6 @@
                 {% for course in courses %}
                 <tr>
                     <td><span class="badge bg-secondary">{{ course.source_table }}</span></td>
-                    <td class="fw-bold">{{ course.Course_Number }}</td>
                     <td>{{ course.Course_Title }}</td>
                     <td>{{ course.Credits }}</td>
                     <td>{{ course.Instructor }}</td>
