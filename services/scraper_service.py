@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import platform
+import shutil
 import subprocess
 import threading
 import time
@@ -64,6 +66,10 @@ def is_scraper_running() -> bool:
 _DEBUGGING_PORT = 9222
 
 
+def _is_hosted_environment() -> bool:
+    return bool(os.environ.get("RENDER") or os.environ.get("DYNO") or os.environ.get("K_SERVICE"))
+
+
 def _is_chrome_running() -> bool:
     """Return True if something is already listening on the debugging port."""
     import socket
@@ -78,6 +84,14 @@ def _is_chrome_running() -> bool:
 
 def _chrome_executable() -> str:
     """Best-effort path to the Chrome executable for the current OS."""
+    configured = (os.environ.get("CHROME_EXECUTABLE") or "").strip()
+    if configured:
+        if os.path.isfile(configured) and os.access(configured, os.X_OK):
+            return configured
+        found = shutil.which(configured)
+        if found:
+            return found
+
     system = platform.system()
     candidates: List[str] = []
     if system == "Darwin":
@@ -94,9 +108,18 @@ def _chrome_executable() -> str:
                          "Google", "Chrome", "Application", "chrome.exe"),
         ]
     else:
-        candidates = ["google-chrome", "chromium-browser", "chromium"]
+        candidates = [
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/chromium",
+            "/opt/google/chrome/chrome",
+            "google-chrome",
+            "google-chrome-stable",
+            "chromium-browser",
+            "chromium",
+        ]
 
-    import shutil, os
     for c in candidates:
         if os.path.isfile(c) and os.access(c, os.X_OK):
             return c
@@ -128,6 +151,17 @@ def start_browser_session() -> dict:
             "success": True,
             "message": "Chrome is already running on port 9222 — session reused.",
             "already_running": True,
+        }
+
+    if _is_hosted_environment():
+        return {
+            "success": False,
+            "message": (
+                "Manual browser session is not supported on hosted servers (Render). "
+                "Run this feature from a local desktop app instance with Chrome installed, "
+                "or provide a reachable remote debugger endpoint."
+            ),
+            "already_running": False,
         }
 
     try:
