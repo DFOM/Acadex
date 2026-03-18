@@ -1119,6 +1119,144 @@ def search_courses():
     if not catalog_rows:
         return jsonify([])
 
+
+@student_bp.route('/api/course_detail', methods=['GET'])
+def api_course_detail():
+    schedule_id_raw = request.args.get('schedule_id')
+    course_number_raw = str(request.args.get('course_number') or '').strip()
+    day_period_raw = str(request.args.get('day_and_period') or '').strip().lower()
+
+    try:
+        schedule_id = int(schedule_id_raw)
+    except Exception:
+        return jsonify({'success': False, 'message': 'Invalid schedule_id.'}), 400
+
+    if not course_number_raw:
+        return jsonify({'success': False, 'message': 'course_number is required.'}), 400
+
+    if current_user.is_authenticated:
+        sched = Schedule.query.filter_by(id=schedule_id, user_id=current_user.id).first()
+    else:
+        sched = Schedule.query.filter_by(id=schedule_id, session_id=get_guest_id()).first()
+
+    if not sched:
+        return jsonify({'success': False, 'message': 'Unauthorized.'}), 403
+
+    catalog_rows, dataset_id = _load_scraped_catalog_for_term(sched.year, sched.semester)
+    if not catalog_rows:
+        return jsonify({'success': False, 'message': 'Course catalog unavailable for this term.'}), 404
+
+    normalized_target_code = _normalize_course_number(course_number_raw)
+    matches = [
+        row
+        for row in catalog_rows
+        if _normalize_course_number(row.get('Course_Number')) == normalized_target_code
+    ]
+    if not matches:
+        return jsonify({'success': False, 'message': 'Course not found in catalog.'}), 404
+
+    target = matches[0]
+    if day_period_raw:
+        for row in matches:
+            if str(row.get('Day_and_Period') or '').strip().lower() == day_period_raw:
+                target = row
+                break
+
+    target_row = _add_display_fields(dict(target))
+
+    completed_identifiers: Iterable[str] = []
+    major_name = ''
+    minor_name = ''
+    if current_user.is_authenticated:
+        completed_identifiers = _completed_passing_prereq_identifiers(current_user.id)
+        user_areas = _resolve_user_area_names()
+        major_name = user_areas.get('major') or ''
+        minor_name = user_areas.get('minor') or ''
+
+    prereq_status = _build_prerequisite_status(
+        target_row.get('Prerequisite'),
+        completed_identifiers,
+        major_name=major_name,
+        minor_name=minor_name,
+        prereq_title_lookup=_build_prereq_title_lookup(),
+    )
+
+    target_code_token = normalize_course_code_for_prereqs(target_row.get('Course_Number'))
+    target_title_token = normalize_course_code_for_prereqs(target_row.get('Course_Title'))
+    target_tokens = {v for v in [target_code_token, target_title_token] if v}
+
+    unlocks: list[dict] = []
+    seen_unlocks: set[tuple[str, str]] = set()
+
+    for row in catalog_rows:
+        row_code = _normalize_course_number(row.get('Course_Number'))
+        row_day = str(row.get('Day_and_Period') or '').strip()
+        if row_code == normalized_target_code and row_day.lower() == str(target_row.get('Day_and_Period') or '').strip().lower():
+            continue
+
+        prereq_value = str(row.get('Prerequisite') or '').strip()
+        if not prereq_value:
+            continue
+
+        is_unlocked = False
+        for term in _split_prereq_terms(prereq_value):
+            if not _looks_like_trackable_course_term(term):
+                continue
+            norm_term = normalize_course_code_for_prereqs(term)
+            if norm_term and norm_term in target_tokens:
+                is_unlocked = True
+                break
+
+        if not is_unlocked:
+            continue
+
+        dedupe_key = (row_code, row_day.lower())
+        if dedupe_key in seen_unlocks:
+            continue
+        seen_unlocks.add(dedupe_key)
+
+        mapped = _add_display_fields(dict(row))
+        unlocks.append(
+            {
+                'course_number': mapped.get('Course_Number'),
+                'display_course_number': mapped.get('display_course_number'),
+                'course_title': mapped.get('Course_Title'),
+                'display_title': mapped.get('display_title'),
+                'day_and_period': mapped.get('Day_and_Period'),
+                'instructor': mapped.get('Instructor'),
+                'credits': mapped.get('Credits'),
+                'prerequisite': mapped.get('Prerequisite'),
+            }
+        )
+
+    unlocks.sort(
+        key=lambda row: (
+            str(row.get('course_number') or ''),
+            str(row.get('day_and_period') or ''),
+        )
+    )
+
+    return jsonify(
+        {
+            'success': True,
+            'dataset_id': dataset_id,
+            'course': {
+                'course_number': target_row.get('Course_Number'),
+                'display_course_number': target_row.get('display_course_number'),
+                'course_title': target_row.get('Course_Title'),
+                'display_title': target_row.get('display_title'),
+                'credits': target_row.get('Credits'),
+                'instructor': target_row.get('Instructor'),
+                'day_and_period': target_row.get('Day_and_Period'),
+                'area_of_study': target_row.get('Area_of_Study'),
+                'prerequisite': target_row.get('Prerequisite'),
+            },
+            'prerequisite_status': prereq_status,
+            'unlocks': unlocks[:250],
+            'unlock_count': len(unlocks),
+        }
+    )
+
     # Full catalog load for the schedule editor.
     if json_mode and schedule_id and query_str == '':
         try:

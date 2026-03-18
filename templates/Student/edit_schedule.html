@@ -266,6 +266,21 @@ document.addEventListener('DOMContentLoaded', function () {
   </div>
 </div>
 
+<div class="modal fade" id="courseDetailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+            <div class="modal-header bg-primary text-white border-0 py-3">
+                <div>
+                    <span class="badge mb-1" style="background: var(--ax-surface); color: var(--ax-primary); border: 1px solid color-mix(in srgb, var(--ax-primary) 35%, var(--ax-border));">Course Detail</span>
+                    <h5 class="modal-title fw-bold mb-0" id="courseDetailTitle">Course</h5>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="courseDetailBody" style="background: var(--ax-surface);"></div>
+        </div>
+    </div>
+</div>
+
 <script id="currentCoursesData" type="application/json">
     {{ current_courses | tojson | safe }}
 </script>

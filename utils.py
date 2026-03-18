@@ -1,5 +1,5 @@
 # utils.py
-from models import db, Setting, ScrapedDataset, Course
+from models import db, Setting, ScrapedDataset, Course, CatalogStatus
 import re
 import json
 
@@ -152,28 +152,50 @@ def format_display_course_number(raw: str) -> str:
     return s
 
 def get_available_dataset_years() -> list[int]:
-    years = set()
+    years: set[int] = set()
+
+    def _add_year(value) -> None:
+        text = str(value or '').strip()
+        if not text:
+            return
+        direct = re.fullmatch(r'\d{4}', text)
+        if direct:
+            year_val = int(text)
+            if 2000 <= year_val <= 2199:
+                years.add(year_val)
+            return
+        for match in re.findall(r'\b(20\d{2})\b', text):
+            try:
+                year_val = int(match)
+            except Exception:
+                continue
+            if 2000 <= year_val <= 2199:
+                years.add(year_val)
+
     try:
         rows = ScrapedDataset.query.filter_by(status='completed').all()
         for row in rows:
-            try:
-                y = int(str(row.year or '').strip())
-                years.add(y)
-            except Exception:
-                continue
+            _add_year(getattr(row, 'year', None))
+            _add_year(getattr(row, 'name', None))
     except Exception:
         pass
 
     try:
-        local_rows = Course.query.filter(Course.year.isnot(None)).all()
+        local_rows = Course.query.all()
         for row in local_rows:
-            try:
-                y = int(str(row.year or '').strip())
-                years.add(y)
-            except Exception:
-                continue
+            _add_year(getattr(row, 'year', None))
+            _add_year(getattr(row, 'dataset_name', None))
     except Exception:
         pass
+
+    try:
+        status_rows = CatalogStatus.query.all()
+        for row in status_rows:
+            _add_year(getattr(row, 'term', None))
+            _add_year(getattr(row, 'dataset', None))
+    except Exception:
+        pass
+
     return sorted(years)
 
 def is_valid_table_name(name: str) -> bool:

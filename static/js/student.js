@@ -164,6 +164,85 @@ document.addEventListener('DOMContentLoaded', () => {
         return `<div class="mt-1 d-flex flex-wrap gap-1">${badges}</div>`;
     };
 
+    const decodeDataAttr = (value) => {
+        try {
+            return decodeURIComponent(String(value || ''));
+        } catch (_) {
+            return String(value || '');
+        }
+    };
+
+    const openCourseDetail = async ({ scheduleId, courseNumber, dayAndPeriod }) => {
+        const titleEl = document.getElementById('courseDetailTitle');
+        const bodyEl = document.getElementById('courseDetailBody');
+        const modalEl = document.getElementById('courseDetailModal');
+        if (!titleEl || !bodyEl || !modalEl) return;
+
+        titleEl.textContent = 'Course Detail';
+        bodyEl.innerHTML = '<div class="text-muted small">Loading course detail...</div>';
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+
+        try {
+            const params = new URLSearchParams({
+                schedule_id: String(scheduleId || ''),
+                course_number: String(courseNumber || ''),
+                day_and_period: String(dayAndPeriod || ''),
+            });
+            const response = await fetch(`/student/api/course_detail?${params.toString()}`);
+            const result = await response.json();
+            if (!response.ok || !result.success) {
+                bodyEl.innerHTML = `<div class="alert alert-warning mb-0">${escapeHtml(result.message || 'Unable to load course detail.')}</div>`;
+                return;
+            }
+
+            const course = result.course || {};
+            const prereqStatus = result.prerequisite_status || {};
+            const prereqItems = Array.isArray(prereqStatus.items) ? prereqStatus.items : [];
+            const unlocks = Array.isArray(result.unlocks) ? result.unlocks : [];
+            const unlockCount = Number(result.unlock_count || unlocks.length || 0);
+
+            titleEl.textContent = course.display_title || course.course_title || 'Course Detail';
+
+            const prereqBadges = prereqItems.length
+                ? `<div class="d-flex flex-wrap gap-1 mt-1">${prereqItems.map(prereqItemBadge).join('')}</div>`
+                : '<div class="small text-muted mt-1">No prerequisite items.</div>';
+
+            const unlockRows = unlocks.length
+                ? unlocks.slice(0, 60).map((item) => `
+                    <li class="list-group-item px-0 py-2 border-0 border-bottom">
+                        <div class="fw-semibold">${escapeHtml(item.display_title || item.course_title || 'Untitled')}</div>
+                        <div class="small text-muted">${escapeHtml(item.display_course_number || item.course_number || '')} · ${escapeHtml(item.day_and_period || 'TBA')} · ${escapeHtml(item.instructor || 'TBA')}</div>
+                    </li>
+                `).join('')
+                : '<div class="small text-muted">No reverse dependencies found in this term.</div>';
+
+            bodyEl.innerHTML = `
+                <div class="mb-3">
+                    <div class="d-flex flex-wrap gap-2 mb-1">
+                        <span class="badge bg-light text-dark border">${escapeHtml(course.display_course_number || course.course_number || '')}</span>
+                        <span class="badge bg-primary-subtle text-primary border border-primary-subtle">${escapeHtml(String(course.credits ?? 0))} CR</span>
+                        <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">${escapeHtml(course.day_and_period || 'TBA')}</span>
+                    </div>
+                    <div class="small text-muted">Instructor: ${escapeHtml(course.instructor || 'TBA')} · Area: ${escapeHtml(course.area_of_study || 'General')}</div>
+                </div>
+
+                <div class="mb-3">
+                    <div class="fw-bold mb-1">Prerequisites</div>
+                    <div class="small text-muted">${escapeHtml(prereqStatus.summary || 'No prerequisites.')}</div>
+                    ${prereqBadges}
+                </div>
+
+                <div>
+                    <div class="fw-bold mb-1">Unlocks (${unlockCount})</div>
+                    <ul class="list-group list-group-flush">${unlockRows}</ul>
+                </div>
+            `;
+        } catch (err) {
+            bodyEl.innerHTML = '<div class="alert alert-danger mb-0">Unable to load course detail right now.</div>';
+        }
+    };
+
     // ==========================================
     // Heroicons (inline SVG strings)
     // ==========================================
@@ -560,6 +639,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             let actionButton = '';
             let sectionBadge = '';
+            const detailButton = `<button class="btn btn-sm btn-outline-secondary view-course-detail-btn rounded-pill px-3 py-1 shadow-sm fw-bold" style="font-size: 0.75rem;" data-course-number="${encodeURIComponent(sample.Course_Number || '')}" data-day-period="${encodeURIComponent(sample.Day_and_Period || '')}" data-schedule-id="${scheduleIdInput.value}">Details</button>`;
 
             if (sections.length > 1) {
                 sectionBadge = `<span class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle rounded-pill">${heroIcon('stack')}${sections.length} Sections</span>`;
@@ -603,7 +683,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div class="d-flex justify-content-between align-items-center mt-2">
                         ${sectionBadge}
-                        ${actionButton}
+                        <div class="d-flex gap-1 align-items-center">${detailButton}${actionButton}</div>
                     </div>
                 </div>
             `;
@@ -659,6 +739,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.addEventListener('click', async (e) => {
+        const detailBtn = e.target.closest('.view-course-detail-btn');
+        if (detailBtn) {
+            const scheduleId = detailBtn.getAttribute('data-schedule-id') || '';
+            const courseNumber = decodeDataAttr(detailBtn.getAttribute('data-course-number'));
+            const dayAndPeriod = decodeDataAttr(detailBtn.getAttribute('data-day-period'));
+            openCourseDetail({ scheduleId, courseNumber, dayAndPeriod });
+            return;
+        }
         
         // OPEN SECTION MODAL
         if (e.target.classList.contains('view-sections-btn')) {
@@ -711,6 +799,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const btnText = isClash ? clashMessage : '+ Select';
                 const rowClass = isClash ? 'bg-secondary bg-opacity-10' : '';
                 const modalDisplayTitle = getDisplayTitle(sec) || 'Untitled Course';
+                const encodedCourseNumber = encodeURIComponent(sec.Course_Number || '');
+                const encodedDayPeriod = encodeURIComponent(sec.Day_and_Period || '');
 
                 bodyHtml += `
                     <div class="list-group-item d-flex justify-content-between align-items-center p-3 ${rowClass}">
@@ -724,12 +814,20 @@ document.addEventListener('DOMContentLoaded', () => {
                             <small class="text-muted d-block fw-bold mb-2" style="font-size: 0.75rem;">👤 ${sec.Instructor || 'TBA'}</small>
                             <span class="badge ${isClash ? 'bg-secondary' : 'bg-info text-dark'} px-2 py-1 rounded-pill">${heroIcon('clock')}${sec.Day_and_Period || 'TBA'}</span>
                         </div>
-                        <button class="btn ${btnClass} btn-sm add-specific-section-btn fw-bold px-4 py-2 rounded-pill shadow-sm"
-                                data-course-number="${sec.Course_Number}"
-                                data-schedule-id="${scheduleId}"
-                                ${disableAttr}>
-                            ${btnText}
-                        </button>
+                        <div class="d-flex flex-column align-items-end gap-2">
+                            <button class="btn btn-outline-secondary btn-sm view-course-detail-btn fw-bold px-3 py-1 rounded-pill"
+                                    data-course-number="${encodedCourseNumber}"
+                                    data-day-period="${encodedDayPeriod}"
+                                    data-schedule-id="${scheduleId}">
+                                Details
+                            </button>
+                            <button class="btn ${btnClass} btn-sm add-specific-section-btn fw-bold px-4 py-2 rounded-pill shadow-sm"
+                                    data-course-number="${sec.Course_Number}"
+                                    data-schedule-id="${scheduleId}"
+                                    ${disableAttr}>
+                                ${btnText}
+                            </button>
+                        </div>
                     </div>
                 `;
             });

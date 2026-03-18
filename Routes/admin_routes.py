@@ -102,6 +102,7 @@ ENDPOINT_PERMISSION_MAP = {
     'admin.scraper_diagnostics_api': 'manage_datasets',
     'admin.admin_health': 'manage_users',
     'admin.health_metrics_api': 'manage_users',
+    'admin.health_fix_api': 'manage_users',
     'admin.restore_version_placeholder': 'manage_users',
 }
 
@@ -279,6 +280,65 @@ def _course_sort_ts(value):
     return value or datetime.min
 
 
+def _faculty_name_key(name: str) -> str:
+    return re.sub(r'\s+', ' ', str(name or '').strip()).lower()
+
+
+def _normalize_faculty_name(name: str) -> str:
+    cleaned = re.sub(r'\s+', ' ', str(name or '').strip())
+    cleaned = re.sub(r'^(dr|prof|professor|mr|ms|mrs)\.?\s+', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s+,', ',', cleaned)
+    cleaned = cleaned.strip(' -;|/')
+    return cleaned
+
+
+def _extract_faculty_names(raw_instructor: str | None) -> list[str]:
+    text = str(raw_instructor or '').strip()
+    if not text:
+        return []
+
+    placeholder = {'tba', 'tbd', 'staff', 'n/a', 'na', 'none', 'unknown'}
+    if _faculty_name_key(text) in placeholder:
+        return []
+
+    parts = re.split(r'\s*(?:;|\||/|&|\band\b)\s*', text, flags=re.IGNORECASE)
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        name = _normalize_faculty_name(part)
+        if not name:
+            continue
+        key = _faculty_name_key(name)
+        if not key or key in placeholder or key in seen:
+            continue
+        seen.add(key)
+        normalized.append(name)
+    return normalized
+
+
+def _sync_course_faculty_from_instructor(course: Course, instructor_value: str | None) -> None:
+    names = _extract_faculty_names(instructor_value)
+    if names:
+        existing_rows = Faculty.query.filter(sa.func.lower(Faculty.name).in_([n.lower() for n in names])).all()
+        existing_map = {_faculty_name_key(r.name): r for r in existing_rows}
+        synced_rows: list[Faculty] = []
+        for name in names:
+            key = _faculty_name_key(name)
+            row = existing_map.get(key)
+            if not row:
+                row = Faculty(name=name)
+                db.session.add(row)
+                existing_map[key] = row
+            synced_rows.append(row)
+        course.faculty = synced_rows
+        course.instructor = '; '.join(names)
+        return
+
+    course.faculty = []
+    clean_instructor = str(instructor_value or '').strip()
+    course.instructor = clean_instructor or None
+
+
 def _parse_course_ref(course_ref: str) -> tuple[str, int] | None:
     raw = str(course_ref or '').strip()
     if not raw:
@@ -344,7 +404,7 @@ def _serialize_scraped_course(row: ScrapedCourse) -> dict:
         'dataset_name': dataset_name,
         'last_updated': getattr(dataset_obj, 'updated_at', None).isoformat() if getattr(dataset_obj, 'updated_at', None) else None,
         'faculty_ids': [],
-        'faculty_names': [],
+        'faculty_names': _extract_faculty_names(row.instructor),
         'editable': True,
         'deletable': False,
     }
@@ -435,6 +495,190 @@ def _serialize_faculty(row: Faculty) -> dict:
         'advisor_area_ids': [a.id for a in (row.advisor_areas or [])],
         'advisor_area_names': [a.name for a in (row.advisor_areas or [])],
         'advisor_areas': [a.name for a in (row.advisor_areas or [])],
+    }
+
+
+def _all_selectable_dataset_names() -> list[str]:
+    scraped_dataset_names = [
+        d.name
+        for d in ScrapedDataset.query.filter(ScrapedDataset.status == 'completed').order_by(ScrapedDataset.created_at.desc()).all()
+        if d.name
+    ]
+    csv_dataset_names = [
+        r[0]
+        for r in db.session.query(Course.dataset_name).filter(Course.dataset_name.isnot(None)).distinct().all()
+        if r and r[0]
+    ]
+    return sorted(set(scraped_dataset_names + csv_dataset_names), reverse=True)
+
+
+def _build_integrity_payload() -> dict:
+    checks: list[dict] = []
+
+    active_dataset_name = str(get_app_setting('active_dataset_name', '') or '').strip()
+    selectable_dataset_names = _all_selectable_dataset_names()
+    local_course_count = int(Course.query.count() or 0)
+    scraped_course_count = int(
+        ScrapedCourse.query
+        .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
+        .filter(ScrapedDataset.status == 'completed')
+        .count()
+        or 0
+    )
+    has_any_courses = (local_course_count + scraped_course_count) > 0
+
+    if not has_any_courses:
+        checks.append(
+            {
+                'id': 'catalog_data',
+                'status': 'critical',
+                'title': 'No catalog rows available',
+                'message': 'No local or scraped courses were found. Upload CSV or run scraper.',
+                'fixes': [],
+            }
+        )
+    else:
+        checks.append(
+            {
+                'id': 'catalog_data',
+                'status': 'ok',
+                'title': 'Catalog rows detected',
+                'message': f'Local courses: {local_course_count}, scraped courses: {scraped_course_count}.',
+                'fixes': [],
+            }
+        )
+
+    active_in_options = bool(active_dataset_name) and active_dataset_name in selectable_dataset_names
+    if selectable_dataset_names and not active_in_options:
+        checks.append(
+            {
+                'id': 'active_dataset',
+                'status': 'warning',
+                'title': 'Active dataset is missing or stale',
+                'message': (
+                    'Active dataset is not set.'
+                    if not active_dataset_name
+                    else f'Active dataset "{active_dataset_name}" is not in selectable datasets.'
+                ),
+                'fixes': [
+                    {
+                        'action': 'set_active_dataset_auto',
+                        'label': 'Set active dataset to latest',
+                    }
+                ],
+            }
+        )
+    else:
+        checks.append(
+            {
+                'id': 'active_dataset',
+                'status': 'ok',
+                'title': 'Active dataset selection',
+                'message': active_dataset_name or 'Auto-resolution enabled (no explicit active dataset).',
+                'fixes': [],
+            }
+        )
+
+    courses_missing_faculty = int(
+        Course.query.filter(~Course.faculty.any()).count() or 0
+    )
+    courses_missing_faculty_with_instructor = int(
+        Course.query.filter(
+            ~Course.faculty.any(),
+            Course.instructor.isnot(None),
+            sa.func.length(sa.func.trim(Course.instructor)) > 0,
+        ).count()
+        or 0
+    )
+    if courses_missing_faculty > 0:
+        fixes = []
+        if courses_missing_faculty_with_instructor > 0:
+            fixes.append({'action': 'link_faculty_from_instructors', 'label': 'Auto-link faculty from instructor names'})
+        checks.append(
+            {
+                'id': 'course_faculty_links',
+                'status': 'warning',
+                'title': 'Courses missing faculty links',
+                'message': (
+                    f'{courses_missing_faculty} courses have no faculty relations. '
+                    f'{courses_missing_faculty_with_instructor} include parseable instructor text.'
+                ),
+                'fixes': fixes,
+            }
+        )
+    else:
+        checks.append(
+            {
+                'id': 'course_faculty_links',
+                'status': 'ok',
+                'title': 'Course/faculty links',
+                'message': 'All local courses have at least one faculty relation.',
+                'fixes': [],
+            }
+        )
+
+    orphan_faculty_count = int(Faculty.query.filter(~Faculty.courses.any()).count() or 0)
+    if orphan_faculty_count > 0:
+        checks.append(
+            {
+                'id': 'orphan_faculty',
+                'status': 'warning',
+                'title': 'Orphan faculty records',
+                'message': f'{orphan_faculty_count} faculty records are not assigned to any course.',
+                'fixes': [{'action': 'remove_orphan_faculty', 'label': 'Remove orphan faculty'}],
+            }
+        )
+    else:
+        checks.append(
+            {
+                'id': 'orphan_faculty',
+                'status': 'ok',
+                'title': 'Faculty assignment coverage',
+                'message': 'No orphan faculty records detected.',
+                'fixes': [],
+            }
+        )
+
+    missing_dataset_status_rows = CatalogStatus.query.filter(
+        CatalogStatus.status == 'available',
+        sa.or_(CatalogStatus.dataset.is_(None), sa.func.length(sa.func.trim(CatalogStatus.dataset)) == 0),
+    ).all()
+    if missing_dataset_status_rows:
+        checks.append(
+            {
+                'id': 'catalog_status_dataset',
+                'status': 'warning',
+                'title': 'Catalog status rows missing dataset label',
+                'message': f'{len(missing_dataset_status_rows)} available catalog statuses have empty dataset metadata.',
+                'fixes': [{'action': 'backfill_catalog_status_dataset', 'label': 'Backfill dataset metadata'}],
+            }
+        )
+    else:
+        checks.append(
+            {
+                'id': 'catalog_status_dataset',
+                'status': 'ok',
+                'title': 'Catalog status metadata',
+                'message': 'All available catalog statuses include dataset metadata.',
+                'fixes': [],
+            }
+        )
+
+    severity_rank = {'ok': 0, 'warning': 1, 'critical': 2}
+    highest = 'ok'
+    for row in checks:
+        if severity_rank.get(row.get('status'), 0) > severity_rank.get(highest, 0):
+            highest = row.get('status')
+
+    return {
+        'summary': {
+            'status': highest,
+            'active_dataset_name': active_dataset_name or None,
+            'selectable_dataset_names': selectable_dataset_names,
+            'local_course_count': local_course_count,
+            'scraped_course_count': scraped_course_count,
+        },
+        'checks': checks,
     }
 
 
@@ -968,9 +1212,12 @@ def upload_dataset():
                     continue
                 for key, value in payload.items():
                     setattr(existing, key, value)
+                _sync_course_faculty_from_instructor(existing, payload.get('instructor'))
                 updated += 1
             else:
-                db.session.add(Course(**payload))
+                new_row = Course(**payload)
+                _sync_course_faculty_from_instructor(new_row, payload.get('instructor'))
+                db.session.add(new_row)
                 inserted += 1
 
         db.session.commit()
@@ -1625,6 +1872,10 @@ def api_courses():
     faculty_ids = payload.get('faculty_ids') or []
     if isinstance(faculty_ids, list):
         row.faculty = Faculty.query.filter(Faculty.id.in_(faculty_ids)).all() if faculty_ids else []
+    if not row.faculty:
+        _sync_course_faculty_from_instructor(row, row.instructor)
+    elif not row.instructor:
+        row.instructor = '; '.join(f.name for f in row.faculty) or None
 
     db.session.add(row)
     db.session.commit()
@@ -1700,6 +1951,10 @@ def api_course_item(course_ref: str):
     faculty_ids = payload.get('faculty_ids')
     if isinstance(faculty_ids, list):
         row.faculty = Faculty.query.filter(Faculty.id.in_(faculty_ids)).all() if faculty_ids else []
+        if row.faculty and not row.instructor:
+            row.instructor = '; '.join(f.name for f in row.faculty) or None
+    if not isinstance(faculty_ids, list):
+        _sync_course_faculty_from_instructor(row, row.instructor)
 
     if source != 'manual':
         db.session.add(row)
@@ -2280,8 +2535,77 @@ def health_metrics_api():
             'recent_versions': _recent_git_versions(limit=15),
             'rollback_supported': False,
         },
+        'integrity': _build_integrity_payload(),
     }
     return jsonify(payload)
+
+
+@admin_bp.route('/api/health-fix', methods=['POST'])
+@login_required
+@admin_required
+def health_fix_api():
+    data = request.get_json(silent=True) or {}
+    action = str(data.get('action') or '').strip().lower()
+
+    if not action:
+        return jsonify({'success': False, 'message': 'Action is required.'}), 400
+
+    try:
+        if action == 'set_active_dataset_auto':
+            names = _all_selectable_dataset_names()
+            if not names:
+                return jsonify({'success': False, 'message': 'No datasets available to set active.'}), 400
+            chosen = names[0]
+            update_app_setting('active_dataset_name', chosen)
+            return jsonify({'success': True, 'message': f'Active dataset set to {chosen}.', 'action': action, 'active_dataset_name': chosen})
+
+        if action == 'link_faculty_from_instructors':
+            updated_courses = 0
+            rows = Course.query.filter(
+                ~Course.faculty.any(),
+                Course.instructor.isnot(None),
+                sa.func.length(sa.func.trim(Course.instructor)) > 0,
+            ).all()
+            for row in rows:
+                before = len(row.faculty or [])
+                _sync_course_faculty_from_instructor(row, row.instructor)
+                after = len(row.faculty or [])
+                if before == 0 and after > 0:
+                    updated_courses += 1
+            db.session.commit()
+            return jsonify({'success': True, 'message': f'Linked faculty for {updated_courses} courses.', 'action': action, 'updated_courses': updated_courses})
+
+        if action == 'remove_orphan_faculty':
+            orphan_rows = Faculty.query.filter(~Faculty.courses.any()).all()
+            removed = len(orphan_rows)
+            for row in orphan_rows:
+                db.session.delete(row)
+            db.session.commit()
+            return jsonify({'success': True, 'message': f'Removed {removed} orphan faculty records.', 'action': action, 'removed': removed})
+
+        if action == 'backfill_catalog_status_dataset':
+            active_name = str(get_app_setting('active_dataset_name', '') or '').strip()
+            fallback_names = _all_selectable_dataset_names()
+            default_name = active_name or (fallback_names[0] if fallback_names else '')
+            if not default_name:
+                return jsonify({'success': False, 'message': 'No dataset label available for backfill.'}), 400
+
+            rows = CatalogStatus.query.filter(
+                CatalogStatus.status == 'available',
+                sa.or_(CatalogStatus.dataset.is_(None), sa.func.length(sa.func.trim(CatalogStatus.dataset)) == 0),
+            ).all()
+            updated = 0
+            for row in rows:
+                row.dataset = default_name
+                updated += 1
+            db.session.commit()
+            return jsonify({'success': True, 'message': f'Backfilled {updated} catalog status rows.', 'action': action, 'updated': updated})
+
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': f'Fix action failed: {exc}', 'action': action}), 500
+
+    return jsonify({'success': False, 'message': 'Unknown fix action.', 'action': action}), 400
 
 
 @admin_bp.route('/api/system/restore', methods=['POST'])
