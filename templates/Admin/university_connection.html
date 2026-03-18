@@ -94,7 +94,7 @@
                     </svg>
                     Check Login Status
                 </button>
-                <button id="btnProceed" class="btn btn-success btn-sm" disabled
+                <button id="btnProceed" class="btn btn-success btn-sm"
                         onclick="document.getElementById('probeSection').scrollIntoView({behavior:'smooth'})">
                     Proceed to Probe ↓
                 </button>
@@ -133,7 +133,7 @@
             </p>
 
             <button id="btnProbeFields" class="btn btn-warning btn-sm w-100 mb-3"
-                    disabled onclick="probeFields()">
+                    onclick="probeFields()">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none"
                      viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
                      stroke-linecap="round" stroke-linejoin="round" class="me-1">
@@ -300,11 +300,25 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
             body: JSON.stringify(body),
-        }).then(r => r.json());
+        }).then(async (r) => {
+            const contentType = (r.headers.get('content-type') || '').toLowerCase();
+            if (!contentType.includes('application/json')) {
+                const txt = (await r.text()) || '';
+                throw new Error(`Server returned non-JSON response (${r.status}). ${txt.slice(0, 160)}`);
+            }
+            return r.json();
+        });
     }
 
     function getJSON(url) {
-        return fetch(url, { headers: { 'X-CSRF-Token': csrfToken() } }).then(r => r.json());
+        return fetch(url, { headers: { 'X-CSRF-Token': csrfToken() } }).then(async (r) => {
+            const contentType = (r.headers.get('content-type') || '').toLowerCase();
+            if (!contentType.includes('application/json')) {
+                const txt = (await r.text()) || '';
+                throw new Error(`Server returned non-JSON response (${r.status}). ${txt.slice(0, 160)}`);
+            }
+            return r.json();
+        });
     }
 
     function escapeHtml(s) {
@@ -335,14 +349,12 @@
             .then(d => {
                 if (d.logged_in) {
                     setBadge('loginBadge', 'Logged In', 'bg-success');
-                    document.getElementById('btnProceed').disabled = false;
-                    document.getElementById('btnProbeFields').disabled = false;
                 } else {
                     setBadge('loginBadge', 'Not Logged In', 'bg-danger');
                 }
                 showAlert(d.message, d.logged_in ? 'success' : 'warning');
             })
-            .catch(e => showAlert('Request failed: ' + e, 'danger'))
+            .catch(e => showAlert('Login check failed (optional step): ' + e, 'warning'))
             .finally(() => setBtn('btnCheckLogin', false));
     };
 
