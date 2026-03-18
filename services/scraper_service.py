@@ -105,7 +105,7 @@ def get_last_backend_error() -> dict:
 
 def get_scraper_diagnostics(debugger_address: Optional[str] = None) -> dict:
     host, port, normalized = _split_debugger_address(debugger_address)
-    debugger_http_ok, debugger_http_message = _debugger_http_health(normalized)
+    debugger_http_ok, debugger_http_message, debugger_http_working_address = _debugger_http_health(normalized)
     selenium_available = True
     selenium_version = None
     selenium_error = None
@@ -133,6 +133,7 @@ def get_scraper_diagnostics(debugger_address: Optional[str] = None) -> dict:
         "debugger_reachable": _is_chrome_running(normalized),
         "debugger_http_ok": debugger_http_ok,
         "debugger_http_message": debugger_http_message,
+        "debugger_http_working_address": debugger_http_working_address,
         "target_is_local": _is_localhost(host),
         "selenium_available": selenium_available,
         "selenium_version": selenium_version,
@@ -201,29 +202,55 @@ def _is_chrome_running(debugger_address: Optional[str] = None) -> bool:
             return False
 
 
-def _debugger_http_health(debugger_address: Optional[str] = None) -> tuple[bool, str]:
-    """Check DevTools HTTP endpoint quickly to avoid long Selenium hangs."""
-    host, port, normalized = _split_debugger_address(debugger_address)
-    url = f"http://{host}:{port}/json/version"
+def _resolve_host_ip(host: str) -> str | None:
+    import socket
+
     try:
-        req = Request(
-            url,
-            headers={
-                "Accept": "application/json",
-                "User-Agent": "acadex-scraper/1.0",
-            },
-        )
-        with urlopen(req, timeout=2.0) as resp:
-            payload = json.loads((resp.read() or b"{}").decode("utf-8", errors="replace"))
-        ws_url = str(payload.get("webSocketDebuggerUrl") or "").strip()
-        browser = str(payload.get("Browser") or "").strip()
-        if not ws_url:
-            return False, f"{normalized} responded but missing webSocketDebuggerUrl"
-        if not browser:
-            return False, f"{normalized} responded with unexpected DevTools payload"
-        return True, "ok"
-    except Exception as exc:
-        return False, f"DevTools endpoint check failed at {normalized}: {exc}"
+        resolved = socket.gethostbyname(host)
+        return resolved.strip() if resolved else None
+    except Exception:
+        return None
+
+
+def _debugger_http_health(debugger_address: Optional[str] = None) -> tuple[bool, str, str]:
+    """Check DevTools endpoint quickly and fallback to resolved IP when needed."""
+    host, port, normalized = _split_debugger_address(debugger_address)
+
+    candidate_hosts: list[str] = [host]
+    if not _is_localhost(host):
+        resolved_ip = _resolve_host_ip(host)
+        if resolved_ip and resolved_ip not in candidate_hosts:
+            candidate_hosts.append(resolved_ip)
+
+    last_error = ""
+    for h in candidate_hosts:
+        address = f"{h}:{port}"
+        url = f"http://{h}:{port}/json/version"
+        try:
+            req = Request(
+                url,
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "acadex-scraper/1.0",
+                },
+            )
+            with urlopen(req, timeout=2.0) as resp:
+                payload = json.loads((resp.read() or b"{}").decode("utf-8", errors="replace"))
+            ws_url = str(payload.get("webSocketDebuggerUrl") or "").strip()
+            browser = str(payload.get("Browser") or "").strip()
+            if not ws_url:
+                last_error = f"{address} responded but missing webSocketDebuggerUrl"
+                continue
+            if not browser:
+                last_error = f"{address} responded with unexpected DevTools payload"
+                continue
+            if address != normalized:
+                return True, f"ok (using IP fallback {address})", address
+            return True, "ok", address
+        except Exception as exc:
+            last_error = f"DevTools endpoint check failed at {address}: {exc}"
+
+    return False, last_error or f"DevTools endpoint check failed at {normalized}", normalized
 
 
 def _chrome_executable() -> str:
@@ -407,7 +434,7 @@ def get_driver(debugger_address: Optional[str] = None):
                 "Use 'Start Browser Session' first."
             )
 
-        http_ok, http_message = _debugger_http_health(normalized)
+        http_ok, http_message, http_working_address = _debugger_http_health(normalized)
         if not http_ok:
             _set_last_backend_error("get_driver", http_message)
             raise RuntimeError(http_message)
@@ -424,7 +451,7 @@ def get_driver(debugger_address: Optional[str] = None):
             )
 
         options = Options()
-        options.add_experimental_option("debuggerAddress", normalized)
+        options.add_experimental_option("debuggerAddress", http_working_address)
         driver = webdriver.Chrome(options=options)
         _active_driver = driver
         _active_debugger_address = normalized
