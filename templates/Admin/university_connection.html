@@ -124,6 +124,11 @@
                 Login must be confirmed first.
             </p>
 
+            <div class="d-flex align-items-center justify-content-between mb-2">
+                <span class="text-muted small">Probe Status</span>
+                <span id="probeStatusBadge" class="badge bg-secondary">Idle</span>
+            </div>
+
             <button id="btnProbeFields" class="btn btn-warning btn-sm w-100 mb-3"
                     onclick="probeFields()">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none"
@@ -378,11 +383,19 @@
         el.className = 'badge ' + cls;
     }
 
+    function setProbeStatus(text, cls) {
+        const el = document.getElementById('probeStatusBadge');
+        if (!el) return;
+        el.textContent = text;
+        el.className = 'badge ' + cls;
+    }
+
     /* ── B) Probe ───────────────────────────────────────────────── */
 
     window.probeFields = function () {
         const debugger_address = document.getElementById('debuggerAddress').value.trim();
         setBtn('btnProbeFields', true);
+        setProbeStatus('Running', 'bg-warning text-dark');
         document.getElementById('probeSpinner').classList.remove('d-none');
         document.getElementById('probeResults').classList.add('d-none');
         document.getElementById('probeEmpty').classList.add('d-none');
@@ -392,6 +405,7 @@
                 if (!d.success) {
                     document.getElementById('probeSpinner').classList.add('d-none');
                     document.getElementById('probeEmpty').classList.remove('d-none');
+                    setProbeStatus('Failed', 'bg-danger');
                     showAlert(d.message || 'Probe failed to start.', 'warning');
                     return;
                 }
@@ -401,6 +415,7 @@
             .catch(e => {
                 document.getElementById('probeSpinner').classList.add('d-none');
                 document.getElementById('probeEmpty').classList.remove('d-none');
+                setProbeStatus('Failed', 'bg-danger');
                 showAlert('Probe request failed: ' + e, 'danger');
                 runDiagnostics();
             })
@@ -419,6 +434,7 @@
             .then(d => {
                 const status = d.status || 'idle';
                 if (status === 'running') {
+                    setProbeStatus('Running', 'bg-warning text-dark');
                     return;
                 }
 
@@ -431,6 +447,7 @@
                 document.getElementById('probeSpinner').classList.add('d-none');
 
                 if (status === 'completed' && d.fields && d.fields.length) {
+                    setProbeStatus('Completed', 'bg-success');
                     renderCheckboxes(d.fields);
                     document.getElementById('probeResults').classList.remove('d-none');
                     document.getElementById('probeEmpty').classList.add('d-none');
@@ -439,6 +456,11 @@
                     return;
                 }
 
+                if (status === 'failed') {
+                    setProbeStatus('Failed', 'bg-danger');
+                } else {
+                    setProbeStatus('Idle', 'bg-secondary');
+                }
                 document.getElementById('probeResults').classList.add('d-none');
                 document.getElementById('probeEmpty').classList.remove('d-none');
                 showAlert(d.message || 'No fields found.', status === 'failed' ? 'danger' : 'warning');
@@ -452,6 +474,7 @@
                 setBtn('btnProbeFields', false);
                 document.getElementById('probeSpinner').classList.add('d-none');
                 document.getElementById('probeEmpty').classList.remove('d-none');
+                setProbeStatus('Failed', 'bg-danger');
                 showAlert('Probe status failed: ' + e, 'danger');
             });
     }
