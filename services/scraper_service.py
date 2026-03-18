@@ -439,6 +439,120 @@ _SYLLABUS_SETTING_KEY = "scraper_syllabus_url"
 _DEFAULT_SYLLABUS_URL = ""
 
 
+def _normalize_label(label: str) -> str:
+    text = (label or "").strip().lower()
+    text = text.replace("＆", "&")
+    for ch in [":", "-", "_", "\u3000"]:
+        text = text.replace(ch, " ")
+    return " ".join(text.split())
+
+
+def _match_value_by_label(values: dict[str, str], target_label: str) -> str:
+    if target_label in values:
+        return values[target_label]
+
+    wanted = _normalize_label(target_label)
+    for key, value in values.items():
+        if _normalize_label(key) == wanted:
+            return value
+
+    aliases = {
+        "subject": {"course", "course title", "subject", "jugyo kmk name"},
+        "day and period": {"day and period", "day period", "day/time", "day and time"},
+        "faculty": {"faculty", "instructor", "teacher", "lecturer"},
+        "class frequency": {"class frequency", "frequency"},
+        "year and semester": {"year and semester", "semester", "term"},
+        "credits": {"credits", "credit"},
+    }
+
+    target_aliases = aliases.get(wanted, set())
+    if target_aliases:
+        for key, value in values.items():
+            normalized_key = _normalize_label(key)
+            if normalized_key in target_aliases:
+                return value
+
+    return ""
+
+
+def _extract_table_headers(driver) -> list[str]:
+    from selenium.webdriver.common.by import By
+
+    headers: list[str] = []
+    try:
+        title_nodes = driver.find_elements(By.CSS_SELECTOR, "#funcForm\\:table_head .ui-column-title")
+        headers = [(n.text or "").strip() for n in title_nodes if (n.text or "").strip()]
+    except Exception:
+        headers = []
+
+    if headers:
+        return headers
+
+    try:
+        th_nodes = driver.find_elements(By.CSS_SELECTOR, "#funcForm\\:table_head th")
+        headers = [(n.text or "").strip() for n in th_nodes if (n.text or "").strip()]
+    except Exception:
+        headers = []
+
+    return headers
+
+
+def _extract_row_table_values(row, headers: list[str]) -> dict[str, str]:
+    from selenium.webdriver.common.by import By
+
+    values: dict[str, str] = {}
+    cells = row.find_elements(By.XPATH, "./td")
+    for idx, header in enumerate(headers):
+        if idx >= len(cells):
+            break
+        text = (cells[idx].text or "").strip()
+        values[header] = text
+
+    # Fallback if header extraction failed
+    if not values and cells:
+        defaults = ["Day and period", "Subject", "Faculty", "Class frequency", "Year and semester", "Credits"]
+        for idx, cell in enumerate(cells[: len(defaults)]):
+            values[defaults[idx]] = (cell.text or "").strip()
+
+    # Ensure Subject uses the link text when present
+    try:
+        link = row.find_element(By.XPATH, ".//td[2]//a")
+        link_text = (link.text or "").strip()
+        if link_text:
+            values["Subject"] = link_text
+            if "Course" not in values:
+                values["Course"] = link_text
+            if "Course Title" not in values:
+                values["Course Title"] = link_text
+    except Exception:
+        pass
+
+    return values
+
+
+def _find_visible_popup(driver, wait):
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support import expected_conditions as EC
+
+    candidates = [
+        (By.ID, "pkx02301:dialog"),
+        (
+            By.XPATH,
+            "//div[contains(@class,'ui-dialog') and not(contains(@style,'display: none')) and not(contains(@class,'ui-helper-hidden'))]",
+        ),
+        (
+            By.XPATH,
+            "//*[contains(@id,':dialog') and not(contains(@style,'display: none')) and not(contains(@class,'ui-helper-hidden'))]",
+        ),
+    ]
+    for locator in candidates:
+        try:
+            return wait.until(EC.visibility_of_element_located(locator))
+        except Exception:
+            continue
+    raise RuntimeError("Course detail popup did not appear")
+
+
 def probe_available_fields(driver, syllabus_url: str = "") -> dict:
     """
     Navigate to the syllabus page, open the first course popup and extract
@@ -471,30 +585,41 @@ def probe_available_fields(driver, syllabus_url: str = "") -> dict:
                 ),
             }
 
-        # Click the first course link
+        fields: list[str] = []
+        seen: set[str] = set()
+
+        # Include visible table headers as probe options
+        table_headers = _extract_table_headers(driver)
+        for header in table_headers:
+            if header not in seen:
+                fields.append(header)
+                seen.add(header)
+
+        # Click first course row to inspect popup fields, if available
         first_link = wait.until(
-            EC.element_to_be_clickable((By.XPATH, '//*[@id="funcForm:table_data"]/tr[1]//td[2]/a'))
+            EC.element_to_be_clickable((By.XPATH, '//*[@id="funcForm:table_data"]/tr[1]//td[2]//a'))
         )
         first_link.click()
 
-        # Wait for popup
-        try:
-            popup = wait.until(EC.visibility_of_element_located((By.ID, "pkx02301:dialog")))
-        except TimeoutException:
-            return {
-                "success": False,
-                "fields": [],
-                "message": "Popup (pkx02301:dialog) did not appear.",
-            }
+        popup = _find_visible_popup(driver, wait)
 
-        # Extract all section headers in the popup
-        headers = popup.find_elements(By.CSS_SELECTOR, "div.ui-widget-header")
-        fields = [h.text.strip() for h in headers if h.text.strip()]
+        popup_headers = popup.find_elements(By.CSS_SELECTOR, "div.ui-widget-header")
+        for header in popup_headers:
+            text = (header.text or "").strip()
+            if text and text not in seen:
+                fields.append(text)
+                seen.add(text)
+
+        # Additional label extraction patterns used by PrimeFaces detail dialogs
+        for node in popup.find_elements(By.CSS_SELECTOR, "dt, th, .ui-outputlabel"):
+            text = (node.text or "").strip().rstrip(":")
+            if text and text not in seen:
+                fields.append(text)
+                seen.add(text)
 
         # Close popup
         try:
-            close_btn = popup.find_element(By.CLASS_NAME, "ui-dialog-titlebar-close")
-            close_btn.click()
+            popup.find_element(By.CSS_SELECTOR, ".ui-dialog-titlebar-close").click()
         except Exception:
             pass
 
@@ -502,13 +627,13 @@ def probe_available_fields(driver, syllabus_url: str = "") -> dict:
             return {
                 "success": False,
                 "fields": [],
-                "message": "No field labels found in the popup.",
+                "message": "No field labels found from table headers or popup.",
             }
 
         return {
             "success": True,
             "fields": fields,
-            "message": f"Found {len(fields)} field(s).",
+            "message": f"Found {len(fields)} field(s) from table and popup.",
         }
 
     except Exception as exc:
@@ -553,6 +678,7 @@ def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app, syll
 
     def _extract_popup_fields(popup) -> dict[str, str]:
         data: dict[str, str] = {}
+        # Pattern 1: section header + following content block
         for header in popup.find_elements(By.CSS_SELECTOR, "div.ui-widget-header"):
             label = (header.text or "").strip()
             if not label:
@@ -568,12 +694,46 @@ def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app, syll
             except Exception:
                 value = ""
             data[label] = value
+
+        # Pattern 2: dt/dd pairs
+        try:
+            dts = popup.find_elements(By.CSS_SELECTOR, "dt")
+            for dt in dts:
+                label = (dt.text or "").strip().rstrip(":")
+                if not label:
+                    continue
+                value = ""
+                try:
+                    dd = dt.find_element(By.XPATH, "following-sibling::dd[1]")
+                    value = (dd.text or "").strip()
+                except Exception:
+                    value = ""
+                if label and value and label not in data:
+                    data[label] = value
+        except Exception:
+            pass
+
+        # Pattern 3: table rows with header/data cells
+        try:
+            rows = popup.find_elements(By.CSS_SELECTOR, "tr")
+            for tr in rows:
+                ths = tr.find_elements(By.CSS_SELECTOR, "th")
+                tds = tr.find_elements(By.CSS_SELECTOR, "td")
+                if not ths or not tds:
+                    continue
+                label = (ths[0].text or "").strip().rstrip(":")
+                value = (tds[0].text or "").strip()
+                if label and value and label not in data:
+                    data[label] = value
+        except Exception:
+            pass
+
         return data
 
     def _close_popup(popup) -> None:
         try:
-            popup.find_element(By.CLASS_NAME, "ui-dialog-titlebar-close").click()
-            wait.until(EC.invisibility_of_element_located((By.ID, "pkx02301:dialog")))
+            popup.find_element(By.CSS_SELECTOR, ".ui-dialog-titlebar-close").click()
+            time.sleep(0.2)
             return
         except Exception:
             pass
@@ -589,6 +749,7 @@ def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app, syll
 
         # Wait for table
         wait.until(EC.visibility_of_element_located((By.ID, "funcForm:table_data")))
+        table_headers = _extract_table_headers(driver)
 
         rows = driver.find_elements(By.XPATH, '//*[@id="funcForm:table_data"]/tr')
         total = len(rows)
@@ -610,21 +771,31 @@ def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app, syll
                     )
                 )
                 row = all_rows[i]
-                day_and_period = row.find_element(By.XPATH, ".//td[1]").text
+                row_values = _extract_row_table_values(row, table_headers)
+                day_and_period = row_values.get("Day and period", "")
                 subject_link = row.find_element(By.XPATH, ".//td[2]/a")
                 subject_link.click()
 
-                popup = wait.until(
-                    EC.visibility_of_element_located((By.ID, "pkx02301:dialog"))
-                )
+                popup = _find_visible_popup(driver, wait)
 
                 # Always capture Day and Period
-                course_data: dict = {"Day and Period": day_and_period}
+                course_data: dict = dict(row_values)
+                if day_and_period and "Day and Period" not in course_data:
+                    course_data["Day and Period"] = day_and_period
                 popup_values = _extract_popup_fields(popup)
                 for field in selected_fields:
-                    course_data[field] = popup_values.get(field, "")
+                    if field in course_data and course_data[field]:
+                        continue
+                    value = _match_value_by_label(course_data, field)
+                    if not value:
+                        value = _match_value_by_label(popup_values, field)
+                    course_data[field] = value
 
-                course_title = course_data.get("Course Title", f"Row {i+1}")
+                course_title = (
+                    _match_value_by_label(course_data, "Course Title")
+                    or _match_value_by_label(course_data, "Subject")
+                    or f"Row {i+1}"
+                )
                 _log_progress(f"[{i+1}/{total}] {course_title}")
 
                 _close_popup(popup)
