@@ -31,9 +31,58 @@
     </div>
     <div class="col-md-3">
         <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">CSV Course Rows</div>
+                <div class="fs-5 fw-bold">{{ csv_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
             <div class="card-body d-grid">
                 <a href="{{ url_for('admin.university_connection') }}" class="btn btn-primary">Open Scrape/Sync</a>
             </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header" style="background: var(--ax-surface);">
+        <h5 class="mb-0">Upload CSV Dataset</h5>
+    </div>
+    <div class="card-body">
+        <form method="post" action="{{ url_for('admin.upload_dataset') }}" enctype="multipart/form-data" class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">CSV File</label>
+                <input type="file" name="dataset_file" accept=".csv" class="form-control" required>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Dataset Name (optional)</label>
+                <input type="text" name="dataset_name" class="form-control" placeholder="2026_Spring_CSV">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Semester</label>
+                <input type="text" name="semester" class="form-control" placeholder="Spring">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Year</label>
+                <input type="text" name="year" class="form-control" placeholder="2026">
+            </div>
+            <div class="col-md-1 d-flex align-items-end">
+                <button type="submit" class="btn btn-success w-100">Upload</button>
+            </div>
+        </form>
+        <div class="small text-muted mt-2">
+            Safety rules: manual rows are never overwritten; CSV updates only non-manual duplicates by course number + day/period.
+        </div>
+        <div class="small mt-2">
+            <strong>Latest CSV:</strong>
+            {% if latest_csv_upload %}
+                {{ latest_csv_upload.dataset_name or 'Unnamed CSV' }} — {{ latest_csv_upload.last_updated.strftime('%Y-%m-%d %H:%M') if latest_csv_upload.last_updated else '—' }}
+            {% else %}
+                —
+            {% endif %}
+            <span class="ms-3"><strong>Active dataset:</strong> {{ active_dataset_name or 'Auto (latest by term)' }}</span>
         </div>
     </div>
 </div>

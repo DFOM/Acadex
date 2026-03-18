@@ -234,16 +234,33 @@ $(document).ready(function() {
 
         const renderCourses = () => {
             const tbody = $('#coursesTableBody');
-            if (!state.courses.length) {
+            const sourceFilter = ($('#courseSourceFilter').val() || '').trim().toLowerCase();
+            const semesterFilter = ($('#courseSemesterFilter').val() || '').trim().toLowerCase();
+            const yearFilter = ($('#courseYearFilter').val() || '').trim().toLowerCase();
+
+            const filteredCourses = (state.courses || []).filter((row) => {
+                const rowSource = (row.source || '').toLowerCase();
+                const rowSemester = (row.semester || '').toLowerCase();
+                const rowYear = String(row.year || '').toLowerCase();
+                if (sourceFilter && rowSource !== sourceFilter) return false;
+                if (semesterFilter && !rowSemester.includes(semesterFilter)) return false;
+                if (yearFilter && !rowYear.includes(yearFilter)) return false;
+                return true;
+            });
+
+            if (!filteredCourses.length) {
                 tbody.html('<tr><td colspan="9" class="text-center text-muted py-4">No courses found.</td></tr>');
                 return;
             }
 
-            const rows = state.courses.map((row) => {
+            const rows = filteredCourses.map((row) => {
                 const faculty = (row.faculty_names || []).length ? row.faculty_names.join(', ') : '—';
-                const sourceBadge = row.source === 'manual'
-                    ? '<span class="badge bg-success">manual</span>'
-                    : '<span class="badge bg-secondary">scraped</span>';
+                let sourceBadge = '<span class="badge bg-secondary">scraped</span>';
+                if ((row.source || '').toLowerCase() === 'manual') {
+                    sourceBadge = '<span class="badge bg-success">manual</span>';
+                } else if ((row.source || '').toLowerCase() === 'csv') {
+                    sourceBadge = '<span class="badge bg-info text-dark">csv</span>';
+                }
                 const deleteBtn = row.source === 'manual'
                     ? `<button class="btn btn-sm btn-outline-danger ms-1 delete-course-btn" data-ref="${escapeHtml(row.ref)}">Delete</button>`
                     : '';
@@ -276,6 +293,10 @@ $(document).ready(function() {
             renderCourseOptions();
             renderCourses();
         };
+
+        $('#courseSourceFilter, #courseSemesterFilter, #courseYearFilter').on('change input', function() {
+            renderCourses();
+        });
 
         $('#addCourseBtn').on('click', function() {
             $('#courseModalTitle').text('Add Course');

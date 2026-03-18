@@ -18,6 +18,55 @@
 {# ── Alert area ── #}
 <div id="alertArea"></div>
 
+<div class="ax-admin-card mb-4">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-4">
+            <div class="small text-muted">Latest CSV Upload</div>
+            <div class="fw-semibold">
+                {% if latest_csv_upload %}
+                    {{ latest_csv_upload.dataset_name or 'Unnamed CSV' }}
+                {% else %}
+                    —
+                {% endif %}
+            </div>
+            <div class="small text-muted">
+                {% if latest_csv_upload and latest_csv_upload.last_updated %}
+                    {{ latest_csv_upload.last_updated.strftime('%Y-%m-%d %H:%M') }}
+                {% else %}
+                    No CSV uploads yet
+                {% endif %}
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="small text-muted">Latest Scrape Run</div>
+            <div class="fw-semibold">{{ latest_scrape_run.name if latest_scrape_run else '—' }}</div>
+            <div class="small text-muted">
+                {% if latest_scrape_run and latest_scrape_run.created_at %}
+                    {{ latest_scrape_run.created_at.strftime('%Y-%m-%d %H:%M') }}
+                {% else %}
+                    No scrape runs yet
+                {% endif %}
+            </div>
+        </div>
+        <div class="col-md-4">
+            <form method="post" action="{{ url_for('admin.set_active_dataset') }}" class="row g-2">
+                <div class="col-8">
+                    <label class="form-label small">Active Dataset</label>
+                    <select name="dataset_name" class="form-select form-select-sm">
+                        <option value="">Auto (latest by term)</option>
+                        {% for dataset_name in selectable_dataset_names %}
+                        <option value="{{ dataset_name }}" {{ 'selected' if active_dataset_name == dataset_name else '' }}>{{ dataset_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-4 d-flex align-items-end">
+                    <button type="submit" class="btn btn-outline-primary btn-sm w-100">Set Active</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <div class="row g-4">
 
     {# ══════════════════════════════════════════════════════════════════

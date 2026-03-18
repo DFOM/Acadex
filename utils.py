@@ -1,5 +1,5 @@
 # utils.py
-from models import db, Setting, ScrapedDataset
+from models import db, Setting, ScrapedDataset, Course
 import re
 import json
 
@@ -156,6 +156,17 @@ def get_available_dataset_years() -> list[int]:
     try:
         rows = ScrapedDataset.query.filter_by(status='completed').all()
         for row in rows:
+            try:
+                y = int(str(row.year or '').strip())
+                years.add(y)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    try:
+        local_rows = Course.query.filter(Course.year.isnot(None)).all()
+        for row in local_rows:
             try:
                 y = int(str(row.year or '').strip())
                 years.add(y)

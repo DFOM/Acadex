@@ -3,6 +3,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import login_required, current_user
 import os
 import csv
+from io import TextIOWrapper
 import re
 import threading
 import subprocess
@@ -45,6 +46,7 @@ admin_bp = Blueprint('admin', __name__)
 ENDPOINT_PERMISSION_MAP = {
     'admin.manage_datasets': 'manage_datasets',
     'admin.upload_dataset': 'manage_datasets',
+    'admin.set_active_dataset': 'manage_datasets',
     'admin.delete_dataset': 'manage_datasets',
     'admin.manage_users': 'manage_users',
     'admin.update_user_demographics': 'manage_users',
@@ -255,12 +257,26 @@ def _process_metrics() -> dict:
         }
 
 
-def _course_merge_key(course_number: str, day_period: str, instructor: str) -> tuple[str, str, str]:
+def _course_merge_key(course_number: str, day_period: str, semester: str, year: str) -> tuple[str, str, str, str]:
     return (
         str(course_number or '').strip().upper(),
         str(day_period or '').strip().lower(),
-        str(instructor or '').strip().lower(),
+        str(semester or '').strip().lower(),
+        str(year or '').strip().lower(),
     )
+
+
+def _source_priority(source: str | None) -> int:
+    src = str(source or '').strip().lower()
+    if src == 'manual':
+        return 3
+    if src == 'csv':
+        return 2
+    return 1
+
+
+def _course_sort_ts(value):
+    return value or datetime.min
 
 
 def _parse_course_ref(course_ref: str) -> tuple[str, int] | None:
@@ -276,16 +292,19 @@ def _parse_course_ref(course_ref: str) -> tuple[str, int] | None:
         row_id = int(ident)
     except Exception:
         return None
-    if prefix not in {'manual', 'scraped'}:
+    if prefix not in {'manual', 'csv', 'scraped'}:
         return None
     return prefix, row_id
 
 
-def _serialize_manual_course(row: Course) -> dict:
+def _serialize_local_course(row: Course) -> dict:
+    src = str(row.source or 'manual').strip().lower()
+    if src not in {'manual', 'csv', 'scraped'}:
+        src = 'manual'
     return {
         'id': row.id,
-        'ref': f'manual:{row.id}',
-        'source': 'manual',
+        'ref': f'{src}:{row.id}',
+        'source': src,
         'course_number': row.course_number,
         'title': row.title,
         'credits': row.credits,
@@ -295,14 +314,20 @@ def _serialize_manual_course(row: Course) -> dict:
         'prerequisite': row.prerequisite,
         'subject_area': row.subject_area,
         'instructor': row.instructor,
+        'dataset_name': row.dataset_name,
+        'last_updated': (row.last_updated or row.updated_at or row.created_at).isoformat() if (row.last_updated or row.updated_at or row.created_at) else None,
         'faculty_ids': [f.id for f in row.faculty],
         'faculty_names': [f.name for f in row.faculty],
         'editable': True,
-        'deletable': True,
+        'deletable': src == 'manual',
     }
 
 
 def _serialize_scraped_course(row: ScrapedCourse) -> dict:
+    dataset_obj = getattr(row, 'dataset', None)
+    dataset_name = getattr(dataset_obj, 'name', None)
+    semester = getattr(dataset_obj, 'semester', None)
+    year = getattr(dataset_obj, 'year', None)
     return {
         'id': row.id,
         'ref': f'scraped:{row.id}',
@@ -311,11 +336,13 @@ def _serialize_scraped_course(row: ScrapedCourse) -> dict:
         'title': row.course_title,
         'credits': row.credits,
         'day_period': row.day_and_period,
-        'semester': getattr(row.dataset, 'semester', None) if getattr(row, 'dataset', None) else None,
-        'year': getattr(row.dataset, 'year', None) if getattr(row, 'dataset', None) else None,
+        'semester': semester,
+        'year': year,
         'prerequisite': row.prerequisite,
         'subject_area': row.area_of_study,
         'instructor': row.instructor,
+        'dataset_name': dataset_name,
+        'last_updated': getattr(dataset_obj, 'updated_at', None).isoformat() if getattr(dataset_obj, 'updated_at', None) else None,
         'faculty_ids': [],
         'faculty_names': [],
         'editable': True,
@@ -324,12 +351,10 @@ def _serialize_scraped_course(row: ScrapedCourse) -> dict:
 
 
 def _merged_courses_for_admin() -> list[dict]:
-    manual_rows = Course.query.order_by(Course.updated_at.desc(), Course.id.desc()).all()
-    manual_payload = [_serialize_manual_course(r) for r in manual_rows]
-    manual_keys = {
-        _course_merge_key(r.course_number, r.day_period, r.instructor): r.id
-        for r in manual_rows
-    }
+    active_dataset_name = str(get_app_setting('active_dataset_name', '') or '').strip().lower()
+
+    local_rows = Course.query.order_by(Course.last_updated.desc(), Course.id.desc()).all()
+    candidates: list[dict] = [_serialize_local_course(r) for r in local_rows]
 
     scraped_rows = (
         ScrapedCourse.query
@@ -338,26 +363,74 @@ def _merged_courses_for_admin() -> list[dict]:
         .order_by(ScrapedDataset.created_at.desc(), ScrapedCourse.id.desc())
         .all()
     )
+    candidates.extend(_serialize_scraped_course(r) for r in scraped_rows)
 
-    scraped_payload: list[dict] = []
-    for row in scraped_rows:
-        key = _course_merge_key(row.course_number, row.day_and_period, row.instructor)
-        if key in manual_keys:
+    winner_by_key: dict[tuple[str, str, str, str], dict] = {}
+    for row in candidates:
+        key = _course_merge_key(
+            row.get('course_number'),
+            row.get('day_period'),
+            row.get('semester'),
+            row.get('year'),
+        )
+        existing = winner_by_key.get(key)
+        if not existing:
+            winner_by_key[key] = row
             continue
-        scraped_payload.append(_serialize_scraped_course(row))
 
-    return manual_payload + scraped_payload
+        left_rank = _source_priority(row.get('source'))
+        right_rank = _source_priority(existing.get('source'))
+        if left_rank > right_rank:
+            winner_by_key[key] = row
+            continue
+        if left_rank < right_rank:
+            continue
+
+        left_active = 1 if active_dataset_name and str(row.get('dataset_name') or '').strip().lower() == active_dataset_name else 0
+        right_active = 1 if active_dataset_name and str(existing.get('dataset_name') or '').strip().lower() == active_dataset_name else 0
+        if left_active > right_active:
+            winner_by_key[key] = row
+            continue
+        if left_active < right_active:
+            continue
+
+        left_ts = _course_sort_ts(
+            datetime.fromisoformat(row['last_updated']) if row.get('last_updated') else None
+        )
+        right_ts = _course_sort_ts(
+            datetime.fromisoformat(existing['last_updated']) if existing.get('last_updated') else None
+        )
+        if left_ts >= right_ts:
+            winner_by_key[key] = row
+
+    rows = list(winner_by_key.values())
+    rows.sort(
+        key=lambda item: (
+            str(item.get('year') or ''),
+            str(item.get('semester') or ''),
+            str(item.get('course_number') or ''),
+            str(item.get('day_period') or ''),
+        ),
+        reverse=True,
+    )
+    return rows
 
 
 def _serialize_faculty(row: Faculty) -> dict:
+    def _ref_for_course(c: Course) -> str:
+        src = str(getattr(c, 'source', 'manual') or 'manual').strip().lower()
+        if src not in {'manual', 'csv'}:
+            src = 'manual'
+        return f'{src}:{c.id}'
+
     return {
         'id': row.id,
         'name': row.name,
         'email': row.email,
         'assigned_courses_count': len(row.courses or []),
-        'assigned_course_refs': [f'manual:{c.id}' for c in (row.courses or [])],
+        'assigned_course_refs': [_ref_for_course(c) for c in (row.courses or [])],
         'assigned_course_labels': [f"{c.course_number} — {c.title}" for c in (row.courses or [])],
-        'course_refs': [f'manual:{c.id}' for c in (row.courses or [])],
+        'course_refs': [_ref_for_course(c) for c in (row.courses or [])],
         'course_labels': [f"{c.course_number} — {c.title}" for c in (row.courses or [])],
         'advisor_area_ids': [a.id for a in (row.advisor_areas or [])],
         'advisor_area_names': [a.name for a in (row.advisor_areas or [])],
@@ -436,20 +509,14 @@ def _area_type_from_form(form) -> str:
 
 
 def _sync_subject_areas_from_catalogs() -> int:
-    """Ensure subject_areas includes all Area_of_Study values from completed scraped datasets."""
-    rows = (
-        db.session.query(ScrapedCourse.area_of_study)
-        .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
-        .filter(ScrapedDataset.status == 'completed')
-        .filter(ScrapedCourse.area_of_study.isnot(None))
-        .all()
-    )
+    """Ensure subject_areas includes all Area_of_Study values from the unified catalog."""
+    rows = _merged_courses_for_admin()
     if not rows:
         return 0
 
     discovered = set()
-    for (area,) in rows:
-        name = str(area or '').strip()
+    for row in rows:
+        name = str(row.get('subject_area') or '').strip()
         if name:
             discovered.add(name)
 
@@ -479,21 +546,12 @@ def _sync_subject_areas_from_catalogs() -> int:
 
 
 def _subject_area_credit_caps_from_catalogs() -> dict[str, float]:
-    """Return max available credits by area from completed scraped datasets.
+    """Return max available credits by area from the unified catalog.
 
     Credits are summed by unique (area, course_number), using the maximum
     observed credits for that course to avoid inflating across duplicate rows.
     """
-    rows = (
-        db.session.query(
-            ScrapedCourse.area_of_study,
-            ScrapedCourse.course_number,
-            ScrapedCourse.credits,
-        )
-        .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
-        .filter(ScrapedDataset.status == 'completed')
-        .all()
-    )
+    rows = _merged_courses_for_admin()
     if not rows:
         return {}
 
@@ -501,13 +559,13 @@ def _subject_area_credit_caps_from_catalogs() -> dict[str, float]:
         course_credit_by_area: dict[tuple[str, str], float] = {}
         area_case: dict[str, str] = {}
 
-        for area_raw, course_raw, credits_raw in rows:
-            area_name = str(area_raw or '').strip()
-            course_number = str(course_raw or '').strip().upper()
+        for row in rows:
+            area_name = str(row.get('subject_area') or '').strip()
+            course_number = str(row.get('course_number') or '').strip().upper()
             if not area_name or not course_number:
                 continue
             try:
-                credits = max(0.0, float(credits_raw or 0.0))
+                credits = max(0.0, float(row.get('credits') or 0.0))
             except Exception:
                 credits = 0.0
 
@@ -768,6 +826,9 @@ def manage_datasets():
     active_dataset = ScrapedDataset.query.filter_by(status='running').order_by(ScrapedDataset.created_at.desc()).first()
     completed_count = ScrapedDataset.query.filter_by(status='completed').count()
     failed_count = ScrapedDataset.query.filter_by(status='failed').count()
+    csv_count = Course.query.filter(sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv').count()
+    latest_csv_upload = Course.query.filter(sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv').order_by(Course.last_updated.desc(), Course.id.desc()).first()
+    active_dataset_name = str(get_app_setting('active_dataset_name', '') or '').strip() or None
 
     return render_template(
         'Admin/manage_datasets.html',
@@ -775,16 +836,175 @@ def manage_datasets():
         active_dataset=active_dataset,
         completed_count=completed_count,
         failed_count=failed_count,
+        csv_count=csv_count,
+        latest_csv_upload=latest_csv_upload,
+        active_dataset_name=active_dataset_name,
         scraper_progress=dict(_progress),
         scraper_running=is_scraper_running(),
     )
 
 @admin_bp.route('/datasets/upload', methods=['POST'])
+@admin_bp.route('/upload-dataset', methods=['POST'])
 @login_required
 @admin_required
 def upload_dataset():
-    flash('CSV upload is deprecated. Use University Connection scraping to generate datasets.', 'warning')
+    file = request.files.get('file') or request.files.get('dataset_file')
+    if not file or not str(file.filename or '').strip():
+        flash('Please choose a CSV file to upload.', 'error')
+        return redirect(url_for('admin.manage_datasets'))
+
+    filename = str(file.filename or '').strip().lower()
+    if not filename.endswith('.csv'):
+        flash('Only CSV uploads are supported.', 'error')
+        return redirect(url_for('admin.manage_datasets'))
+
+    year_hint = str(request.form.get('year') or '').strip()
+    semester_hint = str(request.form.get('semester') or '').strip()
+    dataset_name = str(request.form.get('dataset_name') or '').strip()
+    if not dataset_name:
+        inferred_year = year_hint or get_app_setting('current_year', '')
+        inferred_sem = semester_hint or get_app_setting('current_semester', '')
+        dataset_name = f"{inferred_year}_{inferred_sem}_CSV".strip('_')
+
+    def _norm_key(value: str) -> str:
+        return re.sub(r'[^a-z0-9]+', '', str(value or '').strip().lower())
+
+    alias = {
+        'course_number': {'coursenumber', 'course', 'coursecode', 'courseid', 'number'},
+        'title': {'coursetitle', 'title', 'subject', 'coursetitleen'},
+        'credits': {'credits', 'credit'},
+        'day_period': {'dayandperiod', 'dayperiod', 'dayandtime', 'period', 'day'},
+        'semester': {'semester', 'term'},
+        'year': {'year', 'academicyear', 'yearoffered', 'yearavailable'},
+        'prerequisite': {'prerequisite', 'prerequisites', 'prereq'},
+        'subject_area': {'subjectarea', 'areaofstudy', 'subject', 'area'},
+        'instructor': {'instructor', 'faculty', 'teacher', 'lecturer'},
+    }
+
+    def _pick(row: dict, key: str) -> str:
+        normalized_map = {_norm_key(k): (v or '') for k, v in (row or {}).items()}
+        for name in alias.get(key, set()):
+            if name in normalized_map and str(normalized_map[name]).strip():
+                return str(normalized_map[name]).strip()
+        return ''
+
+    def _normalize_term_values(raw_semester: str, raw_year: str) -> tuple[str | None, str | None]:
+        sem = str(raw_semester or '').strip()
+        yr = str(raw_year or '').strip()
+
+        if not sem and not yr:
+            return None, None
+
+        if sem:
+            sem_match = re.search(r'(spring|summer|fall|winter)', sem, flags=re.IGNORECASE)
+            if sem_match:
+                sem = sem_match.group(1).capitalize()
+
+            if not yr:
+                year_match = re.search(r'\b(20\d{2})\b', str(raw_semester or ''), flags=re.IGNORECASE)
+                if year_match:
+                    yr = year_match.group(1)
+
+        if yr:
+            year_match = re.search(r'\b(20\d{2})\b', yr, flags=re.IGNORECASE)
+            if year_match:
+                yr = year_match.group(1)
+            elif not yr.isdigit():
+                yr = ''
+
+        return (sem or None), (yr or None)
+
+    inserted = 0
+    updated = 0
+    skipped_manual = 0
+    skipped_invalid = 0
+
+    try:
+        reader = csv.DictReader(TextIOWrapper(file.stream, encoding='utf-8-sig', newline=''))
+        for raw_row in reader:
+            course_number = _pick(raw_row, 'course_number')
+            title = _pick(raw_row, 'title')
+            day_period = _pick(raw_row, 'day_period')
+            if not course_number or not title or not day_period:
+                skipped_invalid += 1
+                continue
+
+            credits_raw = _pick(raw_row, 'credits')
+            try:
+                credits = float(credits_raw) if str(credits_raw or '').strip() else 0.0
+            except Exception:
+                credits = 0.0
+
+            semester_raw = _pick(raw_row, 'semester') or semester_hint or ''
+            year_raw = _pick(raw_row, 'year') or year_hint or ''
+            semester, year = _normalize_term_values(semester_raw, year_raw)
+
+            existing = (
+                Course.query.filter(
+                    sa.func.lower(Course.course_number) == course_number.strip().lower(),
+                    sa.func.lower(Course.day_period) == day_period.strip().lower(),
+                )
+                .order_by(Course.last_updated.desc(), Course.id.desc())
+                .first()
+            )
+
+            payload = {
+                'course_number': course_number,
+                'title': title,
+                'credits': credits,
+                'day_period': day_period,
+                'semester': semester,
+                'year': year,
+                'prerequisite': _pick(raw_row, 'prerequisite') or None,
+                'subject_area': _pick(raw_row, 'subject_area') or None,
+                'instructor': _pick(raw_row, 'instructor') or None,
+                'dataset_name': dataset_name or None,
+                'source': 'csv',
+            }
+
+            if existing:
+                if str(existing.source or '').strip().lower() == 'manual':
+                    skipped_manual += 1
+                    continue
+                for key, value in payload.items():
+                    setattr(existing, key, value)
+                updated += 1
+            else:
+                db.session.add(Course(**payload))
+                inserted += 1
+
+        db.session.commit()
+        flash(
+            f'CSV uploaded. Inserted: {inserted}, Updated: {updated}, '
+            f'Skipped manual: {skipped_manual}, Skipped invalid: {skipped_invalid}.',
+            'success',
+        )
+    except Exception as exc:
+        db.session.rollback()
+        flash(f'CSV upload failed: {exc}', 'error')
+
     return redirect(url_for('admin.manage_datasets'))
+
+
+@admin_bp.route('/active-dataset', methods=['POST'])
+@login_required
+@admin_required
+def set_active_dataset():
+    payload = request.get_json(silent=True) if request.is_json else {}
+    payload = payload or {}
+    dataset_name = str(payload.get('dataset_name') or request.form.get('dataset_name') or '').strip()
+    if dataset_name:
+        update_app_setting('active_dataset_name', dataset_name)
+        message = f'Active dataset set to {dataset_name}.'
+    else:
+        update_app_setting('active_dataset_name', '')
+        message = 'Active dataset cleared. System will auto-resolve latest term data.'
+
+    if request.is_json:
+        return jsonify({'success': True, 'message': message, 'active_dataset_name': dataset_name or None})
+
+    flash(message, 'success')
+    return redirect(url_for('admin.university_connection'))
 
 @admin_bp.route('/datasets/delete/<table_name>', methods=['POST'])
 @login_required
@@ -1287,11 +1507,12 @@ def manage_courses():
     return render_template('Admin/manage_courses.html', faculties=faculties, subject_areas=subject_areas)
 
 
-def _validate_course_payload(payload: dict, *, exclude_manual_id: int | None = None) -> tuple[bool, str | None]:
+def _validate_course_payload(payload: dict, *, exclude_ref: str | None = None) -> tuple[bool, str | None]:
     course_number = str(payload.get('course_number') or '').strip()
     title = str(payload.get('title') or '').strip()
     day_period = str(payload.get('day_period') or '').strip()
-    instructor = str(payload.get('instructor') or '').strip()
+    semester = str(payload.get('semester') or '').strip()
+    year = str(payload.get('year') or '').strip()
 
     if not course_number:
         return False, 'course_number is required.'
@@ -1300,14 +1521,19 @@ def _validate_course_payload(payload: dict, *, exclude_manual_id: int | None = N
     if not day_period:
         return False, 'day_period is required.'
 
-    new_key = _course_merge_key(course_number, day_period, instructor)
+    new_key = _course_merge_key(course_number, day_period, semester, year)
     merged = _merged_courses_for_admin()
     for row in merged:
-        if row.get('source') == 'manual' and exclude_manual_id and row.get('id') == exclude_manual_id:
+        if exclude_ref and str(row.get('ref') or '').strip() == exclude_ref:
             continue
-        row_key = _course_merge_key(row.get('course_number'), row.get('day_period'), row.get('instructor'))
+        row_key = _course_merge_key(
+            row.get('course_number'),
+            row.get('day_period'),
+            row.get('semester'),
+            row.get('year'),
+        )
         if row_key == new_key:
-            return False, 'A course with the same course_number, day_period, and instructor already exists.'
+            return False, 'A course with the same course_number, day_period, semester, and year already exists.'
     return True, None
 
 
@@ -1323,6 +1549,26 @@ def _manual_course_from_scraped(scraped_row: ScrapedCourse, overrides: dict | No
         'subject_area': scraped_row.area_of_study,
         'instructor': scraped_row.instructor,
         'source': 'manual',
+        'dataset_name': getattr(scraped_row.dataset, 'name', None) if getattr(scraped_row, 'dataset', None) else None,
+    }
+    if overrides:
+        payload.update({k: v for k, v in overrides.items() if v is not None})
+    return Course(**payload)
+
+
+def _manual_course_from_local(local_row: Course, overrides: dict | None = None) -> Course:
+    payload = {
+        'course_number': local_row.course_number,
+        'title': local_row.title,
+        'credits': local_row.credits,
+        'day_period': local_row.day_period,
+        'semester': local_row.semester,
+        'year': local_row.year,
+        'prerequisite': local_row.prerequisite,
+        'subject_area': local_row.subject_area,
+        'instructor': local_row.instructor,
+        'source': 'manual',
+        'dataset_name': local_row.dataset_name,
     }
     if overrides:
         payload.update({k: v for k, v in overrides.items() if v is not None})
@@ -1334,7 +1580,7 @@ def _resolve_manual_course_ref(course_ref: str) -> Course | None:
     if not parsed:
         return None
     source, row_id = parsed
-    if source == 'manual':
+    if source in {'manual', 'csv'}:
         return Course.query.get(row_id)
     scraped = ScrapedCourse.query.get(row_id)
     if not scraped:
@@ -1382,7 +1628,7 @@ def api_courses():
 
     db.session.add(row)
     db.session.commit()
-    return jsonify({'success': True, 'course': _serialize_manual_course(row)})
+    return jsonify({'success': True, 'course': _serialize_local_course(row)})
 
 
 @admin_bp.route('/api/courses/<path:course_ref>', methods=['PUT', 'DELETE'])
@@ -1396,7 +1642,7 @@ def api_course_item(course_ref: str):
 
     if request.method == 'DELETE':
         if source != 'manual':
-            return jsonify({'success': False, 'message': 'Scraped courses cannot be deleted. Create a manual override instead.'}), 400
+            return jsonify({'success': False, 'message': 'Only manual courses can be deleted.'}), 400
         row = Course.query.get(row_id)
         if not row:
             return jsonify({'success': False, 'message': 'Course not found.'}), 404
@@ -1409,11 +1655,20 @@ def api_course_item(course_ref: str):
         row = Course.query.get(row_id)
         if not row:
             return jsonify({'success': False, 'message': 'Course not found.'}), 404
+        editing_ref = f'manual:{row.id}'
+    elif source == 'csv':
+        csv_row = Course.query.get(row_id)
+        if not csv_row:
+            return jsonify({'success': False, 'message': 'Course not found.'}), 404
+        row = _manual_course_from_local(csv_row)
+        row.faculty = list(csv_row.faculty or [])
+        editing_ref = f'csv:{csv_row.id}'
     else:
         scraped = ScrapedCourse.query.get(row_id)
         if not scraped:
             return jsonify({'success': False, 'message': 'Course not found.'}), 404
         row = _manual_course_from_scraped(scraped)
+        editing_ref = f'scraped:{scraped.id}'
 
     merged = {
         'course_number': str(payload.get('course_number') or row.course_number or '').strip(),
@@ -1427,7 +1682,7 @@ def api_course_item(course_ref: str):
         'instructor': str(payload.get('instructor') or row.instructor or '').strip(),
     }
 
-    ok, err = _validate_course_payload(merged, exclude_manual_id=(row.id if source == 'manual' else None))
+    ok, err = _validate_course_payload(merged, exclude_ref=editing_ref)
     if not ok:
         return jsonify({'success': False, 'message': err}), 400
 
@@ -1449,7 +1704,7 @@ def api_course_item(course_ref: str):
     if source != 'manual':
         db.session.add(row)
     db.session.commit()
-    return jsonify({'success': True, 'course': _serialize_manual_course(row)})
+    return jsonify({'success': True, 'course': _serialize_local_course(row)})
 
 
 @admin_bp.route('/api/courses/<path:course_ref>/duplicate', methods=['POST'])
@@ -1460,11 +1715,11 @@ def api_course_duplicate(course_ref: str):
     if not parsed:
         return jsonify({'success': False, 'message': 'Invalid course reference.'}), 400
     source, row_id = parsed
-    if source == 'manual':
+    if source in {'manual', 'csv'}:
         row = Course.query.get(row_id)
         if not row:
             return jsonify({'success': False, 'message': 'Course not found.'}), 404
-        payload = _serialize_manual_course(row)
+        payload = _serialize_local_course(row)
     else:
         row = ScrapedCourse.query.get(row_id)
         if not row:
@@ -1596,9 +1851,16 @@ def university_connection():
     row_transition_delay = _safe_float(get_app_setting('scraper_row_transition_delay', '0.0'), 0.0)
     popup_open_timeout = _safe_float(get_app_setting('scraper_popup_open_timeout', '10'), 10.0)
     popup_close_delay = _safe_float(get_app_setting('scraper_popup_close_delay', '0.35'), 0.35)
+    active_dataset_name = str(get_app_setting('active_dataset_name', '') or '').strip()
 
     # Past datasets for history panel
     past_datasets = ScrapedDataset.query.order_by(ScrapedDataset.created_at.desc()).limit(10).all()
+    latest_scrape_run = ScrapedDataset.query.order_by(ScrapedDataset.created_at.desc()).first()
+    latest_csv_upload = Course.query.filter(sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv').order_by(Course.last_updated.desc(), Course.id.desc()).first()
+
+    scraped_dataset_names = [d.name for d in past_datasets if d.name]
+    csv_dataset_names = [r[0] for r in db.session.query(Course.dataset_name).filter(Course.dataset_name.isnot(None)).distinct().all() if r and r[0]]
+    selectable_dataset_names = sorted(set(scraped_dataset_names + csv_dataset_names), reverse=True)
 
     chrome_connected = _is_chrome_running(debugger_address)
     return render_template(
@@ -1617,6 +1879,10 @@ def university_connection():
         row_transition_delay=row_transition_delay,
         popup_open_timeout=popup_open_timeout,
         popup_close_delay=popup_close_delay,
+        latest_scrape_run=latest_scrape_run,
+        latest_csv_upload=latest_csv_upload,
+        active_dataset_name=active_dataset_name,
+        selectable_dataset_names=selectable_dataset_names,
     )
 
 
@@ -2320,25 +2586,19 @@ def _subject_area_options_by_type():
 
 def _build_admin_catalog_index():
     catalog = {}
-    rows = (
-        db.session.query(ScrapedCourse)
-        .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
-        .filter(ScrapedDataset.status == 'completed')
-        .order_by(ScrapedDataset.created_at.desc(), ScrapedCourse.id.asc())
-        .all()
-    )
+    rows = _merged_courses_for_admin()
     if not rows:
         return catalog
 
     try:
         for sc in rows:
-            course_number = str(sc.course_number or '').strip()
+            course_number = str(sc.get('course_number') or '').strip()
             if not course_number or course_number in catalog:
                 continue
 
             day = ''
             period = ''
-            dp = str(sc.day_and_period or '').strip()
+            dp = str(sc.get('day_period') or '').strip()
             if dp:
                 try:
                     day_m = re.search(r'(Mon|Tue|Wed|Thu|Fri)', dp, re.I)
@@ -2352,10 +2612,10 @@ def _build_admin_catalog_index():
                     period = ''
 
             catalog[course_number] = {
-                'course_title': str(sc.course_title or '').strip() or course_number,
-                'credits': _safe_float(sc.credits, 0.0),
-                'instructor': str(sc.instructor or 'TBA').strip() or 'TBA',
-                'area_of_study': str(sc.area_of_study or '').strip(),
+                'course_title': str(sc.get('title') or '').strip() or course_number,
+                'credits': _safe_float(sc.get('credits'), 0.0),
+                'instructor': str(sc.get('instructor') or 'TBA').strip() or 'TBA',
+                'area_of_study': str(sc.get('subject_area') or '').strip(),
                 'day': day,
                 'period': period,
                 'day_and_period': dp,
@@ -3046,46 +3306,22 @@ def ai_dashboard():
             db.session.rollback()
             print(f"AI dashboard schedule_courses query failed: {e}")
 
-    # Build metadata lookup from completed scraped datasets for selected schedule courses.
+    # Build metadata lookup from the unified precedence-resolved catalog.
     catalog = {}
     areas = set()
 
     course_numbers_needed = sorted({r.course_number for r in sc_rows if getattr(r, 'course_number', None)})
     if course_numbers_needed:
         try:
-            rows = (
-                db.session.query(
-                    ScrapedCourse.course_number,
-                    ScrapedCourse.course_title,
-                    ScrapedCourse.credits,
-                    ScrapedCourse.instructor,
-                    ScrapedCourse.day_and_period,
-                    ScrapedCourse.area_of_study,
-                    ScrapedDataset.created_at,
-                )
-                .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
-                .filter(
-                    ScrapedDataset.status == 'completed',
-                    ScrapedCourse.course_number.in_(course_numbers_needed),
-                )
-                .order_by(ScrapedDataset.created_at.desc())
-                .all()
-            )
-
-            for r in rows:
-                d = {
-                    'course_number': r.course_number,
-                    'course_title': r.course_title,
-                    'credits': r.credits,
-                    'instructor': r.instructor,
-                    'day_and_period': r.day_and_period,
-                    'area_of_study': r.area_of_study,
-                }
-                cn = d.get('course_number')
-                if not cn:
+            unified_catalog = _build_admin_catalog_index()
+            for cn in course_numbers_needed:
+                key = str(cn or '').strip()
+                if not key:
                     continue
-                if cn not in catalog:
-                    catalog[cn] = d
+                d = unified_catalog.get(key)
+                if not d:
+                    continue
+                catalog[key] = d
                 a = (d.get('area_of_study') or '').strip()
                 if a:
                     areas.add(a)

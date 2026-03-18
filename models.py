@@ -187,8 +187,10 @@ class Course(db.Model):
     subject_area = db.Column(db.String(255), nullable=True, index=True)
     instructor = db.Column(db.String(255), nullable=True, index=True)
     source = db.Column(db.String(20), default='scraped', nullable=False, index=True)
+    dataset_name = db.Column(db.String(150), nullable=True, index=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    last_updated = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     faculty = db.relationship('Faculty', secondary=course_faculty, backref='courses')

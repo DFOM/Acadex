@@ -283,6 +283,11 @@ def health_schema_check():
         'catalog_statuses': {'id', 'term', 'status', 'dataset', 'updated_at'},
         'scraped_datasets': {'id', 'name', 'status', 'selected_fields_json'},
         'scraped_courses': {'id', 'dataset_id', 'data_json'},
+        'courses': {
+            'id', 'course_number', 'title', 'credits', 'day_period', 'semester', 'year',
+            'prerequisite', 'subject_area', 'instructor', 'source', 'dataset_name',
+            'created_at', 'updated_at', 'last_updated',
+        },
         'subject_areas': {
             'id', 'name', 'area_type', 'is_active', 'is_required',
             'required_for_paths', 'min_depth_credits', 'min_major_credits', 'min_minor_credits',
@@ -460,6 +465,15 @@ def _ensure_runtime_schema_compatibility() -> None:
             if 'min_minor_credits' not in subject_cols:
                 conn.execute(sa_text('ALTER TABLE subject_areas ADD COLUMN IF NOT EXISTS min_minor_credits DOUBLE PRECISION'))
                 conn.execute(sa_text('UPDATE subject_areas SET min_minor_credits = 0 WHERE min_minor_credits IS NULL'))
+
+    if 'courses' in tables:
+        course_cols = {c['name'] for c in insp.get_columns('courses')}
+        with db.engine.begin() as conn:
+            if 'dataset_name' not in course_cols:
+                conn.execute(sa_text('ALTER TABLE courses ADD COLUMN IF NOT EXISTS dataset_name VARCHAR(150)'))
+            if 'last_updated' not in course_cols:
+                conn.execute(sa_text('ALTER TABLE courses ADD COLUMN IF NOT EXISTS last_updated TIMESTAMP'))
+            conn.execute(sa_text('UPDATE courses SET last_updated = COALESCE(last_updated, updated_at, created_at, CURRENT_TIMESTAMP)'))
 
     if 'announcements' in tables:
         ann_cols = {c['name'] for c in insp.get_columns('announcements')}

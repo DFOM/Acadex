@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Set, Iterable
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
-from models import db, User, Schedule, ScheduleCourse, Period, Setting, Announcement, AIEvent, BehaviorEvent, Notification, SubjectArea, ScrapedDataset, ScrapedCourse
+from models import db, User, Schedule, ScheduleCourse, Period, Setting, Announcement, AIEvent, BehaviorEvent, Notification, SubjectArea, ScrapedDataset, ScrapedCourse, Course
 from utils import (
     get_available_dataset_years,
     calculate_gpa,
@@ -268,6 +268,42 @@ def _normalize_course_number(course_number: Any) -> str:
     return str(course_number or '').strip().upper()
 
 
+def _source_priority(source: str | None) -> int:
+    src = str(source or '').strip().lower()
+    if src == 'manual':
+        return 3
+    if src == 'csv':
+        return 2
+    return 1
+
+
+def _catalog_resolution_key(course_number: Any, day_period: Any, semester: Any, year: Any) -> tuple[str, str, str, str]:
+    return (
+        _normalize_course_number(course_number),
+        str(day_period or '').strip().lower(),
+        str(semester or '').strip().lower(),
+        str(year or '').strip().lower(),
+    )
+
+
+def _manual_or_csv_course_to_catalog_row(row: Course) -> Dict[str, Any]:
+    return {
+        'Course_Number': str(row.course_number or '').strip(),
+        'Course_Title': str(row.title or '').strip(),
+        'Credits': float(row.credits or 0.0),
+        'Instructor': str(row.instructor or '').strip(),
+        'Day_and_Period': str(row.day_period or '').strip(),
+        'Area_of_Study': str(row.subject_area or '').strip(),
+        'Prerequisite': str(row.prerequisite or '').strip(),
+        'dataset_id': None,
+        'dataset_name': row.dataset_name,
+        'semester': str(row.semester or '').strip(),
+        'year': str(row.year or '').strip(),
+        'source': str(row.source or '').strip().lower() or 'manual',
+        'updated_ts': row.last_updated or row.updated_at or row.created_at,
+    }
+
+
 def _active_subject_areas() -> Dict[str, SubjectArea]:
     rows = SubjectArea.query.filter_by(is_active=True).all()
     return {(r.name or '').strip().lower(): r for r in rows if (r.name or '').strip()}
@@ -518,6 +554,19 @@ def _dataset_for_term(year: Any, semester: Any) -> ScrapedDataset | None:
     if not year_text:
         return None
 
+    active_dataset_name = str(get_str_setting('active_dataset_name', '') or '').strip()
+    if active_dataset_name:
+        active_query = ScrapedDataset.query.filter(
+            ScrapedDataset.status == 'completed',
+            ScrapedDataset.name == active_dataset_name,
+            ScrapedDataset.year == year_text,
+        )
+        if sem_text:
+            active_query = active_query.filter(func.lower(ScrapedDataset.semester) == sem_text)
+        active_row = active_query.order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc()).first()
+        if active_row:
+            return active_row
+
     query = ScrapedDataset.query.filter(
         ScrapedDataset.status == 'completed',
         ScrapedDataset.year == year_text,
@@ -573,22 +622,80 @@ def _scraped_course_to_catalog_row(sc: ScrapedCourse) -> Dict[str, Any]:
         'Area_of_Study': area_of_study,
         'Prerequisite': prerequisite,
         'dataset_id': sc.dataset_id,
+        'dataset_name': getattr(sc.dataset, 'name', None) if getattr(sc, 'dataset', None) else None,
+        'semester': getattr(sc.dataset, 'semester', None) if getattr(sc, 'dataset', None) else None,
+        'year': getattr(sc.dataset, 'year', None) if getattr(sc, 'dataset', None) else None,
+        'source': 'scraped',
+        'updated_ts': getattr(sc.dataset, 'updated_at', None) if getattr(sc, 'dataset', None) else None,
     }
 
 
 def _load_scraped_catalog_for_term(year: Any, semester: Any) -> tuple[list[Dict[str, Any]], int | None]:
+    year_text = str(year or '').strip()
+    sem_text = str(semester or '').strip().lower()
+
+    local_query = Course.query
+    if year_text:
+        local_query = local_query.filter(Course.year == year_text)
+    if sem_text:
+        local_query = local_query.filter(func.lower(Course.semester) == sem_text)
+    local_rows = local_query.all()
+
+    candidates: list[Dict[str, Any]] = [_manual_or_csv_course_to_catalog_row(r) for r in local_rows]
+
     ds = _dataset_for_term(year, semester)
-    if not ds:
-        return [], None
-    rows = (
-        ScrapedCourse.query.filter_by(dataset_id=ds.id)
-        .order_by(ScrapedCourse.id.asc())
-        .all()
+    dataset_id = ds.id if ds else None
+    if ds:
+        scraped_rows = (
+            ScrapedCourse.query.filter_by(dataset_id=ds.id)
+            .order_by(ScrapedCourse.id.asc())
+            .all()
+        )
+        candidates.extend(_scraped_course_to_catalog_row(r) for r in scraped_rows)
+
+    if not candidates:
+        return [], dataset_id
+
+    winner_by_key: Dict[tuple[str, str, str, str], Dict[str, Any]] = {}
+    for row in candidates:
+        key = _catalog_resolution_key(
+            row.get('Course_Number'),
+            row.get('Day_and_Period'),
+            row.get('semester') or semester,
+            row.get('year') or year,
+        )
+        existing = winner_by_key.get(key)
+        if not existing:
+            winner_by_key[key] = row
+            continue
+
+        left_rank = _source_priority(row.get('source'))
+        right_rank = _source_priority(existing.get('source'))
+        if left_rank > right_rank:
+            winner_by_key[key] = row
+            continue
+        if left_rank < right_rank:
+            continue
+
+        left_ts = row.get('updated_ts') or datetime.min
+        right_ts = existing.get('updated_ts') or datetime.min
+        if left_ts >= right_ts:
+            winner_by_key[key] = row
+
+    resolved = list(winner_by_key.values())
+    resolved.sort(
+        key=lambda item: (
+            str(item.get('Course_Number') or ''),
+            str(item.get('Day_and_Period') or ''),
+        )
     )
-    return [_scraped_course_to_catalog_row(r) for r in rows], ds.id
+    return resolved, dataset_id
 
 
 def _build_course_metadata_index() -> Dict[str, Dict[str, Any]]:
+    index: Dict[str, Dict[str, Any]] = {}
+    local_candidates = [_manual_or_csv_course_to_catalog_row(r) for r in Course.query.all()]
+    scraped_candidates = []
     rows = (
         db.session.query(ScrapedCourse)
         .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
@@ -596,10 +703,18 @@ def _build_course_metadata_index() -> Dict[str, Dict[str, Any]]:
         .order_by(ScrapedDataset.created_at.desc(), ScrapedCourse.id.asc())
         .all()
     )
+    scraped_candidates.extend(_scraped_course_to_catalog_row(sc) for sc in rows)
 
-    index: Dict[str, Dict[str, Any]] = {}
-    for sc in rows:
-        mapped = _scraped_course_to_catalog_row(sc)
+    candidates = local_candidates + scraped_candidates
+    candidates.sort(
+        key=lambda row: (
+            _source_priority(row.get('source')),
+            row.get('updated_ts') or datetime.min,
+        ),
+        reverse=True,
+    )
+
+    for mapped in candidates:
         course_number = _normalize_course_number(mapped.get('Course_Number'))
         if not course_number or course_number in index:
             continue
@@ -962,7 +1077,9 @@ def _load_catalog_for_term(year: int, semester: str) -> tuple[list[Dict[str, Any
     rows, dataset_id = _load_scraped_catalog_for_term(year, semester)
     if not rows:
         return [], None
-    return rows, f"scraped_dataset_{dataset_id}"
+    if dataset_id:
+        return rows, f"scraped_dataset_{dataset_id}"
+    return rows, f"unified_catalog_{year}_{semester}"
 
 @student_bp.route('/courses/search')
 def search_courses():
