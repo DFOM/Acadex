@@ -88,6 +88,7 @@ ENDPOINT_PERMISSION_MAP = {
     'admin.start_scraping': 'manage_datasets',
     'admin.scraper_status': 'manage_datasets',
     'admin.scraper_diagnostics': 'manage_datasets',
+    'admin.scraper_diagnostics_api': 'manage_datasets',
 }
 
 
@@ -1424,6 +1425,13 @@ def scraper_diagnostics():
         return jsonify({'success': True, 'diagnostics': payload})
     except Exception as exc:
         return jsonify({'success': False, 'message': f'Diagnostics failed: {exc}'}), 500
+
+
+@admin_bp.route('/api/scraper-diagnostics', methods=['GET'])
+@login_required
+@admin_required
+def scraper_diagnostics_api():
+    return scraper_diagnostics()
 
 @admin_bp.route('/api/update_course', methods=['POST'])
 @login_required

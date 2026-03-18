@@ -310,7 +310,11 @@
     function postJSON(url, body) {
         return fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-CSRF-Token': csrfToken(),
+            },
             body: JSON.stringify(body),
         }).then(async (r) => {
             const contentType = (r.headers.get('content-type') || '').toLowerCase();
@@ -323,7 +327,7 @@
     }
 
     function getJSON(url) {
-        return fetch(url, { headers: { 'X-CSRF-Token': csrfToken() } }).then(async (r) => {
+        return fetch(url, { headers: { 'Accept': 'application/json', 'X-CSRF-Token': csrfToken() } }).then(async (r) => {
             const contentType = (r.headers.get('content-type') || '').toLowerCase();
             if (!contentType.includes('application/json')) {
                 const txt = (await r.text()) || '';
@@ -415,7 +419,7 @@
 
     window.runDiagnostics = function () {
         const debugger_address = document.getElementById('debuggerAddress').value.trim();
-        getJSON('/admin/scraper-diagnostics?debugger_address=' + encodeURIComponent(debugger_address))
+        getJSON('/admin/api/scraper-diagnostics?debugger_address=' + encodeURIComponent(debugger_address))
             .then(d => {
                 const out = document.getElementById('diagOutput');
                 out.textContent = prettyJSON(d);
