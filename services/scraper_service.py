@@ -24,6 +24,7 @@ import time
 import traceback
 from datetime import datetime
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 from typing import List, Optional
 
 log = logging.getLogger(__name__)
@@ -104,6 +105,7 @@ def get_last_backend_error() -> dict:
 
 def get_scraper_diagnostics(debugger_address: Optional[str] = None) -> dict:
     host, port, normalized = _split_debugger_address(debugger_address)
+    debugger_http_ok, debugger_http_message = _debugger_http_health(normalized)
     selenium_available = True
     selenium_version = None
     selenium_error = None
@@ -129,6 +131,8 @@ def get_scraper_diagnostics(debugger_address: Optional[str] = None) -> dict:
         "debugger_host": host,
         "debugger_port": port,
         "debugger_reachable": _is_chrome_running(normalized),
+        "debugger_http_ok": debugger_http_ok,
+        "debugger_http_message": debugger_http_message,
         "target_is_local": _is_localhost(host),
         "selenium_available": selenium_available,
         "selenium_version": selenium_version,
@@ -195,6 +199,31 @@ def _is_chrome_running(debugger_address: Optional[str] = None) -> bool:
             return True
         except OSError:
             return False
+
+
+def _debugger_http_health(debugger_address: Optional[str] = None) -> tuple[bool, str]:
+    """Check DevTools HTTP endpoint quickly to avoid long Selenium hangs."""
+    host, port, normalized = _split_debugger_address(debugger_address)
+    url = f"http://{host}:{port}/json/version"
+    try:
+        req = Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "acadex-scraper/1.0",
+            },
+        )
+        with urlopen(req, timeout=2.0) as resp:
+            payload = json.loads((resp.read() or b"{}").decode("utf-8", errors="replace"))
+        ws_url = str(payload.get("webSocketDebuggerUrl") or "").strip()
+        browser = str(payload.get("Browser") or "").strip()
+        if not ws_url:
+            return False, f"{normalized} responded but missing webSocketDebuggerUrl"
+        if not browser:
+            return False, f"{normalized} responded with unexpected DevTools payload"
+        return True, "ok"
+    except Exception as exc:
+        return False, f"DevTools endpoint check failed at {normalized}: {exc}"
 
 
 def _chrome_executable() -> str:
@@ -377,6 +406,11 @@ def get_driver(debugger_address: Optional[str] = None):
                 f"Chrome debugger is not reachable at {normalized}. "
                 "Use 'Start Browser Session' first."
             )
+
+        http_ok, http_message = _debugger_http_health(normalized)
+        if not http_ok:
+            _set_last_backend_error("get_driver", http_message)
+            raise RuntimeError(http_message)
 
         # Lazy-import selenium so the app starts even if selenium is not installed
         try:

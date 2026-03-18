@@ -1280,7 +1280,7 @@ def university_connection():
 @login_required
 @admin_required
 def start_browser_session():
-    from services.scraper_service import start_browser_session as _start
+    from services.scraper_service import start_browser_session as _start, _set_last_backend_error
     try:
         data = request.get_json(force=True, silent=True) or {}
         debugger_address = (data.get('debugger_address') or get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))).strip()
@@ -1289,6 +1289,7 @@ def start_browser_session():
         result = _start(debugger_address=debugger_address)
         return jsonify(result)
     except Exception as exc:
+        _set_last_backend_error('admin.start_browser_session', exc)
         return jsonify({'success': False, 'message': f'Start session failed: {exc}'}), 500
 
 
@@ -1297,16 +1298,18 @@ def start_browser_session():
 @login_required
 @admin_required
 def check_login_status():
-    from services.scraper_service import get_driver, check_login_status as _check
+    from services.scraper_service import get_driver, check_login_status as _check, _set_last_backend_error
     try:
         debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
         driver = get_driver(debugger_address=debugger_address)
     except Exception as exc:
+        _set_last_backend_error('admin.check_login_status.get_driver', exc)
         return jsonify({'logged_in': False, 'message': str(exc)})
     try:
         result = _check(driver)
         return jsonify(result)
     except Exception as exc:
+        _set_last_backend_error('admin.check_login_status', exc)
         return jsonify({'logged_in': False, 'message': f'Login check failed: {exc}'}), 500
 
 
@@ -1315,7 +1318,7 @@ def check_login_status():
 @login_required
 @admin_required
 def probe_fields():
-    from services.scraper_service import get_driver, probe_available_fields as _probe
+    from services.scraper_service import get_driver, probe_available_fields as _probe, _set_last_backend_error
     try:
         data = request.get_json(force=True, silent=True) or {}
         syllabus_url = (data.get('syllabus_url') or '').strip()
@@ -1329,6 +1332,7 @@ def probe_fields():
 
         driver = get_driver(debugger_address=debugger_address)
     except Exception as exc:
+        _set_last_backend_error('admin.probe_fields.get_driver', exc)
         return jsonify({'success': False, 'fields': [], 'message': str(exc)})
 
     try:
@@ -1337,6 +1341,7 @@ def probe_fields():
             session['scraper_probed_fields'] = list(result.get('fields') or [])
         return jsonify(result)
     except Exception as exc:
+        _set_last_backend_error('admin.probe_fields', exc)
         return jsonify({'success': False, 'fields': [], 'message': f'Probe failed: {exc}'}), 500
 
 
@@ -1373,19 +1378,22 @@ def start_scraping():
     if not year or not semester:
         return jsonify({'success': False, 'message': 'Year and Semester must be configured in Settings.'})
 
-    session['scraper_selected_fields'] = selected_fields
-    if debugger_address:
-        update_app_setting('scraper_debugger_address', debugger_address)
-    flask_app = current_app._get_current_object()
-    result = _run(
-        selected_fields,
-        year,
-        semester,
-        flask_app,
-        syllabus_url=syllabus_url,
-        debugger_address=debugger_address,
-    )
-    return jsonify(result)
+    try:
+        session['scraper_selected_fields'] = selected_fields
+        if debugger_address:
+            update_app_setting('scraper_debugger_address', debugger_address)
+        flask_app = current_app._get_current_object()
+        result = _run(
+            selected_fields,
+            year,
+            semester,
+            flask_app,
+            syllabus_url=syllabus_url,
+            debugger_address=debugger_address,
+        )
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({'success': False, 'message': f'Start scraping failed: {exc}'}), 500
 
 
 # ── GET /admin/scraper-status ─────────────────────────────────────────────
@@ -1393,25 +1401,28 @@ def start_scraping():
 @login_required
 @admin_required
 def scraper_status():
-    from services.scraper_service import scraper_progress as _p, _is_chrome_running, is_scraper_running
-    import copy
-    debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
-    payload = copy.deepcopy(_p)
-    payload['chrome_connected'] = _is_chrome_running(debugger_address)
-    payload['debugger_address'] = debugger_address
-    payload['is_running_lock'] = is_scraper_running()
+    try:
+        from services.scraper_service import scraper_progress as _p, _is_chrome_running, is_scraper_running
+        import copy
+        debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
+        payload = copy.deepcopy(_p)
+        payload['chrome_connected'] = _is_chrome_running(debugger_address)
+        payload['debugger_address'] = debugger_address
+        payload['is_running_lock'] = is_scraper_running()
 
-    # Enrich with DB data when a dataset is active
-    ds_id = payload.get('dataset_id')
-    if ds_id:
-        ds = db.session.get(ScrapedDataset, ds_id)
-        if ds:
-            payload['db_status'] = ds.status
-            payload['db_current'] = ds.current_index
-            payload['db_total'] = ds.total_courses
-            payload['db_last_course'] = ds.last_course
+        # Enrich with DB data when a dataset is active
+        ds_id = payload.get('dataset_id')
+        if ds_id:
+            ds = db.session.get(ScrapedDataset, ds_id)
+            if ds:
+                payload['db_status'] = ds.status
+                payload['db_current'] = ds.current_index
+                payload['db_total'] = ds.total_courses
+                payload['db_last_course'] = ds.last_course
 
-    return jsonify(payload)
+        return jsonify(payload)
+    except Exception as exc:
+        return jsonify({'success': False, 'message': f'Status failed: {exc}'}), 500
 
 
 @admin_bp.route('/scraper-diagnostics', methods=['GET'])
