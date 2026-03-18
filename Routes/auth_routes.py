@@ -6,6 +6,8 @@ import re
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import or_
+from sqlalchemy import text as sa_text
+from sqlalchemy import inspect as sa_inspect
 from flask_migrate import upgrade
 from models import db, User, SubjectArea, Setting, Role, RegistrationField, LoginAttempt
 from utils import get_available_dataset_years
@@ -98,6 +100,79 @@ def _attempt_login_schema_recovery(exc: Exception) -> bool:
         current_app.logger.exception('auth_login_schema_recovery_failed error=%s', heal_exc)
         return False
 
+
+def _heal_auth_user_schema() -> bool:
+    """Best-effort local schema heal for auth-critical user columns."""
+    try:
+        insp = sa_inspect(db.engine)
+        tables = set(insp.get_table_names())
+        if 'users' not in tables:
+            return False
+        user_cols = {c['name'] for c in insp.get_columns('users')}
+        with db.engine.begin() as conn:
+            if 'email' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255)'))
+            if 'is_admin' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN'))
+                conn.execute(sa_text('UPDATE users SET is_admin = FALSE WHERE is_admin IS NULL'))
+                conn.execute(sa_text('ALTER TABLE users ALTER COLUMN is_admin SET DEFAULT FALSE'))
+            if 'full_name' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(150)'))
+            if 'role_id' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS role_id INTEGER'))
+            if 'major_subject_area_id' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS major_subject_area_id INTEGER'))
+            if 'minor_subject_area_id' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS minor_subject_area_id INTEGER'))
+            if 'ai_opt_in' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_opt_in BOOLEAN'))
+                conn.execute(sa_text('UPDATE users SET ai_opt_in = FALSE WHERE ai_opt_in IS NULL'))
+                conn.execute(sa_text('ALTER TABLE users ALTER COLUMN ai_opt_in SET DEFAULT FALSE'))
+            if 'gender' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(50)'))
+            if 'career_interests' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS career_interests TEXT'))
+            if 'extra_profile_json' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_profile_json TEXT'))
+            if 'profile_image_path' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_path VARCHAR(255)'))
+            if 'expected_graduation' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS expected_graduation INTEGER'))
+            if 'two_factor_enabled' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN'))
+                conn.execute(sa_text('UPDATE users SET two_factor_enabled = FALSE WHERE two_factor_enabled IS NULL'))
+                conn.execute(sa_text('ALTER TABLE users ALTER COLUMN two_factor_enabled SET DEFAULT FALSE'))
+            if 'two_factor_secret' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_secret VARCHAR(255)'))
+        return True
+    except Exception as exc:
+        current_app.logger.warning('auth_user_schema_heal_failed error=%s', exc)
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        return False
+
+
+def _verify_password_with_legacy_support(user: User, password: str) -> bool:
+    stored = str(getattr(user, 'password', '') or '')
+    raw = str(password or '')
+    try:
+        if check_password_hash(stored, raw):
+            return True
+    except Exception:
+        pass
+
+    if stored and raw and stored == raw:
+        try:
+            user.password = generate_password_hash(raw, method='pbkdf2:sha256')
+            db.session.commit()
+            current_app.logger.warning('auth_password_upgraded_from_legacy_plaintext user_id=%s', getattr(user, 'id', None))
+        except Exception:
+            db.session.rollback()
+        return True
+    return False
+
 # FIXED: Changed from '/' to '/login' so the new Landing Page can take the root URL
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
@@ -119,7 +194,7 @@ def login():
 
         try:
             user = _safe_lookup_user(username, identity)
-            valid_credentials = bool(user and check_password_hash(user.password, password))
+            valid_credentials = bool(user and _verify_password_with_legacy_support(user, password))
         except Exception as exc:
             recovered = _attempt_login_schema_recovery(exc)
             if not recovered:
@@ -129,7 +204,7 @@ def login():
 
             try:
                 user = _safe_lookup_user(username, identity)
-                valid_credentials = bool(user and check_password_hash(user.password, password))
+                valid_credentials = bool(user and _verify_password_with_legacy_support(user, password))
             except Exception as retry_exc:
                 db.session.rollback()
                 current_app.logger.exception('auth_login_query_retry_error identity=%s ip=%s error=%s', identity, ip_address, retry_exc)
@@ -264,8 +339,23 @@ def register():
             major_subject_area_id=major_subject_area_id,
             minor_subject_area_id=minor_subject_area_id,
         )
-        db.session.add(new_user)
-        db.session.commit()
+        register_saved = False
+        for attempt in range(2):
+            try:
+                db.session.add(new_user)
+                db.session.commit()
+                register_saved = True
+                break
+            except Exception as exc:
+                db.session.rollback()
+                current_app.logger.exception('auth_register_commit_error attempt=%s username=%s email=%s error=%s', attempt + 1, username, email, exc)
+                if attempt == 0 and _heal_auth_user_schema():
+                    continue
+                break
+
+        if not register_saved:
+            flash('Registration is temporarily unavailable due to a server configuration issue. Please try again in a moment.', 'error')
+            return render_template('Student/register.html', majors=majors, minors=minors, dynamic_fields=dynamic_fields)
 
         flash("Registration successful! Please log in.", "success")
         return redirect(url_for('auth.login'))
