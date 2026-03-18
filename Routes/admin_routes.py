@@ -1252,16 +1252,18 @@ def university_connection():
     year = get_app_setting('current_year', '')
     semester = get_app_setting('current_semester', '')
     syllabus_url = get_app_setting('scraper_syllabus_url', '')
+    debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
 
     # Past datasets for history panel
     past_datasets = ScrapedDataset.query.order_by(ScrapedDataset.created_at.desc()).limit(10).all()
 
-    chrome_connected = _is_chrome_running()
+    chrome_connected = _is_chrome_running(debugger_address)
     return render_template(
         'Admin/university_connection.html',
         year=year,
         semester=semester,
         syllabus_url=syllabus_url,
+        debugger_address=debugger_address,
         chrome_connected=chrome_connected,
         past_datasets=past_datasets,
         progress=dict(scraper_progress),
@@ -1277,7 +1279,11 @@ def university_connection():
 @admin_required
 def start_browser_session():
     from services.scraper_service import start_browser_session as _start
-    result = _start()
+    data = request.get_json(force=True, silent=True) or {}
+    debugger_address = (data.get('debugger_address') or get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))).strip()
+    if debugger_address:
+        update_app_setting('scraper_debugger_address', debugger_address)
+    result = _start(debugger_address=debugger_address)
     return jsonify(result)
 
 
@@ -1287,8 +1293,9 @@ def start_browser_session():
 @admin_required
 def check_login_status():
     from services.scraper_service import get_driver, check_login_status as _check
+    debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
     try:
-        driver = get_driver()
+        driver = get_driver(debugger_address=debugger_address)
     except RuntimeError as exc:
         return jsonify({'logged_in': False, 'message': str(exc)})
     result = _check(driver)
@@ -1303,13 +1310,16 @@ def probe_fields():
     from services.scraper_service import get_driver, probe_available_fields as _probe
     data = request.get_json(force=True, silent=True) or {}
     syllabus_url = (data.get('syllabus_url') or '').strip()
+    debugger_address = (data.get('debugger_address') or get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))).strip()
 
     # Persist the URL for future use
     if syllabus_url:
         update_app_setting('scraper_syllabus_url', syllabus_url)
+    if debugger_address:
+        update_app_setting('scraper_debugger_address', debugger_address)
 
     try:
-        driver = get_driver()
+        driver = get_driver(debugger_address=debugger_address)
     except RuntimeError as exc:
         return jsonify({'success': False, 'fields': [], 'message': str(exc)})
 
@@ -1342,6 +1352,7 @@ def start_scraping():
     year = (data.get('year') or get_app_setting('current_year', '')).strip()
     semester = (data.get('semester') or get_app_setting('current_semester', '')).strip()
     syllabus_url = (data.get('syllabus_url') or get_app_setting('scraper_syllabus_url', '')).strip()
+    debugger_address = (data.get('debugger_address') or get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))).strip()
 
     if not selected_fields:
         return jsonify({'success': False, 'message': 'No fields selected.'})
@@ -1349,8 +1360,17 @@ def start_scraping():
         return jsonify({'success': False, 'message': 'Year and Semester must be configured in Settings.'})
 
     session['scraper_selected_fields'] = selected_fields
+    if debugger_address:
+        update_app_setting('scraper_debugger_address', debugger_address)
     flask_app = current_app._get_current_object()
-    result = _run(selected_fields, year, semester, flask_app, syllabus_url=syllabus_url)
+    result = _run(
+        selected_fields,
+        year,
+        semester,
+        flask_app,
+        syllabus_url=syllabus_url,
+        debugger_address=debugger_address,
+    )
     return jsonify(result)
 
 
@@ -1361,8 +1381,10 @@ def start_scraping():
 def scraper_status():
     from services.scraper_service import scraper_progress as _p, _is_chrome_running, is_scraper_running
     import copy
+    debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
     payload = copy.deepcopy(_p)
-    payload['chrome_connected'] = _is_chrome_running()
+    payload['chrome_connected'] = _is_chrome_running(debugger_address)
+    payload['debugger_address'] = debugger_address
     payload['is_running_lock'] = is_scraper_running()
 
     # Enrich with DB data when a dataset is active

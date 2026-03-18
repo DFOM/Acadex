@@ -22,6 +22,7 @@ import subprocess
 import threading
 import time
 from datetime import datetime
+from urllib.parse import urlparse
 from typing import List, Optional
 
 log = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ log = logging.getLogger(__name__)
 _scraper_lock = threading.Lock()          # prevents concurrent runs
 _scraper_is_running = False
 _active_driver = None                     # reused WebDriver instance
+_active_debugger_address = None
 _active_driver_lock = threading.Lock()
 
 # Shared progress dict – written by worker thread, read by status endpoint
@@ -64,19 +66,52 @@ def is_scraper_running() -> bool:
 #  Chrome / WebDriver helpers
 # ──────────────────────────────────────────────────────
 _DEBUGGING_PORT = 9222
+_DEFAULT_DEBUGGER_ADDRESS = "localhost:9222"
 
 
 def _is_hosted_environment() -> bool:
     return bool(os.environ.get("RENDER") or os.environ.get("DYNO") or os.environ.get("K_SERVICE"))
 
 
-def _is_chrome_running() -> bool:
-    """Return True if something is already listening on the debugging port."""
+def _normalize_debugger_address(debugger_address: Optional[str] = None) -> str:
+    candidate = (debugger_address or os.environ.get("CHROME_DEBUGGER_ADDRESS") or _DEFAULT_DEBUGGER_ADDRESS).strip()
+    if not candidate:
+        return _DEFAULT_DEBUGGER_ADDRESS
+
+    if candidate.startswith("http://") or candidate.startswith("https://"):
+        parsed = urlparse(candidate)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or _DEBUGGING_PORT
+        return f"{host}:{port}"
+    return candidate
+
+
+def _split_debugger_address(debugger_address: Optional[str] = None) -> tuple[str, int, str]:
+    normalized = _normalize_debugger_address(debugger_address)
+    if ":" in normalized:
+        host, raw_port = normalized.rsplit(":", 1)
+    else:
+        host, raw_port = normalized, str(_DEBUGGING_PORT)
+    host = (host or "localhost").strip()
+    try:
+        port = int(raw_port)
+    except Exception:
+        port = _DEBUGGING_PORT
+    return host, port, f"{host}:{port}"
+
+
+def _is_localhost(host: str) -> bool:
+    return str(host or "").strip().lower() in {"localhost", "127.0.0.1", "::1"}
+
+
+def _is_chrome_running(debugger_address: Optional[str] = None) -> bool:
+    """Return True if the remote debugging endpoint is reachable."""
     import socket
+    host, port, _ = _split_debugger_address(debugger_address)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(1)
         try:
-            s.connect(("127.0.0.1", _DEBUGGING_PORT))
+            s.connect((host, port))
             return True
         except OSError:
             return False
@@ -141,19 +176,23 @@ def _profile_dir() -> str:
     return os.path.join(tempfile.gettempdir(), "acadex-selenium-profile")
 
 
-def start_browser_session() -> dict:
+def start_browser_session(debugger_address: Optional[str] = None) -> dict:
     """
     Launch Chrome with remote-debugging on port 9222 (if not already running).
     Returns {"success": bool, "message": str, "already_running": bool}
     """
-    if _is_chrome_running():
+    host, port, normalized = _split_debugger_address(debugger_address)
+    if _is_chrome_running(normalized):
         return {
             "success": True,
-            "message": "Chrome is already running on port 9222 — session reused.",
+            "message": f"Chrome debugger already reachable at {normalized} — session reused.",
             "already_running": True,
+            "debugger_address": normalized,
         }
 
-    if _is_hosted_environment():
+    is_local_target = _is_localhost(host)
+
+    if _is_hosted_environment() and is_local_target:
         return {
             "success": False,
             "message": (
@@ -162,17 +201,34 @@ def start_browser_session() -> dict:
                 "or provide a reachable remote debugger endpoint."
             ),
             "already_running": False,
+            "debugger_address": normalized,
+        }
+
+    if not is_local_target:
+        return {
+            "success": False,
+            "message": (
+                f"Could not reach remote debugger endpoint {normalized}. "
+                "Start Chrome on that machine with remote debugging enabled and ensure it is reachable."
+            ),
+            "already_running": False,
+            "debugger_address": normalized,
         }
 
     try:
         exe = _chrome_executable()
     except FileNotFoundError as exc:
-        return {"success": False, "message": str(exc), "already_running": False}
+        return {
+            "success": False,
+            "message": str(exc),
+            "already_running": False,
+            "debugger_address": normalized,
+        }
 
     profile = _profile_dir()
     cmd = [
         exe,
-        f"--remote-debugging-port={_DEBUGGING_PORT}",
+        f"--remote-debugging-port={port}",
         f"--user-data-dir={profile}",
         "--no-first-run",
         "--no-default-browser-check",
@@ -188,43 +244,51 @@ def start_browser_session() -> dict:
         # Wait briefly for Chrome to open its debugging endpoint
         for _ in range(15):
             time.sleep(0.5)
-            if _is_chrome_running():
+            if _is_chrome_running(normalized):
                 return {
                     "success": True,
-                    "message": "Chrome launched successfully on port 9222.",
+                    "message": f"Chrome launched successfully with debugger at {normalized}.",
                     "already_running": False,
+                    "debugger_address": normalized,
                 }
         return {
             "success": False,
-            "message": "Chrome launched but the debugging port did not respond in time.",
+            "message": f"Chrome launched but debugger endpoint {normalized} did not respond in time.",
             "already_running": False,
+            "debugger_address": normalized,
         }
     except Exception as exc:
         return {
             "success": False,
             "message": f"Failed to launch Chrome: {exc}",
             "already_running": False,
+            "debugger_address": normalized,
         }
 
 
-def get_driver():
+def get_driver(debugger_address: Optional[str] = None):
     """
     Return a Selenium WebDriver connected to the running Chrome session via
     remote-debugging port 9222.  Raises RuntimeError if Chrome is not available.
     """
-    global _active_driver
+    global _active_driver, _active_debugger_address
+    host, port, normalized = _split_debugger_address(debugger_address)
     with _active_driver_lock:
         # Try reusing the existing driver
-        if _active_driver is not None:
+        if _active_driver is not None and _active_debugger_address == normalized:
             try:
                 _ = _active_driver.title  # probe — will throw if session is gone
                 return _active_driver
             except Exception:
                 _active_driver = None
+                _active_debugger_address = None
+        elif _active_driver is not None and _active_debugger_address != normalized:
+            _active_driver = None
+            _active_debugger_address = None
 
-        if not _is_chrome_running():
+        if not _is_chrome_running(normalized):
             raise RuntimeError(
-                "Chrome is not running on port 9222. "
+                f"Chrome debugger is not reachable at {normalized}. "
                 "Use 'Start Browser Session' first."
             )
 
@@ -239,17 +303,19 @@ def get_driver():
             )
 
         options = Options()
-        options.add_experimental_option("debuggerAddress", f"localhost:{_DEBUGGING_PORT}")
+        options.add_experimental_option("debuggerAddress", normalized)
         driver = webdriver.Chrome(options=options)
         _active_driver = driver
+        _active_debugger_address = normalized
         return driver
 
 
 def release_driver() -> None:
     """Called after a scraping job completes to reset the cached driver reference."""
-    global _active_driver
+    global _active_driver, _active_debugger_address
     with _active_driver_lock:
         _active_driver = None
+        _active_debugger_address = None
 
 
 # ──────────────────────────────────────────────────────
@@ -577,6 +643,7 @@ def run_controlled_scraper(
     semester: str,
     flask_app,
     syllabus_url: str = "",
+    debugger_address: Optional[str] = None,
 ) -> dict:
     """
     Spawn a background thread that runs the scraper.
@@ -601,7 +668,7 @@ def run_controlled_scraper(
         _scraper_is_running = True
 
     try:
-        driver = get_driver()
+        driver = get_driver(debugger_address=debugger_address)
     except RuntimeError as exc:
         with _progress_lock:
             _scraper_is_running = False
