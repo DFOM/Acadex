@@ -1140,82 +1140,77 @@ def _worker(
             _log_progress(f"[DB] progress update failed: {exc}")
 
     def _extract_popup_fields(popup) -> dict[str, str]:
-        data: dict[str, str] = {}
-
-        # Pattern 0: explicit syllabus row blocks (#pkx02301:ch:table)
+        # Fast path: perform all extraction in browser context in one round trip.
         try:
-            rows = popup.find_elements(By.CSS_SELECTOR, "#pkx02301\\:ch\\:table .rowStyle")
-            for row_block in rows:
-                headers = row_block.find_elements(By.CSS_SELECTOR, "div.ui-widget-header")
-                for header in headers:
-                    label = (header.text or "").strip().rstrip(":")
-                    if not label:
-                        continue
-                    value = ""
-                    try:
-                        content = header.find_element(By.XPATH, "following-sibling::div[contains(@class,'ui-widget-content')][1]")
-                        rich = content.find_elements(By.CSS_SELECTOR, ".fr-box.fr-view, .fr-view")
-                        if rich:
-                            value = (rich[0].text or "").strip()
-                        else:
-                            value = (content.text or "").strip()
-                    except Exception:
-                        value = ""
-                    if label and label not in data:
-                        data[label] = value
+            payload = driver.execute_script(
+                """
+                const root = arguments[0];
+                const out = {};
+                const clean = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+                const put = (k, v) => {
+                  const key = clean(k).replace(/:$/, '');
+                  if (!key || Object.prototype.hasOwnProperty.call(out, key)) return;
+                  out[key] = clean(v);
+                };
+
+                const scopedRows = root.querySelectorAll('#pkx02301\\:ch\\:table .rowStyle');
+                scopedRows.forEach((row) => {
+                  const headers = row.querySelectorAll('div.ui-widget-header');
+                  headers.forEach((header) => {
+                    let sibling = header.nextElementSibling;
+                    while (sibling && !sibling.classList.contains('ui-widget-content')) {
+                      sibling = sibling.nextElementSibling;
+                    }
+                    const valueNode = sibling ? (sibling.querySelector('.fr-box.fr-view, .fr-view') || sibling) : null;
+                    put(header.textContent, valueNode ? valueNode.textContent : '');
+                  });
+                });
+
+                root.querySelectorAll('dt').forEach((dt) => {
+                  let sib = dt.nextElementSibling;
+                  while (sib && sib.tagName !== 'DD') sib = sib.nextElementSibling;
+                  put(dt.textContent, sib ? sib.textContent : '');
+                });
+
+                root.querySelectorAll('tr').forEach((tr) => {
+                  const th = tr.querySelector('th');
+                  const td = tr.querySelector('td');
+                  if (th && td) put(th.textContent, td.textContent);
+                });
+
+                root.querySelectorAll('div.ui-widget-header').forEach((header) => {
+                  let sibling = header.nextElementSibling;
+                  const valueNode = sibling ? (sibling.querySelector('.fr-box.fr-view, .fr-view') || sibling) : null;
+                  put(header.textContent, valueNode ? valueNode.textContent : '');
+                });
+
+                return out;
+                """,
+                popup,
+            )
+            if isinstance(payload, dict) and payload:
+                return {str(k): str(v or '').strip() for k, v in payload.items()}
         except Exception:
             pass
 
-        # Pattern 1: section header + following content block
-        for header in popup.find_elements(By.CSS_SELECTOR, "div.ui-widget-header"):
-            label = (header.text or "").strip()
-            if not label:
-                continue
-            value = ""
-            try:
-                sibling = header.find_element(By.XPATH, "following-sibling::div[1]")
-                rich = sibling.find_elements(By.CSS_SELECTOR, ".fr-view")
-                if rich:
-                    value = (rich[0].text or "").strip()
-                else:
-                    value = (sibling.text or "").strip()
-            except Exception:
-                value = ""
-            data[label] = value
-
-        # Pattern 2: dt/dd pairs
+        # Slow fallback for unexpected DOM/script restrictions.
+        data: dict[str, str] = {}
         try:
-            dts = popup.find_elements(By.CSS_SELECTOR, "dt")
-            for dt in dts:
-                label = (dt.text or "").strip().rstrip(":")
+            for header in popup.find_elements(By.CSS_SELECTOR, "div.ui-widget-header"):
+                label = (header.text or "").strip().rstrip(":")
                 if not label:
                     continue
                 value = ""
                 try:
-                    dd = dt.find_element(By.XPATH, "following-sibling::dd[1]")
-                    value = (dd.text or "").strip()
+                    sibling = header.find_element(By.XPATH, "following-sibling::div[1]")
+                    rich = sibling.find_elements(By.CSS_SELECTOR, ".fr-view")
+                    value = (rich[0].text if rich else sibling.text or "").strip()
                 except Exception:
                     value = ""
-                if label and value and label not in data:
+                if label not in data:
                     data[label] = value
         except Exception:
             pass
-
-        # Pattern 3: table rows with header/data cells
-        try:
-            rows = popup.find_elements(By.CSS_SELECTOR, "tr")
-            for tr in rows:
-                ths = tr.find_elements(By.CSS_SELECTOR, "th")
-                tds = tr.find_elements(By.CSS_SELECTOR, "td")
-                if not ths or not tds:
-                    continue
-                label = (ths[0].text or "").strip().rstrip(":")
-                value = (tds[0].text or "").strip()
-                if label and value and label not in data:
-                    data[label] = value
-        except Exception:
-            pass
-
         return data
 
     def _close_popup(popup, close_delay: float) -> None:
