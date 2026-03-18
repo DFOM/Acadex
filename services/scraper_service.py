@@ -1410,13 +1410,38 @@ def _worker(
 
         # ── Completion ──
         with flask_app.app_context():
-            from models import db, ScrapedDataset, CatalogStatus, Notification, Setting
+            from models import db, ScrapedDataset, CatalogStatus, Notification, Setting, DatasetRegistry
 
             ds = db.session.get(ScrapedDataset, dataset_id)
             if ds:
                 ds.status = "completed"
                 ds.current_index = total
                 db.session.commit()
+
+                try:
+                    reg = DatasetRegistry.query.filter_by(name=str(ds.name or '').strip(), source='scraped').order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
+                    table_name = f"scraped_dataset_{ds.id}"
+                    if not reg:
+                        reg = DatasetRegistry(name=ds.name, source='scraped', table_name=table_name)
+                        db.session.add(reg)
+                    else:
+                        reg.table_name = table_name
+
+                    active_exists = DatasetRegistry.query.filter(DatasetRegistry.is_active.is_(True)).first()
+                    if not active_exists:
+                        DatasetRegistry.query.update({'is_active': False})
+                        reg.is_active = True
+
+                    setting = Setting.query.get('active_dataset_name')
+                    if not setting:
+                        setting = Setting(key='active_dataset_name', value=str(ds.name or '').strip())
+                        db.session.add(setting)
+                    elif not str(setting.value or '').strip():
+                        setting.value = str(ds.name or '').strip()
+
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
 
             # Update / create CatalogStatus
             year_val = ds.year if ds else ""
@@ -1460,11 +1485,18 @@ def _worker(
         _set_last_backend_error("scraper.worker.fatal", exc)
         try:
             with flask_app.app_context():
-                from models import db, ScrapedDataset
+                from models import db, ScrapedDataset, DatasetRegistry
                 ds = db.session.get(ScrapedDataset, dataset_id)
                 if ds:
                     ds.status = "failed"
                     db.session.commit()
+                    try:
+                        stale = DatasetRegistry.query.filter_by(name=str(ds.name or '').strip(), source='scraped').all()
+                        for row in stale:
+                            db.session.delete(row)
+                        db.session.commit()
+                    except Exception:
+                        db.session.rollback()
         except Exception:
             pass
 
@@ -1533,7 +1565,7 @@ def run_controlled_scraper(
     try:
         with flask_app.app_context():
             from models import db, ScrapedDataset
-            slug_sem = semester.replace(" ", "_")
+            slug_sem = re.sub(r'[^A-Za-z0-9]+', '_', str(semester or '').strip()).strip('_') or str(semester or '').strip()
             ds = ScrapedDataset(
                 name=f"Scraped_{year}_{slug_sem}",
                 year=year,

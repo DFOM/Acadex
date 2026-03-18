@@ -7,7 +7,7 @@
     <h1 class="fw-bold mb-2" style="font-size:1.75rem;letter-spacing:-.02em;">What are we building today?</h1>
     <p style="color:var(--ax-muted);font-size:.95rem;margin:0;">Choose whether you are logging past progress or planning for the future.</p>
     {% if not has_dataset_years %}
-    <div class="alert alert-warning mt-4 mb-0">No course datasets are available. Upload datasets first to create schedules.</div>
+    <div class="alert alert-warning mt-4 mb-0">Currently there are no courses for this selection.</div>
     {% endif %}
 </div>
 
@@ -30,7 +30,7 @@
                 {{ hi('plus-circle', 'ax-icon ax-icon-lg') }}
             </div>
             <h3 class="fw-bold mb-2" style="font-size:1.15rem;">Future Plan</h3>
-            <p style="color:var(--ax-muted);font-size:.88rem;margin:0;">No dataset years are currently available for future planning.</p>
+            <p style="color:var(--ax-muted);font-size:.88rem;margin:0;">Currently there are no courses for this selection.</p>
         </div>
         {% endif %}
     </div>
@@ -53,7 +53,7 @@
                 {{ hi('calendar-check', 'ax-icon ax-icon-lg') }}
             </div>
             <h3 class="fw-bold mb-2" style="font-size:1.15rem;">Past Records</h3>
-            <p style="color:var(--ax-muted);font-size:.88rem;margin:0;">No dataset years are currently available for past record imports.</p>
+            <p style="color:var(--ax-muted);font-size:.88rem;margin:0;">Currently there are no courses for this selection.</p>
         </div>
         {% endif %}
     </div>

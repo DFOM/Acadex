@@ -171,6 +171,9 @@
 
         <!-- Footer actions -->
         <div class="ax-sidebar-footer mt-auto">
+            <div class="ax-sidebar-title" style="padding:.35rem .25rem .1rem .25rem;color:var(--ax-muted);font-size:.72rem;">
+                System Version: {{ config.get('APP_VERSION', 'unknown') }}
+            </div>
             <button id="themeToggle" class="ax-sidebar-btn" type="button" aria-pressed="false">
                 <svg class="ax-icon ax-icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
                 <svg class="ax-icon ax-icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.5 6.5 0 0 0 9.8 9.8Z"/></svg>
@@ -206,6 +209,7 @@
         </div>
 
         <footer class="text-center pt-2 pb-3" style="opacity:.45; font-size:.78rem;">
+            <div style="color:var(--ax-muted);margin-bottom:.2rem;">Version {{ config.get('APP_VERSION', 'unknown') }}</div>
             <a href="mailto:abdulrahman.m.h30@gmail.com" class="ax-footer-credit">Made by Hasan</a>
         </footer>
     </main>

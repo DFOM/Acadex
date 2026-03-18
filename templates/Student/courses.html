@@ -1,0 +1,144 @@
+{% extends "Layouts/student_base.html" %}
+{% from 'partials/heroicons.html' import hi %}
+{% block title %}Courses{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-3">
+    <div>
+        <h1 class="fw-bold mb-1" style="font-size:1.5rem;letter-spacing:-.02em;">Courses</h1>
+        <p style="color:var(--ax-muted);font-size:.88rem;margin:0;">Browsing active dataset: <strong>{{ active_dataset_name or 'Auto (latest)' }}</strong></p>
+    </div>
+</div>
+
+<form method="get" class="ax-card p-3 mb-4">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-3">
+            <label class="form-label small">Year</label>
+            <select name="year" class="form-select form-select-sm">
+                <option value="">All years</option>
+                {% for y in year_options %}
+                <option value="{{ y }}" {{ 'selected' if selected_year == y else '' }}>{{ y }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small">Semester</label>
+            <select name="semester" class="form-select form-select-sm">
+                <option value="">All semesters</option>
+                {% for s in semester_options %}
+                <option value="{{ s }}" {{ 'selected' if selected_semester == s else '' }}>{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small">Subject Area</label>
+            <select name="subject_area" class="form-select form-select-sm">
+                <option value="">All areas</option>
+                {% for s in subject_options %}
+                <option value="{{ s }}" {{ 'selected' if selected_subject == s else '' }}>{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2 d-grid">
+            <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+        </div>
+    </div>
+</form>
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="ax-card p-0 overflow-hidden">
+            <div class="p-3 border-bottom" style="border-color:var(--ax-border)!important;">
+                <h5 class="fw-bold mb-0" style="font-size:.95rem;">Course List</h5>
+            </div>
+            <div class="table-responsive" style="max-height:560px;">
+                <table class="table table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Course Title</th>
+                            <th>Credits</th>
+                            <th>Instructor</th>
+                            <th>Day &amp; Period</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for c in courses %}
+                        <tr>
+                            <td>
+                                <div class="fw-semibold">{{ c.display_title or c.Course_Title }}</div>
+                                <div class="small text-muted">{{ c.display_course_number or c.Course_Number }}</div>
+                            </td>
+                            <td>{{ c.Credits }}</td>
+                            <td>{{ c.Instructor or 'TBA' }}</td>
+                            <td>{{ c.Day_and_Period or 'TBA' }}</td>
+                            <td class="text-end">
+                                <a class="btn btn-sm btn-outline-primary"
+                                   href="{{ url_for('student.courses_view', year=selected_year, semester=selected_semester, subject_area=selected_subject, course_number=c.Course_Number, day_and_period=c.Day_and_Period) }}">
+                                    View
+                                </a>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted py-4">Currently there are no courses for this selection.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="ax-card p-3">
+            <h5 class="fw-bold mb-3" style="font-size:.95rem;">Course Detail</h5>
+            {% if selected_detail %}
+            <div class="mb-2">
+                <div class="fw-semibold">{{ selected_detail.display_title or selected_detail.Course_Title }}</div>
+                <div class="small text-muted">{{ selected_detail.display_course_number or selected_detail.Course_Number }}</div>
+            </div>
+            <div class="small mb-3" style="color:var(--ax-text-dim);">
+                <div><strong>Credits:</strong> {{ selected_detail.Credits }}</div>
+                <div><strong>Instructor(s):</strong> {{ selected_detail.Instructor or 'TBA' }}</div>
+                <div><strong>Day &amp; Period:</strong> {{ selected_detail.Day_and_Period or 'TBA' }}</div>
+                <div><strong>Subject Area:</strong> {{ selected_detail.Area_of_Study or 'General' }}</div>
+            </div>
+
+            <div class="mb-3">
+                <div class="fw-semibold mb-1">Prerequisites</div>
+                {% if selected_prereq_status %}
+                <div class="small text-muted mb-1">{{ selected_prereq_status.summary }}</div>
+                <div class="d-flex flex-wrap gap-1">
+                    {% for item in selected_prereq_status.items %}
+                    <span class="badge rounded-pill {{ 'bg-success-subtle text-success border border-success-subtle' if item.status == 'satisfied' else 'bg-danger-subtle text-danger border border-danger-subtle' if item.status == 'missing' else 'bg-secondary-subtle text-secondary border border-secondary-subtle' }}" title="{{ item.reason }}">{{ item.term }}</span>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="small text-muted">No prerequisites.</div>
+                {% endif %}
+            </div>
+
+            <div>
+                <div class="fw-semibold mb-1">What This Course Unlocks</div>
+                <div class="small text-muted mb-2">This course is required for:</div>
+                {% if selected_unlocks %}
+                <ul class="list-group list-group-flush">
+                    {% for row in selected_unlocks %}
+                    <li class="list-group-item px-0" style="background:transparent;">
+                        <div class="fw-semibold">{{ row.display_title or row.course_title }}</div>
+                        <div class="small text-muted">{{ row.display_course_number or row.course_number }} · {{ row.day_and_period or 'TBA' }}</div>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <div class="small text-muted">No reverse dependencies found in this active dataset.</div>
+                {% endif %}
+            </div>
+            {% else %}
+            <div class="small text-muted">Select a course from the list to view full details, prerequisites, and unlock dependencies.</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

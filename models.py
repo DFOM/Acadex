@@ -259,6 +259,17 @@ class CatalogStatus(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
+class DatasetRegistry(db.Model):
+    __tablename__ = 'dataset_registry'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False, index=True)
+    source = db.Column(db.String(20), nullable=False, index=True)  # csv | scraped
+    table_name = db.Column(db.String(150), nullable=False, unique=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    is_active = db.Column(db.Boolean, default=False, nullable=False, index=True)
+
+
 class AIEvent(db.Model):
     __tablename__ = 'ai_events'
 

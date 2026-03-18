@@ -19,7 +19,7 @@ from Routes.main_routes import main_bp
 from Routes.student_routes import student_bp
 from Routes.schedule_routes import schedule_bp
 
-VERSION = 'Beta 0.6'
+VERSION = 'Beta 0.7'
 APP_STARTED_AT = datetime.utcnow().replace(tzinfo=None).isoformat() + 'Z'
 
 app = Flask(__name__)

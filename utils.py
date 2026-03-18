@@ -1,5 +1,5 @@
 # utils.py
-from models import db, Setting, ScrapedDataset, Course, CatalogStatus
+from models import db, Setting, ScrapedDataset, Course, CatalogStatus, DatasetRegistry
 import re
 import json
 
@@ -193,6 +193,14 @@ def get_available_dataset_years() -> list[int]:
         for row in status_rows:
             _add_year(getattr(row, 'term', None))
             _add_year(getattr(row, 'dataset', None))
+    except Exception:
+        pass
+
+    try:
+        reg_rows = DatasetRegistry.query.all()
+        for row in reg_rows:
+            _add_year(getattr(row, 'name', None))
+            _add_year(getattr(row, 'table_name', None))
     except Exception:
         pass
 

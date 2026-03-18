@@ -2,7 +2,7 @@
 {% block title %}Manage Datasets{% endblock %}
 
 {% block content %}
-<h2 class="mb-4">Dataset Management (Scraper First)</h2>
+<h2 class="mb-4">Dataset Management</h2>
 
 <div class="row g-3 mb-4">
     <div class="col-md-3">
@@ -82,7 +82,74 @@
             {% else %}
                 —
             {% endif %}
-            <span class="ms-3"><strong>Active dataset:</strong> {{ active_dataset_name or 'Auto (latest by term)' }}</span>
+            <span class="ms-3"><strong>Active dataset:</strong> <span id="activeDatasetLabel">{{ active_dataset_name or 'Auto (latest)' }}</span></span>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center" style="background: var(--ax-surface);">
+        <h5 class="mb-0">Unified Dataset Registry</h5>
+        <button id="refreshRegistryBtn" class="btn btn-outline-secondary btn-sm" type="button">Refresh</button>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-striped align-middle" id="datasetRegistryTable">
+                <thead>
+                    <tr>
+                        <th>Dataset Name</th>
+                        <th>Source</th>
+                        <th>Table Name</th>
+                        <th>Created At</th>
+                        <th>Status</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="datasetRegistryBody">
+                    {% for row in registry_rows %}
+                    <tr data-id="{{ row.id }}">
+                        <td class="fw-semibold">{{ row.name }}</td>
+                        <td>{{ (row.source or '').upper() }}</td>
+                        <td><code>{{ row.table_name }}</code></td>
+                        <td>{{ row.created_at.strftime('%Y-%m-%d %H:%M') if row.created_at else '—' }}</td>
+                        <td>
+                            <span class="badge {{ 'bg-success' if row.is_active else 'bg-secondary' }}">{{ 'Active' if row.is_active else 'Inactive' }}</span>
+                        </td>
+                        <td class="text-end">
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-outline-primary ds-activate">Set Active</button>
+                                <button type="button" class="btn btn-outline-info ds-refresh">Refresh/Reprocess</button>
+                                <button type="button" class="btn btn-outline-danger ds-delete">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="6" class="text-center text-muted">No datasets registered yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center" style="background: var(--ax-surface);">
+        <h5 class="mb-0">Orphan/Broken Tables</h5>
+        <button id="cleanOrphanBtn" class="btn btn-outline-danger btn-sm" type="button">Clean Orphan Tables</button>
+    </div>
+    <div class="card-body">
+        <div id="orphanStatus" class="small text-muted mb-2">Scans DB tables and compares against DatasetRegistry table names.</div>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead><tr><th>Table Name</th></tr></thead>
+                <tbody id="orphanTableBody">
+                    {% for t in orphan_tables %}
+                    <tr><td><code>{{ t }}</code></td></tr>
+                    {% else %}
+                    <tr><td class="text-muted">No orphan tables detected.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 </div>
@@ -130,4 +197,126 @@
         </table>
     </div>
 </div>
+
+<script>
+(function() {
+    const body = document.getElementById('datasetRegistryBody');
+    const activeLabel = document.getElementById('activeDatasetLabel');
+    const orphanBody = document.getElementById('orphanTableBody');
+    const orphanStatus = document.getElementById('orphanStatus');
+
+    function esc(v) {
+        return String(v || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function createdAtText(value) {
+        if (!value) return '—';
+        try { return new Date(value).toLocaleString(); } catch (_) { return String(value); }
+    }
+
+    async function loadRegistry() {
+        const res = await fetch('/admin/api/datasets', { headers: { 'Accept': 'application/json' } });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || 'Failed to load datasets.');
+
+        if (activeLabel) activeLabel.textContent = data.active_dataset_name || 'Auto (latest)';
+
+        const rows = Array.isArray(data.datasets) ? data.datasets : [];
+        if (!rows.length) {
+            body.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No datasets registered yet.</td></tr>';
+            return;
+        }
+
+        body.innerHTML = rows.map((row) => `
+            <tr data-id="${row.id}">
+                <td class="fw-semibold">${esc(row.name)}</td>
+                <td>${esc(String(row.source || '').toUpperCase())}</td>
+                <td><code>${esc(row.table_name)}</code></td>
+                <td>${esc(createdAtText(row.created_at))}</td>
+                <td><span class="badge ${row.is_active ? 'bg-success' : 'bg-secondary'}">${row.is_active ? 'Active' : 'Inactive'}</span></td>
+                <td class="text-end">
+                    <div class="btn-group btn-group-sm">
+                        <button type="button" class="btn btn-outline-primary ds-activate">Set Active</button>
+                        <button type="button" class="btn btn-outline-info ds-refresh">Refresh/Reprocess</button>
+                        <button type="button" class="btn btn-outline-danger ds-delete">Delete</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+    }
+
+    async function loadOrphans() {
+        const res = await fetch('/admin/api/datasets/orphans', { headers: { 'Accept': 'application/json' } });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || 'Failed to load orphan tables.');
+        const rows = Array.isArray(data.orphans) ? data.orphans : [];
+        orphanBody.innerHTML = rows.length
+            ? rows.map((name) => `<tr><td><code>${esc(name)}</code></td></tr>`).join('')
+            : '<tr><td class="text-muted">No orphan tables detected.</td></tr>';
+    }
+
+    async function postAction(url) {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: '{}',
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || 'Action failed.');
+        return data;
+    }
+
+    document.getElementById('refreshRegistryBtn')?.addEventListener('click', async () => {
+        try {
+            await loadRegistry();
+            await loadOrphans();
+        } catch (err) {
+            alert(String(err));
+        }
+    });
+
+    document.getElementById('cleanOrphanBtn')?.addEventListener('click', async () => {
+        if (!confirm('Delete all orphan tables? This cannot be undone.')) return;
+        try {
+            const result = await postAction('/admin/api/datasets/orphans/clean');
+            if (orphanStatus) orphanStatus.textContent = result.message || 'Orphan cleanup completed.';
+            await loadOrphans();
+        } catch (err) {
+            alert(String(err));
+        }
+    });
+
+    body?.addEventListener('click', async (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) return;
+        const row = target.closest('tr[data-id]');
+        if (!row) return;
+        const id = row.getAttribute('data-id');
+        if (!id) return;
+
+        try {
+            if (target.classList.contains('ds-activate')) {
+                await postAction(`/admin/api/datasets/${id}/activate`);
+            } else if (target.classList.contains('ds-refresh')) {
+                await postAction(`/admin/api/datasets/${id}/refresh`);
+            } else if (target.classList.contains('ds-delete')) {
+                if (!confirm('Delete this dataset and its associated data?')) return;
+                await postAction(`/admin/api/datasets/${id}/delete`);
+            } else {
+                return;
+            }
+
+            await loadRegistry();
+            await loadOrphans();
+        } catch (err) {
+            alert(String(err));
+        }
+    });
+})();
+</script>
 {% endblock %}

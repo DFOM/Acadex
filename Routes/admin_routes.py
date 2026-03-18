@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from functools import wraps
 from sqlalchemy import inspect, text
 import sqlalchemy as sa
-from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField, ScrapedDataset, ScrapedCourse, Course, Faculty
+from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField, ScrapedDataset, ScrapedCourse, Course, Faculty, DatasetRegistry
 from utils import (
     calculate_gpa,
     ensure_default_landing_sections,
@@ -48,6 +48,12 @@ ENDPOINT_PERMISSION_MAP = {
     'admin.upload_dataset': 'manage_datasets',
     'admin.set_active_dataset': 'manage_datasets',
     'admin.delete_dataset': 'manage_datasets',
+    'admin.api_datasets': 'manage_datasets',
+    'admin.api_activate_dataset': 'manage_datasets',
+    'admin.api_delete_dataset': 'manage_datasets',
+    'admin.api_refresh_dataset': 'manage_datasets',
+    'admin.api_orphan_tables': 'manage_datasets',
+    'admin.api_clean_orphan_tables': 'manage_datasets',
     'admin.manage_users': 'manage_users',
     'admin.update_user_demographics': 'manage_users',
     'admin.delete_user': 'manage_users',
@@ -499,6 +505,12 @@ def _serialize_faculty(row: Faculty) -> dict:
 
 
 def _all_selectable_dataset_names() -> list[str]:
+    if _dataset_registry_supported():
+        _ensure_dataset_registry_synced()
+        names = [r.name for r in DatasetRegistry.query.order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).all() if getattr(r, 'name', None)]
+        if names:
+            return sorted(set(names), reverse=True)
+
     scraped_dataset_names = [
         d.name
         for d in ScrapedDataset.query.filter(ScrapedDataset.status == 'completed').order_by(ScrapedDataset.created_at.desc()).all()
@@ -512,10 +524,177 @@ def _all_selectable_dataset_names() -> list[str]:
     return sorted(set(scraped_dataset_names + csv_dataset_names), reverse=True)
 
 
+def _dataset_registry_supported() -> bool:
+    try:
+        DatasetRegistry.query.limit(1).all()
+        return True
+    except Exception:
+        db.session.rollback()
+        return False
+
+
+def _dataset_table_name_from_name(name: str, source: str) -> str:
+    safe_name = re.sub(r'[^a-z0-9]+', '_', str(name or '').strip().lower()).strip('_')
+    if not safe_name:
+        safe_name = 'dataset'
+    if source == 'scraped' and safe_name.startswith('scraped_'):
+        return safe_name
+    return f'{source}_{safe_name}'
+
+
+def _set_active_registry_dataset(dataset_name: str | None) -> None:
+    if not _dataset_registry_supported():
+        update_app_setting('active_dataset_name', str(dataset_name or '').strip())
+        return
+
+    name = str(dataset_name or '').strip()
+    DatasetRegistry.query.update({'is_active': False})
+    if name:
+        row = DatasetRegistry.query.filter(sa.func.lower(DatasetRegistry.name) == name.lower()).order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
+        if row:
+            row.is_active = True
+            name = row.name
+        else:
+            name = ''
+    update_app_setting('active_dataset_name', name)
+    db.session.commit()
+
+
+def _active_registry_row() -> DatasetRegistry | None:
+    if not _dataset_registry_supported():
+        return None
+    row = DatasetRegistry.query.filter(DatasetRegistry.is_active.is_(True)).order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
+    if row:
+        return row
+    return DatasetRegistry.query.order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
+
+
+def _resolve_effective_active_dataset_name() -> str:
+    setting_name = str(get_app_setting('active_dataset_name', '') or '').strip()
+    if setting_name:
+        return setting_name
+    active_row = _active_registry_row()
+    return str(active_row.name).strip() if active_row and active_row.name else ''
+
+
+def _upsert_dataset_registry_entry(name: str, source: str, table_name: str | None = None, *, make_active: bool = False) -> DatasetRegistry | None:
+    if not _dataset_registry_supported():
+        return None
+
+    ds_name = str(name or '').strip()
+    ds_source = str(source or '').strip().lower()
+    if ds_source not in {'csv', 'scraped'} or not ds_name:
+        return None
+
+    table_value = str(table_name or '').strip() or _dataset_table_name_from_name(ds_name, ds_source)
+
+    row = DatasetRegistry.query.filter(sa.func.lower(DatasetRegistry.name) == ds_name.lower(), sa.func.lower(DatasetRegistry.source) == ds_source).order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
+    if not row:
+        row = DatasetRegistry(name=ds_name, source=ds_source, table_name=table_value)
+        db.session.add(row)
+    else:
+        row.table_name = table_value
+
+    if make_active:
+        DatasetRegistry.query.update({'is_active': False})
+        row.is_active = True
+        update_app_setting('active_dataset_name', ds_name)
+    return row
+
+
+def _ensure_dataset_registry_synced() -> None:
+    if not _dataset_registry_supported():
+        return
+
+    scraped_rows = ScrapedDataset.query.filter(ScrapedDataset.status == 'completed').all()
+    for ds in scraped_rows:
+        ds_name = str(getattr(ds, 'name', '') or '').strip()
+        if not ds_name:
+            continue
+        table_name = f'scraped_dataset_{getattr(ds, "id", "")}' if getattr(ds, 'id', None) else _dataset_table_name_from_name(ds_name, 'scraped')
+        _upsert_dataset_registry_entry(ds_name, 'scraped', table_name)
+
+    csv_dataset_names = [
+        r[0]
+        for r in db.session.query(Course.dataset_name)
+        .filter(Course.dataset_name.isnot(None), sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv')
+        .distinct()
+        .all()
+        if r and r[0]
+    ]
+    for ds_name in csv_dataset_names:
+        _upsert_dataset_registry_entry(ds_name, 'csv', _dataset_table_name_from_name(ds_name, 'csv'))
+
+    active_setting = str(get_app_setting('active_dataset_name', '') or '').strip()
+    active_row = DatasetRegistry.query.filter(DatasetRegistry.is_active.is_(True)).first()
+    if not active_row and active_setting:
+        match = DatasetRegistry.query.filter(sa.func.lower(DatasetRegistry.name) == active_setting.lower()).order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
+        if match:
+            match.is_active = True
+
+    db.session.commit()
+
+
+def _registry_rows() -> list[DatasetRegistry]:
+    if not _dataset_registry_supported():
+        return []
+    _ensure_dataset_registry_synced()
+    return DatasetRegistry.query.order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).all()
+
+
+def _protected_tables() -> set[str]:
+    return {
+        'users', 'roles', 'permissions', 'role_permissions', 'registration_fields', 'login_attempts',
+        'schedules', 'schedule_courses', 'subject_areas', 'courses', 'faculty', 'course_faculty',
+        'faculty_advisor_area', 'settings', 'announcements', 'landing_page_sections', 'catalog_statuses',
+        'ai_events', 'behavior_events', 'notifications', 'scraped_datasets', 'scraped_courses',
+        'dataset_registry', 'alembic_version',
+    }
+
+
+def _safe_drop_table_if_exists(table_name: str) -> bool:
+    name = str(table_name or '').strip()
+    if not name or name.lower() in _protected_tables() or not re.match(r'^[A-Za-z0-9_]+$', name):
+        return False
+    try:
+        db.session.execute(text(f'DROP TABLE IF EXISTS "{name}"'))
+        db.session.commit()
+        return True
+    except Exception:
+        db.session.rollback()
+        return False
+
+
+def _orphan_tables() -> list[str]:
+    try:
+        insp = inspect(db.engine)
+        all_tables = set(insp.get_table_names())
+    except Exception:
+        return []
+
+    registered = set()
+    if _dataset_registry_supported():
+        for row in DatasetRegistry.query.all():
+            tname = str(getattr(row, 'table_name', '') or '').strip()
+            if tname:
+                registered.add(tname)
+
+    candidates = []
+    for name in sorted(all_tables):
+        lower = name.lower()
+        if lower in _protected_tables():
+            continue
+        if name in registered:
+            continue
+        if lower.startswith('scraped_') or lower.startswith('csv_') or lower.startswith('dataset_'):
+            candidates.append(name)
+    return candidates
+
+
 def _build_integrity_payload() -> dict:
     checks: list[dict] = []
 
-    active_dataset_name = str(get_app_setting('active_dataset_name', '') or '').strip()
+    active_dataset_name = _resolve_effective_active_dataset_name()
     selectable_dataset_names = _all_selectable_dataset_names()
     local_course_count = int(Course.query.count() or 0)
     scraped_course_count = int(
@@ -1064,6 +1243,8 @@ def delete_announcement(announcement_id):
 def manage_datasets():
     from services.scraper_service import scraper_progress as _progress, is_scraper_running
 
+    _ensure_dataset_registry_synced()
+
     recent_datasets = (
         ScrapedDataset.query.order_by(ScrapedDataset.created_at.desc()).limit(25).all()
     )
@@ -1072,11 +1253,13 @@ def manage_datasets():
     failed_count = ScrapedDataset.query.filter_by(status='failed').count()
     csv_count = Course.query.filter(sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv').count()
     latest_csv_upload = Course.query.filter(sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv').order_by(Course.last_updated.desc(), Course.id.desc()).first()
-    active_dataset_name = str(get_app_setting('active_dataset_name', '') or '').strip() or None
+    active_dataset_name = _resolve_effective_active_dataset_name() or None
+    registry_rows = _registry_rows()
 
     return render_template(
         'Admin/manage_datasets.html',
         recent_datasets=recent_datasets,
+        registry_rows=registry_rows,
         active_dataset=active_dataset,
         completed_count=completed_count,
         failed_count=failed_count,
@@ -1085,6 +1268,7 @@ def manage_datasets():
         active_dataset_name=active_dataset_name,
         scraper_progress=dict(_progress),
         scraper_running=is_scraper_running(),
+        orphan_tables=_orphan_tables(),
     )
 
 @admin_bp.route('/datasets/upload', methods=['POST'])
@@ -1221,6 +1405,24 @@ def upload_dataset():
                 inserted += 1
 
         db.session.commit()
+
+        _upsert_dataset_registry_entry(dataset_name, 'csv', _dataset_table_name_from_name(dataset_name, 'csv'))
+        if not _active_registry_row():
+            _set_active_registry_dataset(dataset_name)
+        else:
+            db.session.commit()
+
+        if semester and year:
+            term_key = f"{semester} {year}".strip()
+            row = CatalogStatus.query.filter_by(term=term_key).first()
+            if not row:
+                row = CatalogStatus(term=term_key, status='available', dataset=dataset_name)
+                db.session.add(row)
+            else:
+                row.status = 'available'
+                row.dataset = dataset_name
+            db.session.commit()
+
         flash(
             f'CSV uploaded. Inserted: {inserted}, Updated: {updated}, '
             f'Skipped manual: {skipped_manual}, Skipped invalid: {skipped_invalid}.',
@@ -1241,11 +1443,11 @@ def set_active_dataset():
     payload = payload or {}
     dataset_name = str(payload.get('dataset_name') or request.form.get('dataset_name') or '').strip()
     if dataset_name:
-        update_app_setting('active_dataset_name', dataset_name)
+        _set_active_registry_dataset(dataset_name)
         message = f'Active dataset set to {dataset_name}.'
     else:
-        update_app_setting('active_dataset_name', '')
-        message = 'Active dataset cleared. System will auto-resolve latest term data.'
+        _set_active_registry_dataset(None)
+        message = 'Active dataset cleared. System will auto-resolve latest dataset.'
 
     if request.is_json:
         return jsonify({'success': True, 'message': message, 'active_dataset_name': dataset_name or None})
@@ -1257,8 +1459,138 @@ def set_active_dataset():
 @login_required
 @admin_required
 def delete_dataset(table_name):
-    flash('Legacy table deletion is disabled. Manage scraper datasets from University Connection.', 'warning')
+    dropped = _safe_drop_table_if_exists(table_name)
+    flash('Dataset table deleted.' if dropped else 'Delete skipped (table missing/protected).', 'success' if dropped else 'warning')
     return redirect(url_for('admin.manage_datasets'))
+
+
+def _delete_registry_dataset_row(row: DatasetRegistry) -> dict:
+    dataset_name = str(getattr(row, 'name', '') or '').strip()
+    source = str(getattr(row, 'source', '') or '').strip().lower()
+    table_name = str(getattr(row, 'table_name', '') or '').strip()
+
+    dropped_table = _safe_drop_table_if_exists(table_name)
+    deleted_rows = 0
+
+    if source == 'csv' and dataset_name:
+        q = Course.query.filter(
+            sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv',
+            sa.func.lower(sa.func.coalesce(Course.dataset_name, '')) == dataset_name.lower(),
+        )
+        deleted_rows = int(q.count() or 0)
+        q.delete(synchronize_session=False)
+
+    if source == 'scraped' and dataset_name:
+        ds_rows = ScrapedDataset.query.filter(sa.func.lower(ScrapedDataset.name) == dataset_name.lower()).all()
+        deleted_rows = int(len(ds_rows))
+        for ds in ds_rows:
+            db.session.delete(ds)
+
+    was_active = bool(getattr(row, 'is_active', False))
+    db.session.delete(row)
+    db.session.commit()
+
+    if was_active:
+        next_row = _active_registry_row()
+        _set_active_registry_dataset(next_row.name if next_row else None)
+
+    return {
+        'dataset_name': dataset_name,
+        'source': source,
+        'table_name': table_name,
+        'dropped_table': dropped_table,
+        'deleted_rows': deleted_rows,
+    }
+
+
+@admin_bp.route('/api/datasets', methods=['GET'])
+@login_required
+@admin_required
+def api_datasets():
+    _ensure_dataset_registry_synced()
+    rows = _registry_rows()
+    payload = [
+        {
+            'id': r.id,
+            'name': r.name,
+            'source': r.source,
+            'table_name': r.table_name,
+            'created_at': r.created_at.isoformat() if r.created_at else None,
+            'is_active': bool(r.is_active),
+            'status': 'Active' if r.is_active else 'Inactive',
+        }
+        for r in rows
+    ]
+    return jsonify({'success': True, 'datasets': payload, 'active_dataset_name': _resolve_effective_active_dataset_name() or None})
+
+
+@admin_bp.route('/api/datasets/<int:dataset_id>/activate', methods=['POST'])
+@login_required
+@admin_required
+def api_activate_dataset(dataset_id: int):
+    if not _dataset_registry_supported():
+        return jsonify({'success': False, 'message': 'Dataset registry is unavailable (run migrations).'}), 500
+    row = DatasetRegistry.query.get(dataset_id)
+    if not row:
+        return jsonify({'success': False, 'message': 'Dataset not found.'}), 404
+    _set_active_registry_dataset(row.name)
+    return jsonify({'success': True, 'message': f'Active dataset set to {row.name}.', 'active_dataset_name': row.name})
+
+
+@admin_bp.route('/api/datasets/<int:dataset_id>/delete', methods=['POST'])
+@login_required
+@admin_required
+def api_delete_dataset(dataset_id: int):
+    if not _dataset_registry_supported():
+        return jsonify({'success': False, 'message': 'Dataset registry is unavailable (run migrations).'}), 500
+    row = DatasetRegistry.query.get(dataset_id)
+    if not row:
+        return jsonify({'success': False, 'message': 'Dataset not found.'}), 404
+    result = _delete_registry_dataset_row(row)
+    return jsonify({'success': True, 'message': f'Dataset {result.get("dataset_name")} deleted.', 'result': result, 'active_dataset_name': _resolve_effective_active_dataset_name() or None})
+
+
+@admin_bp.route('/api/datasets/<int:dataset_id>/refresh', methods=['POST'])
+@login_required
+@admin_required
+def api_refresh_dataset(dataset_id: int):
+    if not _dataset_registry_supported():
+        return jsonify({'success': False, 'message': 'Dataset registry is unavailable (run migrations).'}), 500
+    row = DatasetRegistry.query.get(dataset_id)
+    if not row:
+        return jsonify({'success': False, 'message': 'Dataset not found.'}), 404
+
+    row.created_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'success': True, 'message': f'Dataset {row.name} metadata refreshed.'})
+
+
+@admin_bp.route('/api/datasets/orphans', methods=['GET'])
+@login_required
+@admin_required
+def api_orphan_tables():
+    return jsonify({'success': True, 'orphans': _orphan_tables()})
+
+
+@admin_bp.route('/api/datasets/orphans/clean', methods=['POST'])
+@login_required
+@admin_required
+def api_clean_orphan_tables():
+    deleted: list[str] = []
+    skipped: list[str] = []
+    for table_name in _orphan_tables():
+        if _safe_drop_table_if_exists(table_name):
+            deleted.append(table_name)
+        else:
+            skipped.append(table_name)
+    return jsonify(
+        {
+            'success': True,
+            'message': f'Orphan cleanup finished. Deleted {len(deleted)} table(s).',
+            'deleted': deleted,
+            'skipped': skipped,
+        }
+    )
 
 @admin_bp.route('/update_app_settings', methods=['POST'])
 @login_required
@@ -2106,16 +2438,15 @@ def university_connection():
     row_transition_delay = _safe_float(get_app_setting('scraper_row_transition_delay', '0.0'), 0.0)
     popup_open_timeout = _safe_float(get_app_setting('scraper_popup_open_timeout', '10'), 10.0)
     popup_close_delay = _safe_float(get_app_setting('scraper_popup_close_delay', '0.35'), 0.35)
-    active_dataset_name = str(get_app_setting('active_dataset_name', '') or '').strip()
+    _ensure_dataset_registry_synced()
+    active_dataset_name = _resolve_effective_active_dataset_name()
 
     # Past datasets for history panel
     past_datasets = ScrapedDataset.query.order_by(ScrapedDataset.created_at.desc()).limit(10).all()
     latest_scrape_run = ScrapedDataset.query.order_by(ScrapedDataset.created_at.desc()).first()
     latest_csv_upload = Course.query.filter(sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv').order_by(Course.last_updated.desc(), Course.id.desc()).first()
 
-    scraped_dataset_names = [d.name for d in past_datasets if d.name]
-    csv_dataset_names = [r[0] for r in db.session.query(Course.dataset_name).filter(Course.dataset_name.isnot(None)).distinct().all() if r and r[0]]
-    selectable_dataset_names = sorted(set(scraped_dataset_names + csv_dataset_names), reverse=True)
+    selectable_dataset_names = _all_selectable_dataset_names()
 
     chrome_connected = _is_chrome_running(debugger_address)
     return render_template(
@@ -2556,7 +2887,7 @@ def health_fix_api():
             if not names:
                 return jsonify({'success': False, 'message': 'No datasets available to set active.'}), 400
             chosen = names[0]
-            update_app_setting('active_dataset_name', chosen)
+            _set_active_registry_dataset(chosen)
             return jsonify({'success': True, 'message': f'Active dataset set to {chosen}.', 'action': action, 'active_dataset_name': chosen})
 
         if action == 'link_faculty_from_instructors':
@@ -2584,7 +2915,7 @@ def health_fix_api():
             return jsonify({'success': True, 'message': f'Removed {removed} orphan faculty records.', 'action': action, 'removed': removed})
 
         if action == 'backfill_catalog_status_dataset':
-            active_name = str(get_app_setting('active_dataset_name', '') or '').strip()
+            active_name = _resolve_effective_active_dataset_name()
             fallback_names = _all_selectable_dataset_names()
             default_name = active_name or (fallback_names[0] if fallback_names else '')
             if not default_name:
