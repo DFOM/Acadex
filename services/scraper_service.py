@@ -36,9 +36,16 @@ log = logging.getLogger(__name__)
 _scraper_lock = threading.Lock()          # prevents concurrent runs
 _scraper_is_running = False
 _scraper_pause_event = threading.Event()
+_scraper_stop_event = threading.Event()
 _active_driver = None                     # reused WebDriver instance
 _active_debugger_address = None
 _active_driver_lock = threading.Lock()
+_runtime_config_lock = threading.Lock()
+_runtime_config: dict = {
+    "popup_open_timeout": 10.0,
+    "popup_close_delay": 0.35,
+    "inter_row_delay": 0.0,
+}
 
 # Shared progress dict – written by worker thread, read by status endpoint
 scraper_progress: dict = {
@@ -88,6 +95,45 @@ def is_scraper_paused() -> bool:
     return _scraper_pause_event.is_set()
 
 
+def get_runtime_config() -> dict:
+    with _runtime_config_lock:
+        return dict(_runtime_config)
+
+
+def update_runtime_config(
+    *,
+    popup_open_timeout: Optional[float] = None,
+    popup_close_delay: Optional[float] = None,
+    inter_row_delay: Optional[float] = None,
+) -> dict:
+    with _runtime_config_lock:
+        if popup_open_timeout is not None:
+            _runtime_config["popup_open_timeout"] = max(2.0, min(float(popup_open_timeout), 40.0))
+        if popup_close_delay is not None:
+            _runtime_config["popup_close_delay"] = max(0.0, min(float(popup_close_delay), 5.0))
+        if inter_row_delay is not None:
+            _runtime_config["inter_row_delay"] = max(0.0, min(float(inter_row_delay), 15.0))
+        return dict(_runtime_config)
+
+
+def request_stop_scraper() -> dict:
+    should_log = False
+    with _progress_lock:
+        if not _scraper_is_running:
+            return {
+                "success": False,
+                "message": "No active scraping job to stop.",
+                "status": scraper_progress.get("status") or "idle",
+            }
+        _scraper_stop_event.set()
+        if scraper_progress.get("status") not in {"stopping", "stopped"}:
+            scraper_progress["status"] = "stopping"
+            should_log = True
+    if should_log:
+        _log_progress("🛑 Stop requested by admin. Finishing current step…")
+    return {"success": True, "message": "Stop requested.", "status": "stopping"}
+
+
 def pause_scraper() -> dict:
     should_log = False
     with _progress_lock:
@@ -127,6 +173,8 @@ def resume_scraper() -> dict:
 def scraper_state_label() -> str:
     with _progress_lock:
         status = str(scraper_progress.get("status") or "idle")
+        if _scraper_is_running and _scraper_stop_event.is_set():
+            return "stopping"
         if _scraper_is_running and _scraper_pause_event.is_set():
             return "paused"
         if _scraper_is_running and status not in {"running", "paused", "failed"}:
@@ -148,6 +196,15 @@ def _set_last_backend_error(stage: str, exc: Exception | str) -> None:
                 "traceback": tb,
             }
         )
+
+
+def _compact_exc_text(exc: Exception | str) -> str:
+    text = str(exc or "").strip()
+    if not text:
+        return "Unknown error"
+    if "Stacktrace:" in text:
+        text = text.split("Stacktrace:", 1)[0].strip()
+    return text or "Unknown error"
 
 
 def _clear_last_backend_error() -> None:
@@ -1050,7 +1107,7 @@ def _worker(
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
     from selenium.common.exceptions import (
-        TimeoutException, StaleElementReferenceException, NoSuchElementException,
+        TimeoutException, StaleElementReferenceException, NoSuchElementException, WebDriverException,
     )
 
     wait = WebDriverWait(driver, 12)
@@ -1122,7 +1179,7 @@ def _worker(
 
         return data
 
-    def _close_popup(popup) -> None:
+    def _close_popup(popup, close_delay: float) -> None:
         closed = False
         try:
             close_btn = popup.find_element(By.CSS_SELECTOR, ".ui-dialog-titlebar-close")
@@ -1150,14 +1207,16 @@ def _worker(
             except Exception:
                 closed = False
 
-        time.sleep(max(0.0, float(popup_close_delay or 0.0)))
+        time.sleep(max(0.0, float(close_delay or 0.0)))
 
         if not closed:
             raise RuntimeError("Popup did not close cleanly before next iteration")
 
-    def _wait_if_paused() -> None:
+    def _wait_if_paused() -> bool:
         announced = False
         while _scraper_pause_event.is_set():
+            if _scraper_stop_event.is_set():
+                return False
             with _progress_lock:
                 scraper_progress["status"] = "paused"
             _update_db_progress(status="paused")
@@ -1165,10 +1224,15 @@ def _worker(
                 _log_progress("⏸️ Paused — waiting for resume.")
                 announced = True
             time.sleep(0.3)
+        if _scraper_stop_event.is_set():
+            return False
         with _progress_lock:
             if _scraper_is_running:
                 scraper_progress["status"] = "running"
         _update_db_progress(status="running")
+        return True
+
+    was_stopped = False
 
     try:
         if syllabus_url:
@@ -1188,7 +1252,16 @@ def _worker(
         _update_db_progress(total_courses=total, status="running")
 
         for i in range(total):
-            _wait_if_paused()
+            if _scraper_stop_event.is_set():
+                was_stopped = True
+                _log_progress("🛑 Stop acknowledged. Ending scrape loop.")
+                break
+
+            if not _wait_if_paused():
+                was_stopped = True
+                _log_progress("🛑 Stop acknowledged while paused. Ending scrape loop.")
+                break
+
             with _progress_lock:
                 if scraper_progress["status"] == "failed":
                     break
@@ -1209,7 +1282,12 @@ def _worker(
                 subject_link = row.find_element(By.XPATH, ".//td[2]/a")
                 _safe_click(driver, subject_link)
 
-                popup = _find_visible_popup(driver, popup_open_timeout=popup_open_timeout)
+                runtime_cfg = get_runtime_config()
+                effective_popup_open_timeout = max(1.0, float(runtime_cfg.get("popup_open_timeout", popup_open_timeout) or popup_open_timeout))
+                effective_popup_close_delay = max(0.0, float(runtime_cfg.get("popup_close_delay", popup_close_delay) or popup_close_delay))
+                effective_inter_row_delay = max(0.0, float(runtime_cfg.get("inter_row_delay", inter_row_delay) or inter_row_delay))
+
+                popup = _find_visible_popup(driver, popup_open_timeout=effective_popup_open_timeout)
 
                 # Always capture Day and Period
                 course_data: dict = dict(row_values)
@@ -1231,14 +1309,14 @@ def _worker(
                 )
                 _log_progress(f"[{i+1}/{total}] {course_title}")
 
-                _close_popup(popup)
+                _close_popup(popup, effective_popup_close_delay)
 
                 try:
                     driver.switch_to.default_content()
                 except Exception:
                     pass
 
-                transition_delay = max(0.0, float(inter_row_delay or 0.0))
+                transition_delay = max(0.0, float(effective_inter_row_delay or 0.0))
                 if transition_delay > 0:
                     time.sleep(transition_delay)
 
@@ -1269,8 +1347,8 @@ def _worker(
                     scraper_progress["current_index"] = i + 1
                     scraper_progress["last_course"] = course_title
 
-            except (TimeoutException, StaleElementReferenceException, NoSuchElementException) as exc:
-                msg = f"[{i+1}/{total}] Skipped — {type(exc).__name__}: {exc}"
+            except (TimeoutException, StaleElementReferenceException, NoSuchElementException, WebDriverException) as exc:
+                msg = f"[{i+1}/{total}] Skipped — {type(exc).__name__}: {_compact_exc_text(exc)}"
                 _log_progress(msg)
                 # Attempt page recovery
                 try:
@@ -1280,6 +1358,21 @@ def _worker(
                     )
                 except Exception:
                     pass
+
+        if was_stopped:
+            with flask_app.app_context():
+                from models import db, ScrapedDataset
+
+                ds = db.session.get(ScrapedDataset, dataset_id)
+                if ds:
+                    ds.status = "stopped"
+                    db.session.commit()
+
+            with _progress_lock:
+                scraper_progress["status"] = "stopped"
+                scraper_progress["error"] = None
+            _log_progress("🛑 Scraping stopped by admin.")
+            return
 
         # ── Completion ──
         with flask_app.app_context():
@@ -1325,10 +1418,12 @@ def _worker(
         _log_progress("✅ Scraping completed successfully.")
 
     except Exception as exc:
-        _log_progress(f"❌ Fatal error: {exc}")
+        fatal_message = f"{type(exc).__name__}: {_compact_exc_text(exc)}"
+        _log_progress(f"❌ Fatal error: {fatal_message}")
         with _progress_lock:
             scraper_progress["status"] = "failed"
-            scraper_progress["error"] = str(exc)
+            scraper_progress["error"] = fatal_message
+        _set_last_backend_error("scraper.worker.fatal", exc)
         try:
             with flask_app.app_context():
                 from models import db, ScrapedDataset
@@ -1344,6 +1439,7 @@ def _worker(
         with _progress_lock:
             _scraper_is_running = False
         _scraper_pause_event.clear()
+        _scraper_stop_event.clear()
         if _scraper_lock.locked():
             _scraper_lock.release()
         release_driver()
@@ -1382,6 +1478,13 @@ def run_controlled_scraper(
             }
         _scraper_is_running = True
         _scraper_pause_event.clear()
+        _scraper_stop_event.clear()
+
+    update_runtime_config(
+        popup_open_timeout=popup_open_timeout,
+        popup_close_delay=popup_close_delay,
+        inter_row_delay=inter_row_delay,
+    )
 
     try:
         driver = get_driver(debugger_address=debugger_address)

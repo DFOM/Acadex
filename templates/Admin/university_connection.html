@@ -76,6 +76,19 @@
                 <div class="form-text">Wait time after closing one popup before opening the next row.</div>
             </div>
 
+            <div class="row g-2 mb-3">
+                <div class="col-6">
+                    <label class="form-label small">Popup Open Timeout</label>
+                    <input id="popupOpenTimeout" type="number" class="form-control form-control-sm"
+                           min="2" max="40" step="0.5" value="{{ popup_open_timeout }}">
+                </div>
+                <div class="col-6">
+                    <label class="form-label small">Popup Close Delay</label>
+                    <input id="popupCloseDelay" type="number" class="form-control form-control-sm"
+                           min="0" max="5" step="0.05" value="{{ popup_close_delay }}">
+                </div>
+            </div>
+
             <div class="d-grid gap-2">
                 <button id="btnStartSession" class="btn btn-primary btn-sm" onclick="startSession()">
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none"
@@ -96,6 +109,9 @@
                 <button id="btnProceed" class="btn btn-success btn-sm"
                         onclick="document.getElementById('probeSection').scrollIntoView({behavior:'smooth'})">
                     Proceed to Probe ↓
+                </button>
+                <button id="btnSaveScraperConfig" class="btn btn-outline-info btn-sm" onclick="saveScraperConfig(false)">
+                    Save Config
                 </button>
             </div>
 
@@ -206,14 +222,19 @@
             </button>
 
             <div class="row g-2 mb-3">
-                <div class="col-6">
+                <div class="col-4">
                     <button id="btnPauseScraping" class="btn btn-outline-warning btn-sm w-100" onclick="pauseScraping()" disabled>
                         Pause
                     </button>
                 </div>
-                <div class="col-6">
+                <div class="col-4">
                     <button id="btnResumeScraping" class="btn btn-outline-primary btn-sm w-100" onclick="resumeScraping()" disabled>
                         Resume
+                    </button>
+                </div>
+                <div class="col-4">
+                    <button id="btnStopScraping" class="btn btn-outline-danger btn-sm w-100" onclick="stopScraping()" disabled>
+                        Stop
                     </button>
                 </div>
             </div>
@@ -366,6 +387,39 @@
     /* ── State ──────────────────────────────────────────────────── */
     let pollingTimer = null;
     let probePollingTimer = null;
+    let configSyncTimer = null;
+
+    function readConfigPayload() {
+        return {
+            year: document.getElementById('scrapeYear').value.trim(),
+            semester: document.getElementById('scrapeSemester').value.trim(),
+            debugger_address: document.getElementById('debuggerAddress').value.trim(),
+            row_transition_delay: parseFloat(document.getElementById('rowTransitionDelay').value || '0') || 0,
+            popup_open_timeout: parseFloat(document.getElementById('popupOpenTimeout').value || '10') || 10,
+            popup_close_delay: parseFloat(document.getElementById('popupCloseDelay').value || '0.35') || 0.35,
+        };
+    }
+
+    window.saveScraperConfig = function (notify = true) {
+        setBtn('btnSaveScraperConfig', true);
+        return postJSON('/admin/api/scraper-config', readConfigPayload())
+            .then((d) => {
+                if (notify) showAlert(d.message || 'Scraper config updated.', 'success');
+                return d;
+            })
+            .catch((e) => {
+                if (notify) showAlert('Config update failed: ' + e, 'danger');
+                throw e;
+            })
+            .finally(() => setBtn('btnSaveScraperConfig', false));
+    };
+
+    function scheduleConfigSync() {
+        if (configSyncTimer) clearTimeout(configSyncTimer);
+        configSyncTimer = setTimeout(() => {
+            saveScraperConfig(false).catch(() => {});
+        }, 500);
+    }
 
     /* ── A) Session Control ─────────────────────────────────────── */
 
@@ -557,10 +611,13 @@
         const selected = [...document.querySelectorAll('.field-cb:checked')].map(cb => cb.value);
         if (!selected.length) { showAlert('Select at least one field.', 'warning'); return; }
 
-        const year     = document.getElementById('scrapeYear').value.trim();
-        const semester = document.getElementById('scrapeSemester').value.trim();
-        const debugger_address = document.getElementById('debuggerAddress').value.trim();
-        const row_transition_delay = parseFloat(document.getElementById('rowTransitionDelay').value || '0') || 0;
+        const cfg = readConfigPayload();
+        const year = cfg.year;
+        const semester = cfg.semester;
+        const debugger_address = cfg.debugger_address;
+        const row_transition_delay = cfg.row_transition_delay;
+
+        saveScraperConfig(false).catch(() => {});
 
         setBtn('btnStartScraping', true);
         postJSON('/admin/start-scraping', { selected_fields: selected, year, semester, debugger_address, row_transition_delay })
@@ -597,6 +654,15 @@
             .catch(e => showAlert('Resume failed: ' + e, 'danger'));
     };
 
+    window.stopScraping = function () {
+        postJSON('/admin/stop-scraping', {})
+            .then(d => {
+                showAlert(d.message || 'Stop request sent.', d.success ? 'warning' : 'danger');
+                pollStatus();
+            })
+            .catch(e => showAlert('Stop failed: ' + e, 'danger'));
+    };
+
     /* ── Polling ────────────────────────────────────────────────── */
 
     function startPolling() {
@@ -616,6 +682,8 @@
                 const map = {
                     running: 'bg-warning text-dark',
                     paused: 'bg-info text-dark',
+                    stopping: 'bg-warning text-dark',
+                    stopped: 'bg-secondary',
                     completed: 'bg-success',
                     failed: 'bg-danger',
                     idle: 'bg-secondary',
@@ -627,9 +695,11 @@
 
                 const pauseBtn = document.getElementById('btnPauseScraping');
                 const resumeBtn = document.getElementById('btnResumeScraping');
+                const stopBtn = document.getElementById('btnStopScraping');
                 const canControl = (st === 'running' || st === 'paused');
                 pauseBtn.disabled = !canControl || st === 'paused';
                 resumeBtn.disabled = !canControl || st === 'running';
+                stopBtn.disabled = !canControl || st === 'stopping';
 
                 /* Progress */
                 const cur = d.db_current ?? d.current_index ?? 0;
@@ -645,14 +715,17 @@
                 if (d.log && d.log.length) renderLog(d.log);
 
                 /* Terminal states */
-                if (st === 'completed' || st === 'failed') {
+                if (st === 'completed' || st === 'failed' || st === 'stopped') {
                     clearInterval(pollingTimer); pollingTimer = null;
                     setBtn('btnStartScraping', false);
                     document.getElementById('btnPauseScraping').disabled = true;
                     document.getElementById('btnResumeScraping').disabled = true;
+                    document.getElementById('btnStopScraping').disabled = true;
                     if (st === 'completed') {
                         showAlert('✅ Scraping completed! Catalog is now available.', 'success');
                         setTimeout(() => location.reload(), 3500);
+                    } else if (st === 'stopped') {
+                        showAlert('🛑 Scraping stopped by admin.', 'warning');
                     } else {
                         showAlert('❌ Scraping failed: ' + (d.error || 'Unknown error.'), 'danger');
                     }
@@ -677,6 +750,14 @@
         document.getElementById('liveLog').innerHTML = '<span class="text-muted">Cleared.</span>';
     };
 
+    ['debuggerAddress', 'scrapeYear', 'scrapeSemester', 'rowTransitionDelay', 'popupOpenTimeout', 'popupCloseDelay']
+        .forEach((id) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('input', scheduleConfigSync);
+            el.addEventListener('change', scheduleConfigSync);
+        });
+
     /* ── Auto-resume if job was running before page load ─────────── */
     if (INITIAL_PROBED_FIELDS.length) {
         renderCheckboxes(INITIAL_PROBED_FIELDS, INITIAL_SELECTED_FIELDS);
@@ -687,7 +768,7 @@
 
     {% if progress.status == 'running' %}
     startPolling();
-    {% elif scraper_state == 'paused' %}
+    {% elif scraper_state == 'paused' or scraper_state == 'stopping' %}
     startPolling();
     {% endif %}
 

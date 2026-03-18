@@ -1594,6 +1594,8 @@ def university_connection():
     semester = get_app_setting('current_semester', '')
     debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
     row_transition_delay = _safe_float(get_app_setting('scraper_row_transition_delay', '0.0'), 0.0)
+    popup_open_timeout = _safe_float(get_app_setting('scraper_popup_open_timeout', '10'), 10.0)
+    popup_close_delay = _safe_float(get_app_setting('scraper_popup_close_delay', '0.35'), 0.35)
 
     # Past datasets for history panel
     past_datasets = ScrapedDataset.query.order_by(ScrapedDataset.created_at.desc()).limit(10).all()
@@ -1613,6 +1615,8 @@ def university_connection():
         scraper_is_paused=is_scraper_paused(),
         scraper_state=scraper_state_label(),
         row_transition_delay=row_transition_delay,
+        popup_open_timeout=popup_open_timeout,
+        popup_close_delay=popup_close_delay,
     )
 
 
@@ -1788,6 +1792,83 @@ def resume_scraping():
         return jsonify({'success': False, 'message': f'Resume failed: {exc}', 'status': 'failed'}), 500
 
 
+@admin_bp.route('/stop-scraping', methods=['POST'])
+@login_required
+@admin_required
+def stop_scraping():
+    from services.scraper_service import request_stop_scraper as _stop
+    try:
+        payload = _stop()
+        return jsonify(payload), (200 if payload.get('success') else 409)
+    except Exception as exc:
+        return jsonify({'success': False, 'message': f'Stop failed: {exc}', 'status': 'failed'}), 500
+
+
+@admin_bp.route('/api/scraper-config', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def scraper_config_api():
+    from services.scraper_service import update_runtime_config as _update_runtime_config, get_runtime_config as _get_runtime_config
+
+    if request.method == 'GET':
+        cfg = {
+            'current_year': get_app_setting('current_year', ''),
+            'current_semester': get_app_setting('current_semester', ''),
+            'scraper_debugger_address': get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222')),
+            'scraper_popup_open_timeout': _safe_float(get_app_setting('scraper_popup_open_timeout', '10'), 10.0),
+            'scraper_popup_close_delay': _safe_float(get_app_setting('scraper_popup_close_delay', '0.35'), 0.35),
+            'scraper_row_transition_delay': _safe_float(get_app_setting('scraper_row_transition_delay', '0.0'), 0.0),
+            'runtime': _get_runtime_config(),
+        }
+        return jsonify({'success': True, 'config': cfg})
+
+    data = request.get_json(silent=True) or {}
+
+    year = str(data.get('year') or '').strip()
+    semester = str(data.get('semester') or '').strip()
+    debugger_address = str(data.get('debugger_address') or '').strip()
+    popup_open_timeout = _safe_float(data.get('popup_open_timeout', get_app_setting('scraper_popup_open_timeout', '10')), 10.0)
+    popup_close_delay = _safe_float(data.get('popup_close_delay', get_app_setting('scraper_popup_close_delay', '0.35')), 0.35)
+    row_transition_delay = _safe_float(data.get('row_transition_delay', get_app_setting('scraper_row_transition_delay', '0.0')), 0.0)
+
+    popup_open_timeout = max(2.0, min(popup_open_timeout, 40.0))
+    popup_close_delay = max(0.0, min(popup_close_delay, 5.0))
+    row_transition_delay = max(0.0, min(row_transition_delay, 15.0))
+
+    if year:
+        update_app_setting('current_year', year)
+    if semester:
+        update_app_setting('current_semester', semester)
+    if debugger_address:
+        update_app_setting('scraper_debugger_address', debugger_address)
+
+    update_app_setting('scraper_popup_open_timeout', str(popup_open_timeout))
+    update_app_setting('scraper_popup_close_delay', str(popup_close_delay))
+    update_app_setting('scraper_row_transition_delay', str(row_transition_delay))
+
+    runtime_cfg = _update_runtime_config(
+        popup_open_timeout=popup_open_timeout,
+        popup_close_delay=popup_close_delay,
+        inter_row_delay=row_transition_delay,
+    )
+
+    return jsonify(
+        {
+            'success': True,
+            'message': 'Scraper configuration updated.',
+            'config': {
+                'current_year': get_app_setting('current_year', ''),
+                'current_semester': get_app_setting('current_semester', ''),
+                'scraper_debugger_address': get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222')),
+                'scraper_popup_open_timeout': popup_open_timeout,
+                'scraper_popup_close_delay': popup_close_delay,
+                'scraper_row_transition_delay': row_transition_delay,
+                'runtime': runtime_cfg,
+            },
+        }
+    )
+
+
 # ── GET /admin/scraper-status ─────────────────────────────────────────────
 @admin_bp.route('/scraper-status', methods=['GET'])
 @login_required
@@ -1800,6 +1881,7 @@ def scraper_status():
             is_scraper_running,
             is_scraper_paused,
             scraper_state_label,
+            get_runtime_config,
         )
         import copy
         debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
@@ -1809,6 +1891,7 @@ def scraper_status():
         payload['is_running_lock'] = is_scraper_running()
         payload['is_paused'] = is_scraper_paused()
         payload['state'] = scraper_state_label()
+        payload['runtime_config'] = get_runtime_config()
 
         # Enrich with DB data when a dataset is active
         ds_id = payload.get('dataset_id')
