@@ -9,7 +9,7 @@ from functools import wraps
 from werkzeug.utils import secure_filename
 from sqlalchemy import inspect, text
 import sqlalchemy as sa
-from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField
+from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField, ScrapedDataset, ScrapedCourse
 from utils import (
     get_course_data_tables,
     calculate_gpa,
@@ -81,7 +81,12 @@ ENDPOINT_PERMISSION_MAP = {
     'admin.toggle_announcement': 'edit_landing_page',
     'admin.delete_announcement': 'edit_landing_page',
     'admin.update_app_settings_route': 'manage_users',
-    'admin.university_connection': 'manage_users',
+    'admin.university_connection': 'manage_datasets',
+    'admin.start_browser_session': 'manage_datasets',
+    'admin.check_login_status': 'manage_datasets',
+    'admin.probe_fields': 'manage_datasets',
+    'admin.start_scraping': 'manage_datasets',
+    'admin.scraper_status': 'manage_datasets',
 }
 
 
@@ -1233,30 +1238,131 @@ def manage_courses():
     return render_template('Admin/courses.html', courses=[dict(row._mapping) for row in courses])
 
 
-@admin_bp.route('/university_connection', methods=['GET', 'POST'])
+# ─────────────────────────────────────────────────────────────────────────────
+#  University Connection — Scraping Control System
+# ─────────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route('/university_connection', methods=['GET'])
 @login_required
 @admin_required
 def university_connection():
-    if request.method == 'POST':
-        endpoint = (request.form.get('endpoint') or '').strip()
-        api_key = (request.form.get('api_key') or '').strip()
-        client_id = (request.form.get('client_id') or '').strip()
-        sync_enabled = 'sync_enabled' in request.form
+    from services.scraper_service import scraper_progress, _is_chrome_running
+    import json as _json
 
-        update_app_setting('university_connection_endpoint', endpoint)
-        update_app_setting('university_connection_api_key', api_key)
-        update_app_setting('university_connection_client_id', client_id)
-        update_app_setting('university_connection_sync_enabled', 'true' if sync_enabled else 'false')
-        flash('University Connection placeholder settings saved.', 'success')
-        return redirect(url_for('admin.university_connection'))
+    year = get_app_setting('current_year', '')
+    semester = get_app_setting('current_semester', '')
+    syllabus_url = get_app_setting('scraper_syllabus_url', '')
 
+    # Past datasets for history panel
+    past_datasets = ScrapedDataset.query.order_by(ScrapedDataset.created_at.desc()).limit(10).all()
+
+    chrome_connected = _is_chrome_running()
     return render_template(
         'Admin/university_connection.html',
-        endpoint=get_app_setting('university_connection_endpoint', ''),
-        api_key='••••••••' if get_app_setting('university_connection_api_key', '') else '',
-        client_id=get_app_setting('university_connection_client_id', ''),
-        sync_enabled=get_app_setting('university_connection_sync_enabled', 'false'),
+        year=year,
+        semester=semester,
+        syllabus_url=syllabus_url,
+        chrome_connected=chrome_connected,
+        past_datasets=past_datasets,
+        progress=dict(scraper_progress),
     )
+
+
+# ── POST /admin/start-session ─────────────────────────────────────────────
+@admin_bp.route('/start-session', methods=['POST'])
+@login_required
+@admin_required
+def start_browser_session():
+    from services.scraper_service import start_browser_session as _start
+    result = _start()
+    return jsonify(result)
+
+
+# ── GET /admin/check-login ────────────────────────────────────────────────
+@admin_bp.route('/check-login', methods=['GET'])
+@login_required
+@admin_required
+def check_login_status():
+    from services.scraper_service import get_driver, check_login_status as _check
+    try:
+        driver = get_driver()
+    except RuntimeError as exc:
+        return jsonify({'logged_in': False, 'message': str(exc)})
+    result = _check(driver)
+    return jsonify(result)
+
+
+# ── POST /admin/probe-fields ──────────────────────────────────────────────
+@admin_bp.route('/probe-fields', methods=['POST'])
+@login_required
+@admin_required
+def probe_fields():
+    from services.scraper_service import get_driver, probe_available_fields as _probe
+    data = request.get_json(force=True, silent=True) or {}
+    syllabus_url = (data.get('syllabus_url') or '').strip()
+
+    # Persist the URL for future use
+    if syllabus_url:
+        update_app_setting('scraper_syllabus_url', syllabus_url)
+
+    try:
+        driver = get_driver()
+    except RuntimeError as exc:
+        return jsonify({'success': False, 'fields': [], 'message': str(exc)})
+
+    result = _probe(driver, syllabus_url=syllabus_url)
+    return jsonify(result)
+
+
+# ── POST /admin/start-scraping ────────────────────────────────────────────
+@admin_bp.route('/start-scraping', methods=['POST'])
+@login_required
+@admin_required
+def start_scraping():
+    import json as _json
+    from flask import current_app
+    from services.scraper_service import run_controlled_scraper as _run, scraper_progress
+
+    # Reject if already running
+    if scraper_progress.get('status') == 'running':
+        return jsonify({'success': False, 'message': 'A scraping job is already running.'})
+
+    data = request.get_json(force=True, silent=True) or {}
+    selected_fields = data.get('selected_fields') or []
+    year = (data.get('year') or get_app_setting('current_year', '')).strip()
+    semester = (data.get('semester') or get_app_setting('current_semester', '')).strip()
+
+    if not selected_fields:
+        return jsonify({'success': False, 'message': 'No fields selected.'})
+    if not year or not semester:
+        return jsonify({'success': False, 'message': 'Year and Semester must be configured in Settings.'})
+
+    flask_app = current_app._get_current_object()
+    result = _run(selected_fields, year, semester, flask_app)
+    return jsonify(result)
+
+
+# ── GET /admin/scraper-status ─────────────────────────────────────────────
+@admin_bp.route('/scraper-status', methods=['GET'])
+@login_required
+@admin_required
+def scraper_status():
+    from services.scraper_service import scraper_progress as _p, _is_chrome_running
+    import copy
+    payload = copy.deepcopy(_p)
+    payload['chrome_connected'] = _is_chrome_running()
+
+    # Enrich with DB data when a dataset is active
+    ds_id = payload.get('dataset_id')
+    if ds_id:
+        ds = db.session.get(ScrapedDataset, ds_id)
+        if ds:
+            payload['db_status'] = ds.status
+            payload['db_current'] = ds.current_index
+            payload['db_total'] = ds.total_courses
+            payload['db_last_course'] = ds.last_course
+
+    return jsonify(payload)
 
 @admin_bp.route('/api/update_course', methods=['POST'])
 @login_required

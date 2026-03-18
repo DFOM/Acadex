@@ -2,49 +2,501 @@
 {% block title %}University Connection{% endblock %}
 
 {% block content %}
-<h2 class="mb-3">University Connection</h2>
-<p class="text-muted mb-4">Placeholder tab for future integration with the university database/API.</p>
 
-<div class="card shadow-sm border-0 mb-4">
-    <div class="card-header" style="background: var(--ax-surface);">
-        <strong>Future Integration Settings</strong>
+<div class="ax-page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <div>
+        <h1 class="ax-page-title">University Connection</h1>
+        <p class="ax-page-subtitle">
+            Manually controlled scraping system — <strong>no automation, no stored credentials</strong>.
+        </p>
     </div>
-    <div class="card-body">
-        <form method="POST" action="{{ url_for('admin.university_connection') }}" class="row g-3">
-            <div class="col-md-12">
-                <label class="form-label">API/Base Endpoint</label>
-                <input type="url" name="endpoint" class="form-control" placeholder="https://api.university.edu/v1" value="{{ endpoint }}">
+    <span id="runBadge" class="badge fs-6 px-3 py-2 {{ 'bg-warning text-dark' if progress.status == 'running' else 'bg-secondary' }}">
+        {{ progress.status | capitalize }}
+    </span>
+</div>
+
+{# ── Alert area ── #}
+<div id="alertArea"></div>
+
+<div class="row g-4">
+
+    {# ══════════════════════════════════════════════════════════════════
+       A) SESSION CONTROL
+    ══════════════════════════════════════════════════════════════════ #}
+    <div class="col-lg-4">
+        <div class="ax-admin-card h-100">
+            <div class="d-flex align-items-center gap-2 mb-3">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                     style="color:var(--ax-c-cyan)"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l2 2"/></svg>
+                <h5 class="mb-0">Session Control</h5>
             </div>
-            <div class="col-md-6">
-                <label class="form-label">Client ID</label>
-                <input type="text" name="client_id" class="form-control" placeholder="future-client-id" value="{{ client_id }}">
-            </div>
-            <div class="col-md-6">
-                <label class="form-label">API Key / Token</label>
-                <input type="password" name="api_key" class="form-control" placeholder="future-token" value="{{ api_key }}">
-            </div>
-            <div class="col-12">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" role="switch" id="sync_enabled" name="sync_enabled" {% if (sync_enabled|string)|lower in ['1','true','yes','on'] %}checked{% endif %}>
-                    <label class="form-check-label" for="sync_enabled">Enable sync placeholder toggle</label>
+
+            <div class="mb-3">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="text-muted small">Chrome Connection</span>
+                    <span id="chromeBadge"
+                          class="badge {{ 'bg-success' if chrome_connected else 'bg-danger' }}">
+                        {{ 'Connected' if chrome_connected else 'Not Connected' }}
+                    </span>
+                </div>
+                <div class="d-flex align-items-center justify-content-between">
+                    <span class="text-muted small">Login Status</span>
+                    <span id="loginBadge" class="badge bg-secondary">Unknown</span>
                 </div>
             </div>
-            <div class="col-12">
-                <button type="submit" class="btn btn-primary">Save Placeholder Settings</button>
-            </div>
-        </form>
-    </div>
-</div>
 
-<div class="card shadow-sm border-0">
-    <div class="card-body">
-        <h5 class="mb-2">Planned Endpoints</h5>
-        <ul class="mb-0 text-muted">
-            <li>Student roster sync endpoint</li>
-            <li>Course catalog import endpoint</li>
-            <li>Enrollment + grade export endpoint</li>
-            <li>Background sync status + logs endpoint</li>
-        </ul>
+            <hr class="my-3" style="border-color:var(--ax-border);">
+
+            <div class="mb-3">
+                <label class="form-label small">Syllabus Page URL <span class="text-muted">(optional)</span></label>
+                <input id="syllabusUrl" type="url" class="form-control form-control-sm"
+                       placeholder="https://portal.university.edu/syllabus"
+                       value="{{ syllabus_url }}">
+                <div class="form-text">If set, the probe will navigate here automatically.</div>
+            </div>
+
+            <div class="row g-2 mb-3">
+                <div class="col-6">
+                    <label class="form-label small">Year</label>
+                    <input id="scrapeYear" type="text" class="form-control form-control-sm"
+                           value="{{ year }}" placeholder="e.g. 2026">
+                </div>
+                <div class="col-6">
+                    <label class="form-label small">Semester</label>
+                    <input id="scrapeSemester" type="text" class="form-control form-control-sm"
+                           value="{{ semester }}" placeholder="e.g. Spring">
+                </div>
+            </div>
+
+            <div class="d-grid gap-2">
+                <button id="btnStartSession" class="btn btn-primary btn-sm" onclick="startSession()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none"
+                         viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round" class="me-1">
+                        <circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>
+                    </svg>
+                    Start Browser Session
+                </button>
+                <button id="btnCheckLogin" class="btn btn-outline-secondary btn-sm" onclick="checkLogin()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none"
+                         viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                         stroke-linecap="round" stroke-linejoin="round" class="me-1">
+                        <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                    </svg>
+                    Check Login Status
+                </button>
+                <button id="btnProceed" class="btn btn-success btn-sm" disabled
+                        onclick="document.getElementById('probeSection').scrollIntoView({behavior:'smooth'})">
+                    Proceed to Probe ↓
+                </button>
+            </div>
+
+            <div class="mt-3 p-2 rounded small" style="background:var(--ax-surface-alt); color:var(--ax-text-muted);">
+                <strong>Workflow:</strong>
+                <ol class="mb-0 ps-3 mt-1" style="line-height:1.9">
+                    <li>Click <em>Start Browser Session</em></li>
+                    <li>Log into the university portal in Chrome</li>
+                    <li>Navigate to the syllabus listing page</li>
+                    <li>Click <em>Check Login Status</em></li>
+                    <li>Proceed → Scan Fields → Scrape</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+
+    {# ══════════════════════════════════════════════════════════════════
+       B) PROBE TOOL
+    ══════════════════════════════════════════════════════════════════ #}
+    <div class="col-lg-4" id="probeSection">
+        <div class="ax-admin-card h-100">
+            <div class="d-flex align-items-center gap-2 mb-3">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                     style="color:var(--ax-c-amber)">
+                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <h5 class="mb-0">Probe Tool</h5>
+            </div>
+
+            <p class="text-muted small mb-3">
+                Opens the first course popup and dynamically discovers all available data fields.
+                Login must be confirmed first.
+            </p>
+
+            <button id="btnProbeFields" class="btn btn-warning btn-sm w-100 mb-3"
+                    disabled onclick="probeFields()">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none"
+                     viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" class="me-1">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+                Scan Available Fields
+            </button>
+
+            <div id="probeSpinner" class="text-center d-none py-3">
+                <div class="spinner-border spinner-border-sm text-warning" role="status"></div>
+                <div class="small mt-1 text-muted">Scanning… this may take a few seconds.</div>
+            </div>
+
+            <div id="probeResults" class="d-none">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="small fw-semibold">Detected Fields</span>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-secondary" onclick="toggleAllFields(true)">All</button>
+                        <button class="btn btn-outline-secondary" onclick="toggleAllFields(false)">None</button>
+                    </div>
+                </div>
+                <div id="fieldCheckboxes" class="d-flex flex-column gap-1"
+                     style="max-height:280px; overflow-y:auto;"></div>
+            </div>
+
+            <div id="probeEmpty" class="text-muted small text-center py-4">
+                No fields scanned yet.
+            </div>
+        </div>
+    </div>
+
+    {# ══════════════════════════════════════════════════════════════════
+       C) SCRAPER EXECUTION
+    ══════════════════════════════════════════════════════════════════ #}
+    <div class="col-lg-4">
+        <div class="ax-admin-card h-100 d-flex flex-column">
+            <div class="d-flex align-items-center gap-2 mb-3">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                     style="color:var(--ax-c-emerald)">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                </svg>
+                <h5 class="mb-0">Scraper Execution</h5>
+            </div>
+
+            <div class="mb-3">
+                <div class="d-flex justify-content-between small mb-1">
+                    <span id="progressLabel">0 / 0</span>
+                    <span id="progressPct">0%</span>
+                </div>
+                <div class="progress" style="height:6px;">
+                    <div id="progressBar" class="progress-bar bg-success" role="progressbar"
+                         style="width:0%"></div>
+                </div>
+                <div id="lastCourseLabel" class="text-muted small mt-1 text-truncate"></div>
+            </div>
+
+            <button id="btnStartScraping" class="btn btn-success btn-sm mb-3" disabled
+                    onclick="startScraping()">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none"
+                     viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" class="me-1">
+                    <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                Start Scraping
+            </button>
+
+            <div class="flex-grow-1 d-flex flex-column" style="min-height:0;">
+                <div class="small fw-semibold mb-1 d-flex align-items-center justify-content-between">
+                    <span>Live Log</span>
+                    <button class="btn btn-link btn-sm p-0 text-muted" onclick="clearLog()">Clear</button>
+                </div>
+                <div id="liveLog"
+                     class="flex-grow-1 rounded p-2 font-monospace"
+                     style="font-size:.72rem; overflow-y:auto; max-height:280px;
+                            background:var(--ax-surface-alt); border:1px solid var(--ax-border);
+                            color:var(--ax-text);">
+                    <span class="text-muted">Waiting…</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>{# /row #}
+
+{# ══════════════════════════════════════════════════════════════════
+   D) SCRAPE HISTORY
+══════════════════════════════════════════════════════════════════ #}
+{% if past_datasets %}
+<div class="ax-admin-card mt-4">
+    <h5 class="mb-3">Scrape History</h5>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Name</th><th>Year</th><th>Semester</th>
+                    <th>Status</th><th>Courses</th><th>Created</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ds in past_datasets %}
+                <tr>
+                    <td class="font-monospace small">{{ ds.name }}</td>
+                    <td>{{ ds.year }}</td>
+                    <td>{{ ds.semester }}</td>
+                    <td>
+                        <span class="badge
+                            {{ 'bg-success' if ds.status == 'completed'
+                               else 'bg-warning text-dark' if ds.status == 'running'
+                               else 'bg-danger' if ds.status == 'failed'
+                               else 'bg-secondary' }}">
+                            {{ ds.status }}
+                        </span>
+                    </td>
+                    <td>{{ ds.current_index }} / {{ ds.total_courses }}</td>
+                    <td class="text-muted small">{{ ds.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 </div>
+{% endif %}
+
+{% endblock %}
+
+
+{% block extra_scripts %}
+<script>
+/* ------------------------------------------------------------------ *
+ *  University Connection — Scraping Control Panel
+ * ------------------------------------------------------------------ */
+(function () {
+    'use strict';
+
+    /* ── Utility ────────────────────────────────────────────────── */
+    function showAlert(msg, type) {
+        const area = document.getElementById('alertArea');
+        const div = document.createElement('div');
+        div.className = `alert alert-${type} alert-dismissible fade show`;
+        div.innerHTML = `${msg}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+        area.appendChild(div);
+        setTimeout(() => div.classList.remove('show'), 7000);
+    }
+
+    function setBtn(id, loading) {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.dataset._orig = btn.dataset._orig || btn.innerHTML;
+        btn.disabled = loading;
+        btn.innerHTML = loading
+            ? `<span class="spinner-border spinner-border-sm me-1"></span>Loading…`
+            : btn.dataset._orig;
+    }
+
+    const csrfToken = () =>
+        document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+    function postJSON(url, body) {
+        return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken() },
+            body: JSON.stringify(body),
+        }).then(r => r.json());
+    }
+
+    function getJSON(url) {
+        return fetch(url, { headers: { 'X-CSRF-Token': csrfToken() } }).then(r => r.json());
+    }
+
+    function escapeHtml(s) {
+        return String(s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    /* ── State ──────────────────────────────────────────────────── */
+    let pollingTimer = null;
+
+    /* ── A) Session Control ─────────────────────────────────────── */
+
+    window.startSession = function () {
+        setBtn('btnStartSession', true);
+        postJSON('/admin/start-session', {})
+            .then(d => {
+                showAlert(d.message, d.success ? 'success' : 'danger');
+                setBadge('chromeBadge', d.success ? 'Connected' : 'Not Connected', d.success ? 'bg-success' : 'bg-danger');
+            })
+            .catch(e => showAlert('Request failed: ' + e, 'danger'))
+            .finally(() => setBtn('btnStartSession', false));
+    };
+
+    window.checkLogin = function () {
+        setBtn('btnCheckLogin', true);
+        getJSON('/admin/check-login')
+            .then(d => {
+                if (d.logged_in) {
+                    setBadge('loginBadge', 'Logged In', 'bg-success');
+                    document.getElementById('btnProceed').disabled = false;
+                    document.getElementById('btnProbeFields').disabled = false;
+                } else {
+                    setBadge('loginBadge', 'Not Logged In', 'bg-danger');
+                }
+                showAlert(d.message, d.logged_in ? 'success' : 'warning');
+            })
+            .catch(e => showAlert('Request failed: ' + e, 'danger'))
+            .finally(() => setBtn('btnCheckLogin', false));
+    };
+
+    function setBadge(id, text, cls) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = text;
+        el.className = 'badge ' + cls;
+    }
+
+    /* ── B) Probe ───────────────────────────────────────────────── */
+
+    window.probeFields = function () {
+        const url = document.getElementById('syllabusUrl').value.trim();
+        setBtn('btnProbeFields', true);
+        document.getElementById('probeSpinner').classList.remove('d-none');
+        document.getElementById('probeResults').classList.add('d-none');
+        document.getElementById('probeEmpty').classList.add('d-none');
+
+        postJSON('/admin/probe-fields', { syllabus_url: url })
+            .then(d => {
+                document.getElementById('probeSpinner').classList.add('d-none');
+                if (d.success && d.fields && d.fields.length) {
+                    renderCheckboxes(d.fields);
+                    document.getElementById('probeResults').classList.remove('d-none');
+                    document.getElementById('btnStartScraping').disabled = false;
+                    showAlert(`Probe complete — ${d.fields.length} field(s) found.`, 'success');
+                } else {
+                    document.getElementById('probeEmpty').classList.remove('d-none');
+                    showAlert(d.message || 'No fields found.', 'warning');
+                }
+            })
+            .catch(e => {
+                document.getElementById('probeSpinner').classList.add('d-none');
+                document.getElementById('probeEmpty').classList.remove('d-none');
+                showAlert('Probe request failed: ' + e, 'danger');
+            })
+            .finally(() => setBtn('btnProbeFields', false));
+    };
+
+    const DEFAULT_FIELDS = [
+        'Course Title', 'Course Number', 'Credits', 'Semester', 'Year Offered',
+        'Prerequisites', 'Course Instructor', 'Year Available', 'Subject Area',
+    ];
+
+    function renderCheckboxes(fields) {
+        const c = document.getElementById('fieldCheckboxes');
+        c.innerHTML = '';
+        fields.forEach(f => {
+            const id = 'fld_' + f.replace(/\s+/g, '_');
+            const checked = DEFAULT_FIELDS.includes(f);
+            c.insertAdjacentHTML('beforeend', `
+                <div class="form-check" style="padding-left:1.6em;">
+                    <input class="form-check-input field-cb" type="checkbox"
+                           id="${id}" value="${escapeHtml(f)}" ${checked ? 'checked' : ''}>
+                    <label class="form-check-label small" for="${id}">${escapeHtml(f)}</label>
+                </div>`);
+        });
+    }
+
+    window.toggleAllFields = function (v) {
+        document.querySelectorAll('.field-cb').forEach(cb => { cb.checked = v; });
+    };
+
+    /* ── C) Scraper Execution ───────────────────────────────────── */
+
+    window.startScraping = function () {
+        const selected = [...document.querySelectorAll('.field-cb:checked')].map(cb => cb.value);
+        if (!selected.length) { showAlert('Select at least one field.', 'warning'); return; }
+
+        const year     = document.getElementById('scrapeYear').value.trim();
+        const semester = document.getElementById('scrapeSemester').value.trim();
+
+        setBtn('btnStartScraping', true);
+        postJSON('/admin/start-scraping', { selected_fields: selected, year, semester })
+            .then(d => {
+                if (d.success) {
+                    showAlert(d.message, 'success');
+                    startPolling();
+                } else {
+                    showAlert(d.message, 'danger');
+                    setBtn('btnStartScraping', false);
+                }
+            })
+            .catch(e => {
+                showAlert('Failed: ' + e, 'danger');
+                setBtn('btnStartScraping', false);
+            });
+    };
+
+    /* ── Polling ────────────────────────────────────────────────── */
+
+    function startPolling() {
+        if (pollingTimer) clearInterval(pollingTimer);
+        pollingTimer = setInterval(pollStatus, 1200);
+    }
+
+    function pollStatus() {
+        getJSON('/admin/scraper-status')
+            .then(d => {
+                /* Chrome badge */
+                setBadge('chromeBadge',
+                    d.chrome_connected ? 'Connected' : 'Not Connected',
+                    d.chrome_connected ? 'bg-success' : 'bg-danger');
+
+                /* Run status badge */
+                const map = {
+                    running: 'bg-warning text-dark',
+                    completed: 'bg-success',
+                    failed: 'bg-danger',
+                    idle: 'bg-secondary',
+                };
+                const rb = document.getElementById('runBadge');
+                const st = d.status || 'idle';
+                rb.textContent = st.charAt(0).toUpperCase() + st.slice(1);
+                rb.className = 'badge fs-6 px-3 py-2 ' + (map[st] || 'bg-secondary');
+
+                /* Progress */
+                const cur = d.db_current ?? d.current_index ?? 0;
+                const tot = d.db_total   ?? d.total_courses  ?? 0;
+                const pct = tot > 0 ? Math.round((cur / tot) * 100) : 0;
+                document.getElementById('progressLabel').textContent = `${cur} / ${tot}`;
+                document.getElementById('progressPct').textContent   = `${pct}%`;
+                document.getElementById('progressBar').style.width   = pct + '%';
+                const lc = d.db_last_course ?? d.last_course ?? '';
+                if (lc) document.getElementById('lastCourseLabel').textContent = `Last: ${lc}`;
+
+                /* Log */
+                if (d.log && d.log.length) renderLog(d.log);
+
+                /* Terminal states */
+                if (st === 'completed' || st === 'failed') {
+                    clearInterval(pollingTimer); pollingTimer = null;
+                    setBtn('btnStartScraping', false);
+                    if (st === 'completed') {
+                        showAlert('✅ Scraping completed! Catalog is now available.', 'success');
+                        setTimeout(() => location.reload(), 3500);
+                    } else {
+                        showAlert('❌ Scraping failed: ' + (d.error || 'Unknown error.'), 'danger');
+                    }
+                }
+            })
+            .catch(() => {});
+    }
+
+    function renderLog(lines) {
+        const box = document.getElementById('liveLog');
+        box.innerHTML = lines.map(l => {
+            const cls = l.includes('✅') ? 'text-success'
+                      : l.includes('❌') ? 'text-danger'
+                      : l.includes('Skipped') || l.includes('issue') ? 'text-warning'
+                      : '';
+            return `<div class="${cls}">${escapeHtml(l)}</div>`;
+        }).join('');
+        box.scrollTop = box.scrollHeight;
+    }
+
+    window.clearLog = function () {
+        document.getElementById('liveLog').innerHTML = '<span class="text-muted">Cleared.</span>';
+    };
+
+    /* ── Auto-resume if job was running before page load ─────────── */
+    {% if progress.status == 'running' %}
+    startPolling();
+    {% endif %}
+
+}());
+</script>
 {% endblock %}

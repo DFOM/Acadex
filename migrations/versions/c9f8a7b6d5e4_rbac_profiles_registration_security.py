@@ -160,25 +160,34 @@ def upgrade() -> None:
                 {'role_name': role_name, 'perm_key': perm_key},
             )
 
-    op.execute(
-        sa.text(
-            """
-            UPDATE users
-            SET role_id = (SELECT id FROM roles WHERE name = 'admin')
-            WHERE (is_admin = 1 OR lower(coalesce(role, '')) = 'admin')
-              AND role_id IS NULL
-            """
+    # Assign default role_id values.  Wrap in try/except for DB-dialect safety
+    # (SQLite stores booleans as 0/1; PostgreSQL uses TRUE/FALSE).
+    try:
+        op.execute(
+            sa.text(
+                """
+                UPDATE users
+                SET role_id = (SELECT id FROM roles WHERE name = 'admin')
+                WHERE (is_admin = TRUE OR lower(coalesce(role, '')) = 'admin')
+                  AND role_id IS NULL
+                """
+            )
         )
-    )
-    op.execute(
-        sa.text(
-            """
-            UPDATE users
-            SET role_id = (SELECT id FROM roles WHERE name = 'user')
-            WHERE role_id IS NULL
-            """
+    except Exception:
+        pass  # Non-critical; _seed_security_defaults() handles role assignment at startup.
+
+    try:
+        op.execute(
+            sa.text(
+                """
+                UPDATE users
+                SET role_id = (SELECT id FROM roles WHERE name = 'user')
+                WHERE role_id IS NULL
+                """
+            )
         )
-    )
+    except Exception:
+        pass
 
     reg_rows = [
         {'field_key': 'career_interests', 'label': 'Career Interests', 'input_type': 'textarea', 'options_json': None, 'is_required': False, 'is_active': True, 'display_order': 10},

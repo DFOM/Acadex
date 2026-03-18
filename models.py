@@ -259,3 +259,53 @@ class Notification(db.Model):
     read_at = db.Column(db.DateTime, nullable=True)
 
     metadata_json = db.Column(db.Text, nullable=True)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Scraper models
+# ──────────────────────────────────────────────────────────────────────────────
+
+class ScrapedDataset(db.Model):
+    """Tracks a single scraping run — one record per admin-initiated scrape."""
+    __tablename__ = 'scraped_datasets'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False)          # e.g. Scraped_2026_Spring
+    year = db.Column(db.String(20), nullable=False)
+    semester = db.Column(db.String(50), nullable=False)
+    status = db.Column(db.String(20), default='idle', nullable=False)
+    # idle | running | completed | failed
+
+    # Fields the admin chose to scrape (JSON list)
+    selected_fields_json = db.Column(db.Text, nullable=True)
+
+    # Live progress counters
+    total_courses = db.Column(db.Integer, default=0, nullable=False)
+    current_index = db.Column(db.Integer, default=0, nullable=False)
+    last_course = db.Column(db.String(255), nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow,
+        onupdate=datetime.utcnow, nullable=False,
+    )
+
+    courses = db.relationship(
+        'ScrapedCourse', backref='dataset', lazy=True,
+        cascade='all, delete-orphan',
+    )
+
+
+class ScrapedCourse(db.Model):
+    """One scraped course row belonging to a ScrapedDataset."""
+    __tablename__ = 'scraped_courses'
+
+    id = db.Column(db.Integer, primary_key=True)
+    dataset_id = db.Column(
+        db.Integer, db.ForeignKey('scraped_datasets.id'),
+        nullable=False, index=True,
+    )
+    # JSON-encoded dict of field → value pairs chosen during the scraping run
+    data_json = db.Column(db.Text, nullable=False, default='{}')
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

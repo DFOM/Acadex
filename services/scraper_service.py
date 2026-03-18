@@ -1,0 +1,586 @@
+# services/scraper_service.py
+"""
+Scraper Service — Selenium-based course catalog scraper.
+
+All functions that need a DB app context accept a `flask_app` parameter
+and call `with flask_app.app_context(): ...` internally, making them
+safe to call from background threads.
+
+SECURITY:
+  - No credentials are stored anywhere.
+  - Chrome is launched / reused via remote-debugging on port 9222.
+  - The admin must log in manually before using any probe / scrape feature.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import platform
+import subprocess
+import sys
+import threading
+import time
+from datetime import datetime
+from typing import List, Optional
+
+log = logging.getLogger(__name__)
+
+# ──────────────────────────────────────────────────────
+#  Global in-process scraper state
+# ──────────────────────────────────────────────────────
+_scraper_lock = threading.Lock()          # prevents concurrent runs
+_active_driver = None                     # reused WebDriver instance
+_active_driver_lock = threading.Lock()
+
+# Shared progress dict – written by worker thread, read by status endpoint
+scraper_progress: dict = {
+    "status": "idle",          # idle | running | completed | failed
+    "dataset_id": None,
+    "current_index": 0,
+    "total_courses": 0,
+    "last_course": "",
+    "log": [],                 # list of log strings (capped at 200 entries)
+    "error": None,
+}
+_progress_lock = threading.Lock()
+
+
+def _log_progress(msg: str) -> None:
+    """Thread-safe append to the in-memory log."""
+    with _progress_lock:
+        scraper_progress["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+        if len(scraper_progress["log"]) > 200:
+            scraper_progress["log"] = scraper_progress["log"][-200:]
+
+
+# ──────────────────────────────────────────────────────
+#  Chrome / WebDriver helpers
+# ──────────────────────────────────────────────────────
+_DEBUGGING_PORT = 9222
+
+
+def _is_chrome_running() -> bool:
+    """Return True if something is already listening on the debugging port."""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1)
+        try:
+            s.connect(("127.0.0.1", _DEBUGGING_PORT))
+            return True
+        except OSError:
+            return False
+
+
+def _chrome_executable() -> str:
+    """Best-effort path to the Chrome executable for the current OS."""
+    system = platform.system()
+    candidates: List[str] = []
+    if system == "Darwin":
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ]
+    elif system == "Windows":
+        import os
+        candidates = [
+            os.path.join(os.environ.get("PROGRAMFILES", "C:\\Program Files"),
+                         "Google", "Chrome", "Application", "chrome.exe"),
+            os.path.join(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)"),
+                         "Google", "Chrome", "Application", "chrome.exe"),
+        ]
+    else:
+        candidates = ["google-chrome", "chromium-browser", "chromium"]
+
+    import shutil, os
+    for c in candidates:
+        if os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+        found = shutil.which(c)
+        if found:
+            return found
+
+    raise FileNotFoundError(
+        "Google Chrome executable not found. "
+        "Please install Chrome or set the correct path."
+    )
+
+
+def _profile_dir() -> str:
+    """Return a per-OS temp profile directory for the isolated debugging session."""
+    import os, tempfile
+    if platform.system() == "Windows":
+        return r"C:\selenium-profile"
+    return os.path.join(tempfile.gettempdir(), "acadex-selenium-profile")
+
+
+def start_browser_session() -> dict:
+    """
+    Launch Chrome with remote-debugging on port 9222 (if not already running).
+    Returns {"success": bool, "message": str, "already_running": bool}
+    """
+    if _is_chrome_running():
+        return {
+            "success": True,
+            "message": "Chrome is already running on port 9222 — session reused.",
+            "already_running": True,
+        }
+
+    try:
+        exe = _chrome_executable()
+    except FileNotFoundError as exc:
+        return {"success": False, "message": str(exc), "already_running": False}
+
+    profile = _profile_dir()
+    cmd = [
+        exe,
+        f"--remote-debugging-port={_DEBUGGING_PORT}",
+        f"--user-data-dir={profile}",
+        "--no-first-run",
+        "--no-default-browser-check",
+    ]
+    try:
+        # Detach so the process outlives the Flask thread
+        subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        # Wait briefly for Chrome to open its debugging endpoint
+        for _ in range(15):
+            time.sleep(0.5)
+            if _is_chrome_running():
+                return {
+                    "success": True,
+                    "message": "Chrome launched successfully on port 9222.",
+                    "already_running": False,
+                }
+        return {
+            "success": False,
+            "message": "Chrome launched but the debugging port did not respond in time.",
+            "already_running": False,
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "message": f"Failed to launch Chrome: {exc}",
+            "already_running": False,
+        }
+
+
+def get_driver():
+    """
+    Return a Selenium WebDriver connected to the running Chrome session via
+    remote-debugging port 9222.  Raises RuntimeError if Chrome is not available.
+    """
+    global _active_driver
+    with _active_driver_lock:
+        # Try reusing the existing driver
+        if _active_driver is not None:
+            try:
+                _ = _active_driver.title  # probe — will throw if session is gone
+                return _active_driver
+            except Exception:
+                _active_driver = None
+
+        if not _is_chrome_running():
+            raise RuntimeError(
+                "Chrome is not running on port 9222. "
+                "Use 'Start Browser Session' first."
+            )
+
+        # Lazy-import selenium so the app starts even if selenium is not installed
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.chrome.options import Options
+        except ImportError:
+            raise RuntimeError(
+                "selenium is not installed. "
+                "Run: pip install selenium"
+            )
+
+        options = Options()
+        options.add_experimental_option("debuggerAddress", f"localhost:{_DEBUGGING_PORT}")
+        driver = webdriver.Chrome(options=options)
+        _active_driver = driver
+        return driver
+
+
+def release_driver() -> None:
+    """Called after a scraping job completes to reset the cached driver reference."""
+    global _active_driver
+    with _active_driver_lock:
+        _active_driver = None
+
+
+# ──────────────────────────────────────────────────────
+#  Login check
+# ──────────────────────────────────────────────────────
+
+def check_login_status(driver) -> dict:
+    """
+    Check whether the admin is logged into the university portal by looking
+    for the main course-table element.
+
+    Returns {"logged_in": bool, "message": str}
+    """
+    try:
+        from selenium.webdriver.common.by import By
+        driver.find_element(By.ID, "funcForm:table_data")
+        return {"logged_in": True, "message": "Logged In — course table detected."}
+    except Exception:
+        return {
+            "logged_in": False,
+            "message": (
+                "Not Logged In — course table not found. "
+                "Please navigate to the syllabus page and log in."
+            ),
+        }
+
+
+# ──────────────────────────────────────────────────────
+#  Probe available fields
+# ──────────────────────────────────────────────────────
+
+_SYLLABUS_SETTING_KEY = "scraper_syllabus_url"
+_DEFAULT_SYLLABUS_URL = ""
+
+
+def probe_available_fields(driver, syllabus_url: str = "") -> dict:
+    """
+    Navigate to the syllabus page, open the first course popup and extract
+    all available field labels.
+
+    Returns {"success": bool, "fields": list[str], "message": str}
+    """
+    try:
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        from selenium.common.exceptions import TimeoutException
+
+        wait = WebDriverWait(driver, 15)
+
+        # Navigate if a URL is given
+        if syllabus_url:
+            driver.get(syllabus_url)
+
+        # Wait for the course table
+        try:
+            wait.until(EC.visibility_of_element_located((By.ID, "funcForm:table_data")))
+        except TimeoutException:
+            return {
+                "success": False,
+                "fields": [],
+                "message": (
+                    "Timed out waiting for course table (funcForm:table_data). "
+                    "Ensure the syllabus page is open and you are logged in."
+                ),
+            }
+
+        # Click the first course link
+        first_link = wait.until(
+            EC.element_to_be_clickable((By.XPATH, '//*[@id="funcForm:table_data"]/tr[1]//td[2]/a'))
+        )
+        first_link.click()
+
+        # Wait for popup
+        try:
+            popup = wait.until(EC.visibility_of_element_located((By.ID, "pkx02301:dialog")))
+        except TimeoutException:
+            return {
+                "success": False,
+                "fields": [],
+                "message": "Popup (pkx02301:dialog) did not appear.",
+            }
+
+        # Extract all section headers in the popup
+        headers = popup.find_elements(By.CSS_SELECTOR, "div.ui-widget-header")
+        fields = [h.text.strip() for h in headers if h.text.strip()]
+
+        # Close popup
+        try:
+            close_btn = popup.find_element(By.CLASS_NAME, "ui-dialog-titlebar-close")
+            close_btn.click()
+        except Exception:
+            pass
+
+        if not fields:
+            return {
+                "success": False,
+                "fields": [],
+                "message": "No field labels found in the popup.",
+            }
+
+        return {
+            "success": True,
+            "fields": fields,
+            "message": f"Found {len(fields)} field(s).",
+        }
+
+    except Exception as exc:
+        return {
+            "success": False,
+            "fields": [],
+            "message": f"Probe error: {exc}",
+        }
+
+
+# ──────────────────────────────────────────────────────
+#  Controlled scraper — runs in background thread
+# ──────────────────────────────────────────────────────
+
+def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app) -> None:
+    """
+    Background thread: iterates over every course row, extracts selected
+    fields and persists them.  Updates scraper_progress in real time.
+    """
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.common.exceptions import (
+        TimeoutException, StaleElementReferenceException, NoSuchElementException,
+    )
+
+    wait = WebDriverWait(driver, 12)
+
+    def _update_db_progress(**kwargs) -> None:
+        """Persist current progress counters to the DB."""
+        try:
+            with flask_app.app_context():
+                from models import db, ScrapedDataset
+                ds = db.session.get(ScrapedDataset, dataset_id)
+                if ds:
+                    for k, v in kwargs.items():
+                        setattr(ds, k, v)
+                    db.session.commit()
+        except Exception as exc:
+            _log_progress(f"[DB] progress update failed: {exc}")
+
+    def _get_popup_info(popup, label: str) -> str:
+        try:
+            xpath = (
+                f".//div[contains(@class, 'ui-widget-header') "
+                f"and normalize-space(.)=\"{label}\"]"
+                f"/following-sibling::div[1]//div[contains(@class, 'fr-view')]"
+            )
+            return popup.find_element(By.XPATH, xpath).text
+        except NoSuchElementException:
+            return ""
+
+    try:
+        # Wait for table
+        wait.until(EC.visibility_of_element_located((By.ID, "funcForm:table_data")))
+
+        rows = driver.find_elements(By.XPATH, '//*[@id="funcForm:table_data"]/tr')
+        total = len(rows)
+        _log_progress(f"Found {total} course rows. Starting scrape…")
+
+        with _progress_lock:
+            scraper_progress["total_courses"] = total
+        _update_db_progress(total_courses=total, status="running")
+
+        for i in range(total):
+            with _progress_lock:
+                if scraper_progress["status"] == "failed":
+                    break
+
+            try:
+                all_rows = wait.until(
+                    EC.presence_of_all_elements_located(
+                        (By.XPATH, '//*[@id="funcForm:table_data"]/tr')
+                    )
+                )
+                row = all_rows[i]
+                day_and_period = row.find_element(By.XPATH, ".//td[1]").text
+                subject_link = row.find_element(By.XPATH, ".//td[2]/a")
+                subject_link.click()
+
+                popup = wait.until(
+                    EC.visibility_of_element_located((By.ID, "pkx02301:dialog"))
+                )
+
+                # Always capture Day and Period
+                course_data: dict = {"Day and Period": day_and_period}
+                for field in selected_fields:
+                    course_data[field] = _get_popup_info(popup, field)
+
+                course_title = course_data.get("Course Title", f"Row {i+1}")
+                _log_progress(f"[{i+1}/{total}] {course_title}")
+
+                # Close popup
+                try:
+                    popup.find_element(By.CLASS_NAME, "ui-dialog-titlebar-close").click()
+                    wait.until(
+                        EC.invisibility_of_element_located((By.ID, "pkx02301:dialog"))
+                    )
+                except Exception:
+                    pass
+
+                # Persist the row
+                with flask_app.app_context():
+                    from models import db, ScrapedCourse, ScrapedDataset
+                    sc = ScrapedCourse(
+                        dataset_id=dataset_id,
+                        data_json=json.dumps(course_data, ensure_ascii=False),
+                    )
+                    db.session.add(sc)
+                    ds = db.session.get(ScrapedDataset, dataset_id)
+                    if ds:
+                        ds.current_index = i + 1
+                        ds.last_course = course_title
+                    db.session.commit()
+
+                with _progress_lock:
+                    scraper_progress["current_index"] = i + 1
+                    scraper_progress["last_course"] = course_title
+
+            except (TimeoutException, StaleElementReferenceException) as exc:
+                msg = f"[{i+1}/{total}] Skipped — {type(exc).__name__}: {exc}"
+                _log_progress(msg)
+                # Attempt page recovery
+                try:
+                    driver.refresh()
+                    wait.until(
+                        EC.visibility_of_element_located((By.ID, "funcForm:table_data"))
+                    )
+                except Exception:
+                    pass
+
+        # ── Completion ──
+        with flask_app.app_context():
+            from models import db, ScrapedDataset, CatalogStatus, Notification, Setting
+
+            ds = db.session.get(ScrapedDataset, dataset_id)
+            if ds:
+                ds.status = "completed"
+                ds.current_index = total
+                db.session.commit()
+
+            # Update / create CatalogStatus
+            year_val = ds.year if ds else ""
+            sem_val = ds.semester if ds else ""
+            term_key = f"{sem_val} {year_val}".strip()
+            if term_key:
+                cs = CatalogStatus.query.filter_by(term=term_key).first()
+                if cs is None:
+                    cs = CatalogStatus(term=term_key, status="available")
+                    db.session.add(cs)
+                else:
+                    cs.status = "available"
+                    cs.updated_at = datetime.utcnow()
+                db.session.commit()
+
+            # Broadcast notification to all users
+            notif = Notification(
+                user_id=None,
+                session_id=None,
+                notif_type="info",
+                title="New Course Catalog Available",
+                body=f"New course catalog for {year_val} {sem_val} is now available.",
+            )
+            db.session.add(notif)
+            db.session.commit()
+
+        with _progress_lock:
+            scraper_progress["status"] = "completed"
+        _log_progress("✅ Scraping completed successfully.")
+
+    except Exception as exc:
+        _log_progress(f"❌ Fatal error: {exc}")
+        with _progress_lock:
+            scraper_progress["status"] = "failed"
+            scraper_progress["error"] = str(exc)
+        try:
+            with flask_app.app_context():
+                from models import db, ScrapedDataset
+                ds = db.session.get(ScrapedDataset, dataset_id)
+                if ds:
+                    ds.status = "failed"
+                    db.session.commit()
+        except Exception:
+            pass
+
+    finally:
+        with _scraper_lock:
+            pass  # lock released automatically when thread exits
+        release_driver()
+
+
+def run_controlled_scraper(
+    selected_fields: List[str],
+    year: str,
+    semester: str,
+    flask_app,
+) -> dict:
+    """
+    Spawn a background thread that runs the scraper.
+
+    Returns {"success": bool, "message": str, "dataset_id": int | None}
+    """
+    if not _scraper_lock.acquire(blocking=False):
+        return {
+            "success": False,
+            "message": "A scraping job is already running.",
+            "dataset_id": None,
+        }
+
+    try:
+        driver = get_driver()
+    except RuntimeError as exc:
+        _scraper_lock.release()
+        return {"success": False, "message": str(exc), "dataset_id": None}
+
+    # Create a ScrapedDataset record to track this job
+    dataset_id: Optional[int] = None
+    try:
+        with flask_app.app_context():
+            from models import db, ScrapedDataset
+            slug_sem = semester.replace(" ", "_")
+            ds = ScrapedDataset(
+                name=f"Scraped_{year}_{slug_sem}",
+                year=year,
+                semester=semester,
+                status="running",
+                selected_fields_json=json.dumps(selected_fields),
+            )
+            db.session.add(ds)
+            db.session.commit()
+            dataset_id = ds.id
+    except Exception as exc:
+        _scraper_lock.release()
+        return {
+            "success": False,
+            "message": f"Failed to create dataset record: {exc}",
+            "dataset_id": None,
+        }
+
+    # Reset progress state
+    with _progress_lock:
+        scraper_progress.update(
+            {
+                "status": "running",
+                "dataset_id": dataset_id,
+                "current_index": 0,
+                "total_courses": 0,
+                "last_course": "",
+                "log": [],
+                "error": None,
+            }
+        )
+
+    _log_progress(f"Starting scrape for {year} {semester} with fields: {selected_fields}")
+
+    t = threading.Thread(
+        target=_worker,
+        args=(driver, selected_fields, dataset_id, flask_app),
+        daemon=True,
+        name="ScraperWorker",
+    )
+    t.start()
+
+    return {
+        "success": True,
+        "message": f"Scraper started for {year} {semester}.",
+        "dataset_id": dataset_id,
+    }
