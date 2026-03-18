@@ -759,7 +759,7 @@ def _extract_row_table_values(row, headers: list[str]) -> dict[str, str]:
 
     # Ensure Subject uses the link text when present
     try:
-        link = row.find_element(By.XPATH, ".//td[2]//a")
+        link = row.find_element(By.CSS_SELECTOR, "td:nth-child(2) a[id$=':jugyoKmkName']")
         link_text = (link.text or "").strip()
         if link_text:
             values["Subject"] = link_text
@@ -767,8 +767,20 @@ def _extract_row_table_values(row, headers: list[str]) -> dict[str, str]:
                 values["Course"] = link_text
             if "Course Title" not in values:
                 values["Course Title"] = link_text
+
+            # Common format in this syllabus page: "8001 Course Name"
+            parts = link_text.split(" ", 1)
+            if parts and parts[0] and any(ch.isdigit() for ch in parts[0]):
+                values.setdefault("Course Number", parts[0].strip())
+            if len(parts) == 2 and parts[1].strip():
+                values.setdefault("Course Title", parts[1].strip())
     except Exception:
         pass
+
+    # Normalize credits like "3Credits" from list rows
+    credits_raw = values.get("Credits") or values.get("Number of Credits") or ""
+    if credits_raw:
+        values["Credits"] = credits_raw.replace(" ", "")
 
     return values
 
@@ -807,6 +819,8 @@ def _find_visible_popup(driver, popup_open_timeout: float = 10.0):
     from selenium.webdriver.common.by import By
 
     candidates = [
+        (By.ID, "pkx02301:dialog"),
+        (By.CSS_SELECTOR, "div[id='pkx02301:dialog']"),
         (By.ID, "pkx02301:dialog"),
         (
             By.XPATH,
@@ -920,12 +934,12 @@ def probe_available_fields(
 
         # Click first course row to inspect popup fields, if available
         first_link = wait.until(
-            EC.element_to_be_clickable((By.XPATH, '//*[@id="funcForm:table_data"]/tr[1]//td[2]//a'))
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "#funcForm\\:table_data tr[data-ri] td:nth-child(2) a[id$=':jugyoKmkName']"))
         )
         _safe_click(driver, first_link)
 
         # Read row values before opening popup
-        first_row = driver.find_element(By.XPATH, '//*[@id="funcForm:table_data"]/tr[1]')
+        first_row = driver.find_element(By.CSS_SELECTOR, "#funcForm\\:table_data tr[data-ri]")
         row_values = _extract_row_table_values(first_row, table_headers)
         for key in row_values.keys():
             key_text = (key or "").strip()
@@ -935,7 +949,7 @@ def probe_available_fields(
 
         popup = _find_visible_popup(driver, popup_open_timeout=popup_open_timeout)
 
-        popup_headers = popup.find_elements(By.CSS_SELECTOR, "div.ui-widget-header")
+        popup_headers = popup.find_elements(By.CSS_SELECTOR, "#pkx02301\\:ch\\:table .rowStyle .ui-widget-header, div.ui-widget-header")
         for header in popup_headers:
             text = (header.text or "").strip()
             if text and text not in seen:
@@ -943,7 +957,7 @@ def probe_available_fields(
                 seen.add(text)
 
         # Additional label extraction patterns used by PrimeFaces detail dialogs
-        for node in popup.find_elements(By.CSS_SELECTOR, "dt, th, .ui-outputlabel"):
+        for node in popup.find_elements(By.CSS_SELECTOR, "#pkx02301\\:ch\\:table .rowStyle .ui-widget-header, dt, th, .ui-outputlabel"):
             text = (node.text or "").strip().rstrip(":")
             if text and text not in seen:
                 fields.append(text)
@@ -1127,6 +1141,31 @@ def _worker(
 
     def _extract_popup_fields(popup) -> dict[str, str]:
         data: dict[str, str] = {}
+
+        # Pattern 0: explicit syllabus row blocks (#pkx02301:ch:table)
+        try:
+            rows = popup.find_elements(By.CSS_SELECTOR, "#pkx02301\\:ch\\:table .rowStyle")
+            for row_block in rows:
+                headers = row_block.find_elements(By.CSS_SELECTOR, "div.ui-widget-header")
+                for header in headers:
+                    label = (header.text or "").strip().rstrip(":")
+                    if not label:
+                        continue
+                    value = ""
+                    try:
+                        content = header.find_element(By.XPATH, "following-sibling::div[contains(@class,'ui-widget-content')][1]")
+                        rich = content.find_elements(By.CSS_SELECTOR, ".fr-box.fr-view, .fr-view")
+                        if rich:
+                            value = (rich[0].text or "").strip()
+                        else:
+                            value = (content.text or "").strip()
+                    except Exception:
+                        value = ""
+                    if label and label not in data:
+                        data[label] = value
+        except Exception:
+            pass
+
         # Pattern 1: section header + following content block
         for header in popup.find_elements(By.CSS_SELECTOR, "div.ui-widget-header"):
             label = (header.text or "").strip()
