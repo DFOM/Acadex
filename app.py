@@ -266,6 +266,8 @@ def health_schema_check():
         'users': {
             'id', 'username', 'email', 'password', 'role', 'role_id', 'is_admin',
             'full_name', 'major_subject_area_id', 'minor_subject_area_id',
+            'ai_opt_in', 'gender', 'career_interests', 'extra_profile_json',
+            'profile_image_path', 'expected_graduation', 'two_factor_enabled', 'two_factor_secret',
         },
         'roles': {'id', 'name'},
         'permissions': {'id', 'key'},
@@ -395,6 +397,34 @@ def _ensure_runtime_schema_compatibility() -> None:
                 conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS major_subject_area_id INTEGER'))
             if 'minor_subject_area_id' not in user_cols:
                 conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS minor_subject_area_id INTEGER'))
+            if 'ai_opt_in' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS ai_opt_in BOOLEAN'))
+                conn.execute(sa_text('UPDATE users SET ai_opt_in = FALSE WHERE ai_opt_in IS NULL'))
+                conn.execute(sa_text('ALTER TABLE users ALTER COLUMN ai_opt_in SET DEFAULT FALSE'))
+                try:
+                    conn.execute(sa_text('ALTER TABLE users ALTER COLUMN ai_opt_in SET NOT NULL'))
+                except Exception:
+                    pass
+            if 'gender' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(50)'))
+            if 'career_interests' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS career_interests TEXT'))
+            if 'extra_profile_json' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS extra_profile_json TEXT'))
+            if 'profile_image_path' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_image_path VARCHAR(255)'))
+            if 'expected_graduation' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS expected_graduation INTEGER'))
+            if 'two_factor_enabled' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN'))
+                conn.execute(sa_text('UPDATE users SET two_factor_enabled = FALSE WHERE two_factor_enabled IS NULL'))
+                conn.execute(sa_text('ALTER TABLE users ALTER COLUMN two_factor_enabled SET DEFAULT FALSE'))
+                try:
+                    conn.execute(sa_text('ALTER TABLE users ALTER COLUMN two_factor_enabled SET NOT NULL'))
+                except Exception:
+                    pass
+            if 'two_factor_secret' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_secret VARCHAR(255)'))
 
     if 'catalog_statuses' in tables:
         cat_cols = {c['name'] for c in insp.get_columns('catalog_statuses')}
