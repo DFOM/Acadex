@@ -1,6 +1,6 @@
 # utils.py
 from sqlalchemy import inspect
-from models import db, Setting
+from models import db, Setting, ScrapedDataset
 import re
 import json
 
@@ -277,12 +277,16 @@ def get_course_data_tables():
 
 def get_available_dataset_years() -> list[int]:
     years = set()
-    for table_name in get_course_data_tables():
-        for match in re.findall(r'(?:19|20)\d{2}', str(table_name)):
+    try:
+        rows = ScrapedDataset.query.filter_by(status='completed').all()
+        for row in rows:
             try:
-                years.add(int(match))
+                y = int(str(row.year or '').strip())
+                years.add(y)
             except Exception:
                 continue
+    except Exception:
+        pass
     return sorted(years)
 
 def is_valid_table_name(name: str) -> bool:

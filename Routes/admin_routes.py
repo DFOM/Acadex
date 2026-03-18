@@ -566,171 +566,37 @@ def delete_announcement(announcement_id):
 @login_required
 @admin_required
 def manage_datasets():
-    tables = get_course_data_tables()
-    return render_template('Admin/manage_datasets.html', tables=tables)
+    from services.scraper_service import scraper_progress as _progress, is_scraper_running
+
+    recent_datasets = (
+        ScrapedDataset.query.order_by(ScrapedDataset.created_at.desc()).limit(25).all()
+    )
+    active_dataset = ScrapedDataset.query.filter_by(status='running').order_by(ScrapedDataset.created_at.desc()).first()
+    completed_count = ScrapedDataset.query.filter_by(status='completed').count()
+    failed_count = ScrapedDataset.query.filter_by(status='failed').count()
+
+    return render_template(
+        'Admin/manage_datasets.html',
+        recent_datasets=recent_datasets,
+        active_dataset=active_dataset,
+        completed_count=completed_count,
+        failed_count=failed_count,
+        scraper_progress=dict(_progress),
+        scraper_running=is_scraper_running(),
+    )
 
 @admin_bp.route('/datasets/upload', methods=['POST'])
 @login_required
 @admin_required
 def upload_dataset():
-    if 'file' not in request.files:
-        flash('No file part', 'error')
-        return redirect(url_for('admin.manage_datasets'))
-    
-    file = request.files['file']
-    if file.filename == '' or not file.filename.endswith('.csv'):
-        flash('Invalid file selection. Must be CSV.', 'error')
-        return redirect(url_for('admin.manage_datasets'))
-
-    filename = secure_filename(file.filename)
-    table_name = filename.replace('.csv', '')
-    table_name = re.sub(r'[^A-Za-z0-9_]', '_', table_name)
-    if not is_valid_table_name(table_name):
-        flash('Invalid course catalog name after sanitization. Please rename the CSV file.', 'error')
-        return redirect(url_for('admin.manage_datasets'))
-    upload_path = os.path.join('uploads', filename)
-    
-    if not os.path.exists('uploads'): os.makedirs('uploads')
-    file.save(upload_path)
-
-    # Best-effort status update (safe if migrations haven't run yet).
-    catalog_term = format_course_catalog_name(table_name)
-    try:
-        row = CatalogStatus.query.filter_by(term=catalog_term).first()
-        if not row:
-            row = CatalogStatus(term=catalog_term, status='processing')
-            db.session.add(row)
-        else:
-            row.status = 'processing'
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-
-    try:
-        processed_rows = []
-        seen_course_nums = set()
-
-        with open(upload_path, mode='r', encoding='utf-8-sig', errors='replace') as f:
-            reader = csv.reader(f)
-            raw_headers = next(reader)
-            
-            def clean_header(h): return re.sub(r'[^a-z0-9]', '', str(h).lower())
-            headers = [clean_header(h) for h in raw_headers]
-            
-            for row in reader:
-                if not row or not any(row): continue 
-                row_dict = dict(zip(headers, row))
-                
-                course_num = row_dict.get('coursenumber', row_dict.get('courseid', row_dict.get('code', ''))).strip()
-                title = row_dict.get('coursetitle', row_dict.get('title', row_dict.get('name', ''))).strip()
-                credits = row_dict.get('credits', row_dict.get('credit', '0'))
-                instructor = row_dict.get('courseinstructor', row_dict.get('instructor', row_dict.get('teacher', ''))).strip()
-                day_period = row_dict.get('dayandperiod', row_dict.get('schedule', row_dict.get('time', ''))).strip()
-                semester = row_dict.get('semester', row_dict.get('term', '')).strip()
-                area_of_study = row_dict.get('areaofstudy', row_dict.get('subjectarea', row_dict.get('faculty', row_dict.get('subject', '')))).strip()
-                year_available = row_dict.get('yearavailable', row_dict.get('targetyear', row_dict.get('year', ''))).strip()
-                prerequisite = row_dict.get('prerequisite', row_dict.get('prereq', row_dict.get('prerequisites', ''))).strip()
-                
-                if course_num:
-                    sec_match = re.search(r'Sec\s*(\d+)', title, re.IGNORECASE)
-                    sec_str = f"-S{sec_match.group(1)}" if sec_match else ""
-                    sem_str = "-Sp" if "spring" in semester.lower() else "-Fa" if "fall" in semester.lower() else ""
-                    
-                    base_unique = f"{course_num}{sec_str}{sem_str}"
-                    unique_course_num = base_unique
-                    counter = 1
-                    while unique_course_num in seen_course_nums:
-                        unique_course_num = f"{base_unique}-V{counter}"
-                        counter += 1
-                    seen_course_nums.add(unique_course_num)
-
-                    processed_rows.append({
-                        "Course_Number": unique_course_num,
-                        "Course_Title": title,
-                        "Credits": credits,
-                        "Instructor": instructor,
-                        "Day_and_Period": day_period,
-                        "Area_of_Study": area_of_study,
-                        "Year_Available": year_available,
-                        "Prerequisite": prerequisite,
-                        "subject_area_id": None,
-                        "Semester": semester
-                    })
-
-        df = pd.DataFrame(processed_rows)
-        df.to_sql(table_name, con=db.engine, if_exists='replace', index=False)
-
-        try:
-            row = CatalogStatus.query.filter_by(term=catalog_term).first()
-            if not row:
-                row = CatalogStatus(term=catalog_term, status='available')
-                db.session.add(row)
-            else:
-                row.status = 'available'
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-        # Notifications MVP: create an in-app notification for all registered users.
-        try:
-            if _setting_truthy(get_app_setting('ai_notifications_enabled', 'false')):
-                insp = inspect(db.engine)
-                if insp.has_table('notifications'):
-                    title = 'New Course Catalog Available'
-                    body = f'The {catalog_term} Course Catalog is now available.'
-
-                    # 1) Broadcast notification (visible to guest sessions via API)
-                    db.session.add(Notification(user_id=None, session_id=None, notif_type='catalog', title=title, body=body))
-
-                    # 2) Per-user notifications for authenticated inboxes
-                    user_ids = [r[0] for r in db.session.query(User.id).all()]
-                    if user_ids:
-                        notifications = [
-                            Notification(user_id=uid, session_id=None, notif_type='catalog', title=title, body=body)
-                            for uid in user_ids
-                        ]
-                        db.session.bulk_save_objects(notifications)
-
-                    db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            print(f"Catalog upload notification creation failed: {e}")
-
-        flash(f'Course Catalog "{table_name}" uploaded and parsed successfully!', 'success')
-    except Exception as e:
-        try:
-            row = CatalogStatus.query.filter_by(term=catalog_term).first()
-            if row:
-                row.status = 'processing'
-                db.session.commit()
-        except Exception:
-            db.session.rollback()
-        flash('Upload failed.', 'error')
-
+    flash('CSV upload is deprecated. Use University Connection scraping to generate datasets.', 'warning')
     return redirect(url_for('admin.manage_datasets'))
 
 @admin_bp.route('/datasets/delete/<table_name>', methods=['POST'])
 @login_required
 @admin_required
 def delete_dataset(table_name):
-    try:
-        if not is_valid_table_name(table_name) or table_name not in get_course_data_tables():
-            flash('Invalid course catalog table name.', 'error')
-            return redirect(url_for('admin.manage_datasets'))
-        db.session.execute(text(f'DROP TABLE "{table_name}"'))
-        db.session.commit()
-
-        # Best-effort cleanup of status row
-        try:
-            CatalogStatus.query.filter_by(term=format_course_catalog_name(table_name)).delete()
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-
-        flash(f'Course Catalog "{table_name}" deleted.', 'success')
-    except Exception as e:
-        db.session.rollback()
-        flash('Error deleting dataset.', 'error')
+    flash('Legacy table deletion is disabled. Manage scraper datasets from University Connection.', 'warning')
     return redirect(url_for('admin.manage_datasets'))
 
 @admin_bp.route('/update_app_settings', methods=['POST'])

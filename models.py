@@ -309,4 +309,16 @@ class ScrapedCourse(db.Model):
     # JSON-encoded dict of field → value pairs chosen during the scraping run
     data_json = db.Column(db.Text, nullable=False, default='{}')
 
+    # Canonical searchable columns sourced from scrape output
+    course_number = db.Column(db.String(120), nullable=True, index=True)
+    course_title = db.Column(db.String(300), nullable=True, index=True)
+    credits = db.Column(db.Float, nullable=True)
+    instructor = db.Column(db.String(255), nullable=True, index=True)
+    day_and_period = db.Column(db.String(255), nullable=True, index=True)
+    area_of_study = db.Column(db.String(255), nullable=True, index=True)
+    prerequisite = db.Column(db.Text, nullable=True)
+
+    # Any dynamic fields not mapped to canonical columns
+    additional_attributes_json = db.Column(db.Text, nullable=True)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)

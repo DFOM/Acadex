@@ -1,53 +1,84 @@
 {% extends "Layouts/admin_base.html" %}
-{% block title %}Manage Course Catalogs{% endblock %}
+{% block title %}Manage Datasets{% endblock %}
 
 {% block content %}
-<h2 class="mb-4">Course Catalog Management</h2>
+<h2 class="mb-4">Dataset Management (Scraper First)</h2>
 
-<div class="row">
-    <div class="col-md-5 mb-4">
-        <div class="card shadow-sm">
-            <div class="card-header" style="background: var(--ax-surface);"><h5 class="mb-0">Upload New Course Catalog CSV</h5></div>
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
             <div class="card-body">
-                <p class="text-muted small">File should be named with Year and Semester (e.g., <code>2025_Spring.csv</code> or <code>2025_All_Courses.csv</code>).</p>
-                <form action="{{ url_for('admin.upload_dataset') }}" method="POST" enctype="multipart/form-data">
-                    <div class="mb-3">
-                        <input type="file" name="file" class="form-control" accept=".csv" required>
-                    </div>
-                    <button type="submit" class="btn btn-success w-100">Upload & Process Catalog</button>
-                </form>
+                <div class="text-muted small">Active Sync</div>
+                <div class="fs-5 fw-bold">{{ 'Running' if scraper_running else 'Idle' }}</div>
             </div>
         </div>
     </div>
-
-    <div class="col-md-7 mb-4">
-        <div class="card shadow-sm">
-            <div class="card-header" style="background: var(--ax-surface);"><h5 class="mb-0">Active Course Catalog Tables</h5></div>
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
             <div class="card-body">
-                <table class="table table-striped">
-                    <thead>
-                        <tr>
-                            <th>Table Name (Database)</th>
-                            <th class="text-end">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for table in tables %}
-                        <tr>
-                            <td class="align-middle fw-bold">{{ table }}</td>
-                            <td class="text-end">
-                                <form action="{{ url_for('admin.delete_dataset', table_name=table) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete the {{ table }} course catalog?');">
-                                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
-                                </form>
-                            </td>
-                        </tr>
-                        {% else %}
-                        <tr><td colspan="2" class="text-center">No course catalogs uploaded yet.</td></tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+                <div class="text-muted small">Completed Datasets</div>
+                <div class="fs-5 fw-bold">{{ completed_count }}</div>
             </div>
         </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="text-muted small">Failed Datasets</div>
+                <div class="fs-5 fw-bold">{{ failed_count }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100">
+            <div class="card-body d-grid">
+                <a href="{{ url_for('admin.university_connection') }}" class="btn btn-primary">Open Scrape/Sync</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header" style="background: var(--ax-surface);">
+        <h5 class="mb-0">Live Scraper Progress</h5>
+    </div>
+    <div class="card-body">
+        <div class="mb-2"><strong>Status:</strong> {{ scraper_progress.status or 'idle' }}</div>
+        <div class="mb-2"><strong>Dataset ID:</strong> {{ scraper_progress.dataset_id or '—' }}</div>
+        <div class="mb-2"><strong>Progress:</strong> {{ scraper_progress.current_index or 0 }} / {{ scraper_progress.total_courses or 0 }}</div>
+        <div class="mb-0"><strong>Last Course:</strong> {{ scraper_progress.last_course or '—' }}</div>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header" style="background: var(--ax-surface);"><h5 class="mb-0">Scraped Datasets</h5></div>
+    <div class="card-body">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Year</th>
+                    <th>Semester</th>
+                    <th>Status</th>
+                    <th>Courses</th>
+                    <th>Created</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ds in recent_datasets %}
+                <tr>
+                    <td class="fw-bold">{{ ds.name }}</td>
+                    <td>{{ ds.year }}</td>
+                    <td>{{ ds.semester }}</td>
+                    <td>{{ ds.status }}</td>
+                    <td>{{ ds.current_index }} / {{ ds.total_courses }}</td>
+                    <td>{{ ds.created_at.strftime('%Y-%m-%d %H:%M') if ds.created_at else '—' }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="text-center">No scraped datasets yet. Use Scrape/Sync to create one.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
 </div>
 {% endblock %}

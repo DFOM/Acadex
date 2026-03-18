@@ -1,7 +1,7 @@
 # Routes/student_routes.py
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session, current_app, send_file
 from flask_login import login_required, current_user
-from sqlalchemy import text, or_, and_, inspect
+from sqlalchemy import text, or_, and_, inspect, func
 import uuid
 import re
 import json
@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Set, Iterable
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
-from models import db, User, Schedule, ScheduleCourse, Period, Setting, Announcement, AIEvent, BehaviorEvent, Notification, SubjectArea
+from models import db, User, Schedule, ScheduleCourse, Period, Setting, Announcement, AIEvent, BehaviorEvent, Notification, SubjectArea, ScrapedDataset, ScrapedCourse
 from utils import (
     get_best_course_table,
     get_course_data_tables,
@@ -517,64 +517,109 @@ def _build_learning_signals(
     }
 
 
+def _dataset_for_term(year: Any, semester: Any) -> ScrapedDataset | None:
+    year_text = str(year or '').strip()
+    sem_text = str(semester or '').strip().lower()
+    if not year_text:
+        return None
+
+    query = ScrapedDataset.query.filter(
+        ScrapedDataset.status == 'completed',
+        ScrapedDataset.year == year_text,
+    )
+    if sem_text:
+        query = query.filter(func.lower(ScrapedDataset.semester) == sem_text)
+
+    row = query.order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc()).first()
+    if row:
+        return row
+
+    return (
+        ScrapedDataset.query.filter(
+            ScrapedDataset.status == 'completed',
+            ScrapedDataset.year == year_text,
+        )
+        .order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc())
+        .first()
+    )
+
+
+def _scraped_course_to_catalog_row(sc: ScrapedCourse) -> Dict[str, Any]:
+    raw = _safe_json_load_dict(getattr(sc, 'data_json', None))
+
+    def pick(*keys: str) -> str:
+        for key in keys:
+            value = raw.get(key)
+            if value not in (None, ''):
+                return str(value).strip()
+        return ''
+
+    course_number = str(getattr(sc, 'course_number', None) or pick('Course Number', 'Course') or '').strip()
+    course_title = str(getattr(sc, 'course_title', None) or pick('Course Title', 'Subject') or '').strip()
+    instructor = str(getattr(sc, 'instructor', None) or pick('Instructor', 'Faculty', 'Course Instructor') or '').strip()
+    day_and_period = str(getattr(sc, 'day_and_period', None) or pick('Day and Period') or '').strip()
+    area_of_study = str(getattr(sc, 'area_of_study', None) or pick('Area of Study', 'Subject Area') or '').strip()
+    prerequisite = str(getattr(sc, 'prerequisite', None) or pick('Prerequisite', 'Prerequisites') or '').strip()
+
+    credits_value = getattr(sc, 'credits', None)
+    if credits_value is None:
+        c = pick('Credits')
+        try:
+            credits_value = float(c) if c else 0.0
+        except Exception:
+            credits_value = 0.0
+
+    return {
+        'Course_Number': course_number,
+        'Course_Title': course_title,
+        'Credits': float(credits_value or 0.0),
+        'Instructor': instructor,
+        'Day_and_Period': day_and_period,
+        'Area_of_Study': area_of_study,
+        'Prerequisite': prerequisite,
+        'dataset_id': sc.dataset_id,
+    }
+
+
+def _load_scraped_catalog_for_term(year: Any, semester: Any) -> tuple[list[Dict[str, Any]], int | None]:
+    ds = _dataset_for_term(year, semester)
+    if not ds:
+        return [], None
+    rows = (
+        ScrapedCourse.query.filter_by(dataset_id=ds.id)
+        .order_by(ScrapedCourse.id.asc())
+        .all()
+    )
+    return [_scraped_course_to_catalog_row(r) for r in rows], ds.id
+
+
 def _build_course_metadata_index() -> Dict[str, Dict[str, Any]]:
-    tables = [t for t in get_course_data_tables() if is_valid_table_name(t)]
-    if not tables:
-        return {}
+    rows = (
+        db.session.query(ScrapedCourse)
+        .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
+        .filter(ScrapedDataset.status == 'completed')
+        .order_by(ScrapedDataset.created_at.desc(), ScrapedCourse.id.asc())
+        .all()
+    )
 
-    try:
-        insp = inspect(db.engine)
-        union_parts = []
-        for table_name in tables:
-            cols = {c['name'] for c in insp.get_columns(table_name)}
-            area_expr = '"Area_of_Study"' if 'Area_of_Study' in cols else 'NULL'
-            credits_expr = '"Credits"' if 'Credits' in cols else '0'
-            title_expr = '"Course_Title"' if 'Course_Title' in cols else 'NULL'
-            instructor_expr = '"Instructor"' if 'Instructor' in cols else 'NULL'
-            union_parts.append(
-                f'''SELECT "Course_Number" as course_number,
-                           {title_expr} as course_title,
-                           {instructor_expr} as instructor,
-                           {area_expr} as area_of_study,
-                           {credits_expr} as credits
-                    FROM "{table_name}"'''
-            )
-
-        sql = ' UNION ALL '.join(union_parts)
-        rows = db.session.execute(
-            text(
-                f'''
-                SELECT course_number,
-                      MAX(course_title) as course_title,
-                        MAX(instructor) as instructor,
-                       MAX(area_of_study) as area_of_study,
-                       MAX(credits) as credits
-                FROM ({sql})
-                GROUP BY course_number
-                '''
-            )
-        ).fetchall()
-
-        index: Dict[str, Dict[str, Any]] = {}
-        for r in rows:
-            d = dict(r._mapping)
-            course_number = _normalize_course_number(d.get('course_number'))
-            if not course_number:
-                continue
-            try:
-                credits = float(d.get('credits') or 0.0)
-            except Exception:
-                credits = 0.0
-            index[course_number] = {
-                'title': (d.get('course_title') or '').strip(),
-                'instructor': (d.get('instructor') or '').strip(),
-                'area': (d.get('area_of_study') or '').strip(),
-                'credits': max(0.0, credits),
-            }
-        return index
-    except Exception:
-        db.session.rollback()
-        return {}
+    index: Dict[str, Dict[str, Any]] = {}
+    for sc in rows:
+        mapped = _scraped_course_to_catalog_row(sc)
+        course_number = _normalize_course_number(mapped.get('Course_Number'))
+        if not course_number or course_number in index:
+            continue
+        try:
+            credits = float(mapped.get('Credits') or 0.0)
+        except Exception:
+            credits = 0.0
+        index[course_number] = {
+            'title': str(mapped.get('Course_Title') or '').strip(),
+            'instructor': str(mapped.get('Instructor') or '').strip(),
+            'area': str(mapped.get('Area_of_Study') or '').strip(),
+            'day_and_period': str(mapped.get('Day_and_Period') or '').strip(),
+            'credits': max(0.0, credits),
+        }
+    return index
 
 
 def _build_prereq_title_lookup() -> Dict[str, str]:
@@ -919,49 +964,10 @@ def _degree_progress_context(user_id: int) -> Dict[str, Any]:
 
 
 def _load_catalog_for_term(year: int, semester: str) -> tuple[list[Dict[str, Any]], str | None]:
-    table_name, needs_sem_filter = get_best_course_table(year, semester)
-    if not table_name or not is_valid_table_name(table_name):
+    rows, dataset_id = _load_scraped_catalog_for_term(year, semester)
+    if not rows:
         return [], None
-
-    semester_label = None
-    if needs_sem_filter and table_has_column(table_name, 'Semester'):
-        semester_label = semester_label_for_dataset(year, semester)
-
-    try:
-        sql = (
-            f'''SELECT "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Area_of_Study", "Prerequisite"
-                FROM "{table_name}"'''
-        )
-        params: Dict[str, Any] = {}
-        if semester_label:
-            sql += ' WHERE "Semester" = :semester_label'
-            params['semester_label'] = semester_label
-        rows = db.session.execute(text(sql), params).fetchall()
-        return [dict(r._mapping) for r in rows], table_name
-    except Exception as e:
-        db.session.rollback()
-        msg = str(e)
-        if 'Area_of_Study' in msg and ('no such column' in msg.lower() or 'undefined column' in msg.lower()):
-            try:
-                sql = (
-                    f'''SELECT "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Prerequisite"
-                        FROM "{table_name}"'''
-                )
-                params = {}
-                if semester_label:
-                    sql += ' WHERE "Semester" = :semester_label'
-                    params['semester_label'] = semester_label
-                rows = db.session.execute(text(sql), params).fetchall()
-                payload = []
-                for r in rows:
-                    d = dict(r._mapping)
-                    d['Area_of_Study'] = None
-                    payload.append(d)
-                return payload, table_name
-            except Exception:
-                db.session.rollback()
-                return [], None
-        return [], None
+    return rows, f"scraped_dataset_{dataset_id}"
 
 @student_bp.route('/courses/search')
 def search_courses():
@@ -997,27 +1003,14 @@ def search_courses():
         resolved_year = sched.year
         resolved_semester = sched.semester
 
-    table_name, needs_sem_filter = get_best_course_table(resolved_year, resolved_semester)
-    if not table_name or not is_valid_table_name(table_name):
+    catalog_rows, dataset_id = _load_scraped_catalog_for_term(resolved_year, resolved_semester)
+    if not catalog_rows:
         return jsonify([])
-
-    semester_label = None
-    if needs_sem_filter and table_has_column(table_name, 'Semester') and resolved_year and resolved_semester:
-        semester_label = semester_label_for_dataset(resolved_year, resolved_semester)
 
     # Full catalog load for the schedule editor.
     if json_mode and schedule_id and query_str == '':
         try:
-            sql = (
-                f'''SELECT "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Area_of_Study", "Prerequisite"
-                    FROM "{table_name}"'''
-            )
-            params = {}
-            if semester_label:
-                sql += ' WHERE "Semester" = :semester_label'
-                params['semester_label'] = semester_label
-            results = db.session.execute(text(sql), params).fetchall()
-            payload = [_add_display_fields(dict(r._mapping)) for r in results]
+            payload = [_add_display_fields(dict(r)) for r in catalog_rows]
 
             log_behavior_event_safe(
                 'catalog_loaded',
@@ -1027,46 +1020,12 @@ def search_courses():
                     'year': resolved_year,
                     'semester': resolved_semester,
                     'source': 'schedule_editor',
+                    'dataset_id': dataset_id,
                 },
             )
             return jsonify(payload)
         except Exception as e:
             db.session.rollback()
-            # Backward compatibility: some uploaded datasets don't include Area_of_Study.
-            msg = str(e)
-            if 'Area_of_Study' in msg and ('no such column' in msg.lower() or 'undefined column' in msg.lower()):
-                try:
-                    sql = (
-                        f'''SELECT "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Prerequisite"
-                            FROM "{table_name}"'''
-                    )
-                    params = {}
-                    if semester_label:
-                        sql += ' WHERE "Semester" = :semester_label'
-                        params['semester_label'] = semester_label
-                    results = db.session.execute(text(sql), params).fetchall()
-                    payload = []
-                    for r in results:
-                        d = dict(r._mapping)
-                        d['Area_of_Study'] = None
-                        payload.append(_add_display_fields(d))
-
-                    log_behavior_event_safe(
-                        'catalog_loaded',
-                        schedule_id=schedule_id_int,
-                        metadata={
-                            'result_count': len(payload),
-                            'year': resolved_year,
-                            'semester': resolved_semester,
-                            'source': 'schedule_editor',
-                        },
-                    )
-                    return jsonify(payload)
-                except Exception as e2:
-                    db.session.rollback()
-                    print(f"Catalog load error (fallback): {e2}")
-                    return jsonify([])
-
             print(f"Catalog load error: {e}")
             return jsonify([])
 
@@ -1086,48 +1045,44 @@ def search_courses():
     )
 
     try:
-        sql = (
-            f'''SELECT "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Area_of_Study", "Prerequisite"
-                FROM "{table_name}"
-                WHERE (LOWER("Course_Number") LIKE LOWER(:q)
-                   OR LOWER("Course_Title") LIKE LOWER(:q))'''
-        )
-        params = {'q': f'%{query_str}%'}
-        if semester_label:
-            sql += ' AND "Semester" = :semester_label'
-            params['semester_label'] = semester_label
-        sql += ' LIMIT 50'
-        results = db.session.execute(text(sql), params).fetchall()
-        payload = [_add_display_fields(dict(r._mapping)) for r in results]
+        q = query_str.lower()
+        filtered = [
+            row for row in catalog_rows
+            if q in str(row.get('Course_Number') or '').lower()
+            or q in str(row.get('Course_Title') or '').lower()
+        ]
+
+        # Optional direct filters
+        day_period = (request.args.get('day_period') or '').strip().lower()
+        faculty = (request.args.get('faculty') or '').strip().lower()
+        subject_area = (request.args.get('subject_area') or '').strip().lower()
+        credits_min = request.args.get('credits_min')
+        credits_max = request.args.get('credits_max')
+
+        if day_period:
+            filtered = [r for r in filtered if day_period in str(r.get('Day_and_Period') or '').lower()]
+        if faculty:
+            filtered = [r for r in filtered if faculty in str(r.get('Instructor') or '').lower()]
+        if subject_area:
+            filtered = [r for r in filtered if subject_area in str(r.get('Area_of_Study') or '').lower()]
+
+        def _safe_float(v):
+            try:
+                return float(v)
+            except Exception:
+                return None
+
+        min_v = _safe_float(credits_min)
+        max_v = _safe_float(credits_max)
+        if min_v is not None:
+            filtered = [r for r in filtered if _safe_float(r.get('Credits')) is not None and _safe_float(r.get('Credits')) >= min_v]
+        if max_v is not None:
+            filtered = [r for r in filtered if _safe_float(r.get('Credits')) is not None and _safe_float(r.get('Credits')) <= max_v]
+
+        payload = [_add_display_fields(dict(r)) for r in filtered[:200]]
         return jsonify(payload)
     except Exception as e:
         db.session.rollback()
-        msg = str(e)
-        if 'Area_of_Study' in msg and ('no such column' in msg.lower() or 'undefined column' in msg.lower()):
-            try:
-                sql = (
-                    f'''SELECT "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Prerequisite"
-                        FROM "{table_name}"
-                        WHERE (LOWER("Course_Number") LIKE LOWER(:q)
-                           OR LOWER("Course_Title") LIKE LOWER(:q))'''
-                )
-                params = {'q': f'%{query_str}%'}
-                if semester_label:
-                    sql += ' AND "Semester" = :semester_label'
-                    params['semester_label'] = semester_label
-                sql += ' LIMIT 50'
-                results = db.session.execute(text(sql), params).fetchall()
-                payload = []
-                for r in results:
-                    d = dict(r._mapping)
-                    d['Area_of_Study'] = None
-                    payload.append(_add_display_fields(d))
-                return jsonify(payload)
-            except Exception as e2:
-                db.session.rollback()
-                print(f"Search error (fallback): {e2}")
-                return jsonify([])
-
         print(f"Search error: {e}")
         return jsonify([])
 
@@ -1138,11 +1093,7 @@ def user_dashboard():
     schedules = Schedule.query.filter_by(user_id=current_user.id).order_by(Schedule.year.desc()).all()
     past_schedules = [s for s in schedules if s.schedule_type == 'past']
     dataset_years = get_available_dataset_years()
-    
-    tables = get_course_data_tables()
-    # Validate table identifiers before using them in SQL
-    validated_tables = [t for t in tables if is_valid_table_name(t)]
-    
+
     total_credits = 0.0
     area_credits = {}
     top_faculty = {}
@@ -1150,60 +1101,53 @@ def user_dashboard():
     overall_courses_for_gpa = []
     future_courses_for_predictive = []
 
-    if validated_tables:
-        table_union = " UNION ".join([f'SELECT "Course_Number", "Course_Title", "Credits", "Area_of_Study", "Instructor", "Day_and_Period" FROM "{t}"' for t in validated_tables])
-
-        try:
-            # 1. Past Courses (For overall GPA, total credits, areas, faculty, periods)
-            past_query = text(f'''
-                SELECT sc.grade, c."Credits", c."Area_of_Study", c."Instructor", c."Day_and_Period"
+    metadata_index = _build_course_metadata_index()
+    try:
+        joined_rows = db.session.execute(
+            text(
+                '''
+                SELECT s.schedule_type, sc.grade, sc.course_number
                 FROM schedule_courses sc
                 JOIN schedules s ON sc.schedule_id = s.id
-                JOIN ({table_union}) c ON sc.course_number = c."Course_Number"
-                WHERE s.user_id = :uid AND s.schedule_type = 'past'
-            ''')
-            past_results = db.session.execute(past_query, {'uid': current_user.id}).fetchall()
+                WHERE s.user_id = :uid
+                '''
+            ),
+            {'uid': current_user.id},
+        ).fetchall()
 
-            for row in past_results:
-                try:
-                    cred = float(row.Credits) if row.Credits else 0.0
-                except ValueError:
-                    cred = 0.0
+        for row in joined_rows:
+            cnum = _normalize_course_number(row.course_number)
+            meta = metadata_index.get(cnum, {})
+            credits_value = float(meta.get('credits') or 0.0)
+            instructor = str(meta.get('instructor') or '').strip()
+            area = str(meta.get('area') or '').strip() or 'Unspecified'
+            day_and_period = str(meta.get('day_and_period') or '').strip()
+            grade = str(row.grade or '').strip()
+            schedule_type = str(row.schedule_type or '').strip().lower()
 
-                if row.grade and row.grade.upper() != 'F':
-                    total_credits += cred
-                    area = row.Area_of_Study if row.Area_of_Study else 'Unspecified'
-                    area_credits[area] = area_credits.get(area, 0) + cred
+            if schedule_type == 'past':
+                if grade and grade.upper() != 'F':
+                    total_credits += credits_value
+                    area_credits[area] = area_credits.get(area, 0) + credits_value
 
-                if row.grade:
-                    overall_courses_for_gpa.append({'grade': row.grade, 'Credits': row.Credits})
+                if grade:
+                    overall_courses_for_gpa.append({'grade': grade, 'Credits': credits_value})
 
-                instructor = row.Instructor
-                if instructor and instructor.strip():
+                if instructor:
                     top_faculty[instructor] = top_faculty.get(instructor, 0) + 1
 
-                dp = row.Day_and_Period
-                if dp:
-                    days = re.findall(r'[A-Za-z]+', dp)
+                if day_and_period:
+                    days = re.findall(r'[A-Za-z]+', day_and_period)
                     for d in days:
-                        if len(d) >= 3: # E.g., Mon, Tue
+                        if len(d) >= 3:
                             top_periods[d] = top_periods.get(d, 0) + 1
 
-            # 2. Future Courses (For predictive GPA, assuming user inputs expected grades)
-            future_query = text(f'''
-                SELECT sc.grade, c."Credits"
-                FROM schedule_courses sc
-                JOIN schedules s ON sc.schedule_id = s.id
-                JOIN ({table_union}) c ON sc.course_number = c."Course_Number"
-                WHERE s.user_id = :uid AND s.schedule_type = 'future' AND sc.grade IS NOT NULL AND sc.grade != ''
-            ''')
-            future_results = db.session.execute(future_query, {'uid': current_user.id}).fetchall()
-            for row in future_results:
-                future_courses_for_predictive.append({'grade': row.grade, 'Credits': row.Credits})
-                
-        except Exception as e:
-            db.session.rollback()
-            print(f"Error calculating dashboard analytics: {e}")
+            if schedule_type == 'future' and grade:
+                future_courses_for_predictive.append({'grade': grade, 'Credits': credits_value})
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error calculating dashboard analytics: {e}")
 
     overall_gpa = calculate_gpa(overall_courses_for_gpa) if overall_courses_for_gpa else 0.0
 

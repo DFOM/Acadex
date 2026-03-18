@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shutil
 import subprocess
 import threading
@@ -564,6 +565,51 @@ def _match_value_by_label(values: dict[str, str], target_label: str) -> str:
     return ""
 
 
+def _coerce_float(value: str | int | float | None) -> float | None:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    s = s.replace(',', '')
+    match = re.search(r'-?\d+(?:\.\d+)?', s)
+    if not match:
+        return None
+    try:
+        return float(match.group(0))
+    except Exception:
+        return None
+
+
+def _build_canonical_scraped_fields(course_data: dict[str, str]) -> tuple[dict[str, object], dict[str, str]]:
+    canonical = {
+        "course_number": _match_value_by_label(course_data, "Course Number") or _match_value_by_label(course_data, "Course"),
+        "course_title": _match_value_by_label(course_data, "Course Title") or _match_value_by_label(course_data, "Subject"),
+        "credits": _coerce_float(_match_value_by_label(course_data, "Credits")),
+        "instructor": _match_value_by_label(course_data, "Instructor") or _match_value_by_label(course_data, "Faculty") or _match_value_by_label(course_data, "Course Instructor"),
+        "day_and_period": _match_value_by_label(course_data, "Day and Period"),
+        "area_of_study": _match_value_by_label(course_data, "Area of Study") or _match_value_by_label(course_data, "Subject Area"),
+        "prerequisite": _match_value_by_label(course_data, "Prerequisite") or _match_value_by_label(course_data, "Prerequisites"),
+    }
+
+    canonical_labels = {
+        "course number", "course", "course title", "subject", "credits",
+        "instructor", "faculty", "course instructor", "day and period",
+        "area of study", "subject area", "prerequisite", "prerequisites",
+    }
+
+    additional: dict[str, str] = {}
+    for key, value in (course_data or {}).items():
+        normalized_key = _normalize_label(str(key or ""))
+        if not normalized_key or normalized_key in canonical_labels:
+            continue
+        v = str(value or "").strip()
+        if v:
+            additional[str(key)] = v
+
+    return canonical, additional
+
+
 def _extract_table_headers(driver) -> list[str]:
     from selenium.webdriver.common.by import By
 
@@ -617,6 +663,36 @@ def _extract_row_table_values(row, headers: list[str]) -> dict[str, str]:
         pass
 
     return values
+
+
+def _safe_click(driver, element) -> None:
+    """Click an element robustly when fixed headers/overlays intercept native clicks."""
+    try:
+        driver.execute_script(
+            "arguments[0].scrollIntoView({block:'center', inline:'center'});",
+            element,
+        )
+        time.sleep(0.12)
+    except Exception:
+        pass
+
+    try:
+        element.click()
+        return
+    except Exception:
+        pass
+
+    try:
+        driver.execute_script("arguments[0].click();", element)
+        return
+    except Exception:
+        pass
+
+    # Final attempt: slightly offset scroll then JS click
+    driver.execute_script(
+        "window.scrollBy(0, -120); arguments[0].click();",
+        element,
+    )
 
 
 def _find_visible_popup(driver, popup_open_timeout: float = 10.0):
@@ -704,7 +780,7 @@ def probe_available_fields(
         first_link = wait.until(
             EC.element_to_be_clickable((By.XPATH, '//*[@id="funcForm:table_data"]/tr[1]//td[2]//a'))
         )
-        first_link.click()
+        _safe_click(driver, first_link)
 
         # Read row values before opening popup
         first_row = driver.find_element(By.XPATH, '//*[@id="funcForm:table_data"]/tr[1]')
@@ -733,7 +809,8 @@ def probe_available_fields(
 
         # Close popup
         try:
-            popup.find_element(By.CSS_SELECTOR, ".ui-dialog-titlebar-close").click()
+            close_btn = popup.find_element(By.CSS_SELECTOR, ".ui-dialog-titlebar-close")
+            _safe_click(driver, close_btn)
             time.sleep(max(0.0, float(popup_close_delay or 0.0)))
         except Exception:
             pass
@@ -961,7 +1038,8 @@ def _worker(
 
     def _close_popup(popup) -> None:
         try:
-            popup.find_element(By.CSS_SELECTOR, ".ui-dialog-titlebar-close").click()
+            close_btn = popup.find_element(By.CSS_SELECTOR, ".ui-dialog-titlebar-close")
+            _safe_click(driver, close_btn)
             time.sleep(max(0.0, float(popup_close_delay or 0.0)))
             return
         except Exception:
@@ -1003,7 +1081,7 @@ def _worker(
                 row_values = _extract_row_table_values(row, table_headers)
                 day_and_period = row_values.get("Day and period", "")
                 subject_link = row.find_element(By.XPATH, ".//td[2]/a")
-                subject_link.click()
+                _safe_click(driver, subject_link)
 
                 popup = _find_visible_popup(driver, popup_open_timeout=popup_open_timeout)
 
@@ -1032,9 +1110,18 @@ def _worker(
                 # Persist the row
                 with flask_app.app_context():
                     from models import db, ScrapedCourse, ScrapedDataset
+                    canonical, additional = _build_canonical_scraped_fields(course_data)
                     sc = ScrapedCourse(
                         dataset_id=dataset_id,
                         data_json=json.dumps(course_data, ensure_ascii=False),
+                        course_number=str(canonical.get("course_number") or "").strip() or None,
+                        course_title=str(canonical.get("course_title") or "").strip() or None,
+                        credits=canonical.get("credits"),
+                        instructor=str(canonical.get("instructor") or "").strip() or None,
+                        day_and_period=str(canonical.get("day_and_period") or "").strip() or None,
+                        area_of_study=str(canonical.get("area_of_study") or "").strip() or None,
+                        prerequisite=str(canonical.get("prerequisite") or "").strip() or None,
+                        additional_attributes_json=json.dumps(additional, ensure_ascii=False) if additional else None,
                     )
                     db.session.add(sc)
                     ds = db.session.get(ScrapedDataset, dataset_id)
