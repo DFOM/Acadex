@@ -14,6 +14,20 @@ role_permissions = db.Table(
 )
 
 
+course_faculty = db.Table(
+    'course_faculty',
+    db.Column('course_id', db.Integer, db.ForeignKey('courses.id'), primary_key=True),
+    db.Column('faculty_id', db.Integer, db.ForeignKey('faculty.id'), primary_key=True),
+)
+
+
+faculty_advisor_area = db.Table(
+    'faculty_advisor_area',
+    db.Column('faculty_id', db.Integer, db.ForeignKey('faculty.id'), primary_key=True),
+    db.Column('subject_area_id', db.Integer, db.ForeignKey('subject_areas.id'), primary_key=True),
+)
+
+
 class Role(db.Model):
     __tablename__ = 'roles'
 
@@ -157,6 +171,39 @@ class SubjectArea(db.Model):
     min_depth_credits = db.Column(db.Float, default=0.0)
     min_major_credits = db.Column(db.Float, default=0.0, nullable=False)
     min_minor_credits = db.Column(db.Float, default=0.0, nullable=False)
+
+
+class Course(db.Model):
+    __tablename__ = 'courses'
+
+    id = db.Column(db.Integer, primary_key=True)
+    course_number = db.Column(db.String(120), nullable=False, index=True)
+    title = db.Column(db.String(300), nullable=False)
+    credits = db.Column(db.Float, nullable=True)
+    day_period = db.Column(db.String(255), nullable=False, index=True)
+    semester = db.Column(db.String(50), nullable=True, index=True)
+    year = db.Column(db.String(20), nullable=True, index=True)
+    prerequisite = db.Column(db.Text, nullable=True)
+    subject_area = db.Column(db.String(255), nullable=True, index=True)
+    instructor = db.Column(db.String(255), nullable=True, index=True)
+    source = db.Column(db.String(20), default='scraped', nullable=False, index=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    faculty = db.relationship('Faculty', secondary=course_faculty, backref='courses')
+
+
+class Faculty(db.Model):
+    __tablename__ = 'faculty'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    email = db.Column(db.String(120), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    advisor_areas = db.relationship('SubjectArea', secondary=faculty_advisor_area, backref='advisors')
 
 class Period(db.Model):
     __tablename__ = 'periods'

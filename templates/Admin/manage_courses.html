@@ -1,0 +1,100 @@
+{% extends "Layouts/admin_base.html" %}
+{% block title %}Manage Courses{% endblock %}
+
+{% block content %}
+<div id="coursesAdminApp">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="mb-0">Manage Courses</h2>
+        <button class="btn btn-primary" id="addCourseBtn" type="button">Add Course</button>
+    </div>
+
+    <div class="card shadow-sm border-0">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover w-100 mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Course #</th>
+                            <th>Title</th>
+                            <th>Credits</th>
+                            <th>Day / Period</th>
+                            <th>Instructor</th>
+                            <th>Subject Area</th>
+                            <th>Source</th>
+                            <th>Faculty</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="coursesTableBody">
+                        <tr><td colspan="9" class="text-center text-muted py-4">Loading courses…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="courseModal" class="modal" tabindex="-1" style="display:none;background:rgba(0,0,0,0.5);position:fixed;top:0;left:0;width:100%;height:100%;z-index:1050;">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <form id="courseModalForm">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="courseModalTitle">Course</h5>
+                    <button type="button" class="btn-close close-modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="course_ref">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Course Number</label>
+                            <input class="form-control" id="course_course_number" required>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label">Title</label>
+                            <input class="form-control" id="course_title" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Credits</label>
+                            <input class="form-control" id="course_credits" type="number" step="0.5" min="0">
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label">Day / Period</label>
+                            <input class="form-control" id="course_day_period" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Instructor</label>
+                            <input class="form-control" id="course_instructor" list="courseInstructorSuggestions">
+                            <datalist id="courseInstructorSuggestions"></datalist>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Semester</label>
+                            <input class="form-control" id="course_semester">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Year</label>
+                            <input class="form-control" id="course_year">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Subject Area</label>
+                            <input class="form-control" id="course_subject_area">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Prerequisite</label>
+                            <input class="form-control" id="course_prerequisite">
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Faculty (multi-select)</label>
+                            <select class="form-select" id="course_faculty_ids" multiple size="6"></select>
+                        </div>
+                    </div>
+                    <div class="alert alert-danger d-none mt-3 mb-0" id="courseModalError"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary modal-cancel-btn">Cancel</button>
+                    <button type="submit" class="btn btn-success">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -142,97 +142,352 @@ $(document).ready(function() {
         } catch (err) { console.error(err); }
     });
 
-    // ==========================================
-    // 3. INSTRUCTOR MANAGEMENT (/admin/instructors)
-    // ==========================================
-    $(document).on('click', '.edit-instructor-btn', function() {
-        $('#edit_instructor_id').val($(this).data('id'));
-        $('#edit_instructor_old_name').val($(this).data('name'));
-        $('#edit_instructor_current_name').val($(this).data('name'));
-        $('#edit_instructor_name').val($(this).data('name'));
-        $('#editInstructorModal').show();
-    });
-
-    $('#editInstructorForm').on('submit', async function(e) {
-        e.preventDefault();
-        const id = $('#edit_instructor_id').val();
-        const payload = {
-            old_name: $('#edit_instructor_old_name').val(),
-            name: $('#edit_instructor_name').val()
-        };
-
-        try {
-            const response = await fetch(`/admin/api/update_instructor/${id}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const result = await response.json();
-            if (result.success) window.location.reload();
-            else alert(result.message || 'Failed to update instructor.');
-        } catch (err) { console.error(err); }
-    });
-
-    $(document).on('click', '.delete-instructor-btn', function() {
-        const name = ($(this).data('name') || '').toString();
-        $('#delete_instructor_name').val(name);
-        $('#delete_instructor_name_label').text(name);
-        $('#delete_instructor_reassign_to').val('');
-        $('#deleteInstructorModal').show();
-    });
-
-    $('#deleteInstructorForm').on('submit', async function(e) {
-        e.preventDefault();
-        const payload = {
-            name: $('#delete_instructor_name').val(),
-            reassign_to: $('#delete_instructor_reassign_to').val()
-        };
-        try {
-            const response = await fetch('/admin/api/instructors/delete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const result = await response.json();
-            if (result.success) {
-                window.location.reload();
-            } else {
-                alert(result.message || 'Failed to delete instructor.');
-            }
-        } catch (err) {
-            console.error(err);
-            alert('A network error occurred.');
+    const jsonFetch = async (url, options = {}) => {
+        const response = await fetch(url, {
+            headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+            ...options,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.success === false) {
+            throw new Error(payload.message || 'Request failed.');
         }
-    });
+        return payload;
+    };
+
+    const escapeHtml = (value) => {
+        return String(value ?? '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
+    };
+
+    const filterSelectOptions = (selector, query) => {
+        const q = (query || '').toString().trim().toLowerCase();
+        $(selector).find('option').each(function() {
+            const text = ($(this).text() || '').toLowerCase();
+            $(this).toggle(!q || text.includes(q));
+        });
+    };
 
     // ==========================================
-    // 4. COURSE MANAGEMENT (/admin/courses)
+    // 3. COURSES MANAGEMENT (/admin/courses)
     // ==========================================
-    $(document).on('click', '.edit-course-btn', function() {
-        $('#edit_course_rowid').val($(this).data('rowid'));
-        $('#edit_course_table').val($(this).data('table'));
-        $('#edit_course_title').val($(this).data('title'));
-        $('#edit_course_credits').val($(this).data('credits'));
-        $('#editCourseModal').show();
-    });
+    const coursesApp = $('#coursesAdminApp');
+    if (coursesApp.length) {
+        const state = { courses: [], faculty: [], advisorAreas: [] };
 
-    $('#editCourseForm').on('submit', async function(e) {
-        e.preventDefault();
-        const payload = {
-            _rowid: $('#edit_course_rowid').val(),
-            source_table: $('#edit_course_table').val(),
-            Course_Title: $('#edit_course_title').val(),
-            Credits: $('#edit_course_credits').val()
+        const collectCoursePayload = () => ({
+            course_number: $('#course_course_number').val().trim(),
+            title: $('#course_title').val().trim(),
+            credits: $('#course_credits').val(),
+            day_period: $('#course_day_period').val().trim(),
+            semester: $('#course_semester').val().trim(),
+            year: $('#course_year').val().trim(),
+            prerequisite: $('#course_prerequisite').val().trim(),
+            subject_area: $('#course_subject_area').val().trim(),
+            instructor: $('#course_instructor').val().trim(),
+            faculty_ids: ($('#course_faculty_ids').val() || []).map(v => Number(v)),
+        });
+
+        const setCourseError = (message) => {
+            const box = $('#courseModalError');
+            if (message) {
+                box.text(message).removeClass('d-none');
+            } else {
+                box.addClass('d-none').text('');
+            }
         };
 
-        try {
-            const response = await fetch('/admin/api/update_course', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+        const setCourseFormValues = (row = null) => {
+            $('#course_ref').val(row?.ref || '');
+            $('#course_course_number').val(row?.course_number || '');
+            $('#course_title').val(row?.title || '');
+            $('#course_credits').val(row?.credits ?? '');
+            $('#course_day_period').val(row?.day_period || '');
+            $('#course_semester').val(row?.semester || '');
+            $('#course_year').val(row?.year || '');
+            $('#course_prerequisite').val(row?.prerequisite || '');
+            $('#course_subject_area').val(row?.subject_area || '');
+            $('#course_instructor').val(row?.instructor || '');
+            $('#course_faculty_ids').val((row?.faculty_ids || []).map(v => String(v)));
+        };
+
+        const renderCourseOptions = () => {
+            const options = state.faculty
+                .map(row => `<option value="${row.id}">${escapeHtml(row.name)}</option>`)
+                .join('');
+            $('#course_faculty_ids').html(options);
+
+            const instructorNames = Array.from(
+                new Set([
+                    ...state.faculty.map(f => (f.name || '').trim()).filter(Boolean),
+                    ...state.courses.map(c => (c.instructor || '').trim()).filter(Boolean),
+                ])
+            ).sort();
+
+            $('#courseInstructorSuggestions').html(
+                instructorNames.map(name => `<option value="${escapeHtml(name)}"></option>`).join('')
+            );
+        };
+
+        const renderCourses = () => {
+            const tbody = $('#coursesTableBody');
+            if (!state.courses.length) {
+                tbody.html('<tr><td colspan="9" class="text-center text-muted py-4">No courses found.</td></tr>');
+                return;
+            }
+
+            const rows = state.courses.map((row) => {
+                const faculty = (row.faculty_names || []).length ? row.faculty_names.join(', ') : '—';
+                const sourceBadge = row.source === 'manual'
+                    ? '<span class="badge bg-success">manual</span>'
+                    : '<span class="badge bg-secondary">scraped</span>';
+                const deleteBtn = row.source === 'manual'
+                    ? `<button class="btn btn-sm btn-outline-danger ms-1 delete-course-btn" data-ref="${escapeHtml(row.ref)}">Delete</button>`
+                    : '';
+                return `
+                    <tr>
+                        <td>${escapeHtml(row.course_number || '')}</td>
+                        <td>${escapeHtml(row.title || '')}</td>
+                        <td>${escapeHtml(row.credits ?? '')}</td>
+                        <td>${escapeHtml(row.day_period || '')}</td>
+                        <td>${escapeHtml(row.instructor || '')}</td>
+                        <td>${escapeHtml(row.subject_area || '')}</td>
+                        <td>${sourceBadge}</td>
+                        <td>${escapeHtml(faculty)}</td>
+                        <td>
+                            <button class="btn btn-sm btn-primary edit-course-btn" data-ref="${escapeHtml(row.ref)}">Edit</button>
+                            <button class="btn btn-sm btn-outline-secondary ms-1 duplicate-course-btn" data-ref="${escapeHtml(row.ref)}">Duplicate</button>
+                            ${deleteBtn}
+                        </td>
+                    </tr>
+                `;
             });
-            const result = await response.json();
-            if (result.success) window.location.reload();
-        } catch (err) { console.error(err); }
-    });
+            tbody.html(rows.join(''));
+        };
+
+        const loadCourses = async () => {
+            const payload = await jsonFetch('/admin/api/courses');
+            state.courses = payload.courses || [];
+            state.faculty = payload.faculty || [];
+            state.advisorAreas = payload.advisor_areas || [];
+            renderCourseOptions();
+            renderCourses();
+        };
+
+        $('#addCourseBtn').on('click', function() {
+            $('#courseModalTitle').text('Add Course');
+            setCourseError('');
+            setCourseFormValues(null);
+            $('#courseModal').show();
+        });
+
+        $(document).on('click', '.edit-course-btn', function() {
+            const ref = $(this).data('ref');
+            const row = state.courses.find(c => c.ref === ref);
+            if (!row) return;
+            $('#courseModalTitle').text(`Edit Course (${row.source})`);
+            setCourseError('');
+            setCourseFormValues(row);
+            $('#courseModal').show();
+        });
+
+        $(document).on('click', '.duplicate-course-btn', async function() {
+            const ref = $(this).data('ref');
+            try {
+                const payload = await jsonFetch(`/admin/api/courses/${encodeURIComponent(ref)}/duplicate`, { method: 'POST' });
+                $('#courseModalTitle').text('Duplicate Course');
+                setCourseError('');
+                setCourseFormValues({ ...payload.course, ref: '' });
+                $('#courseModal').show();
+            } catch (err) {
+                alert(err.message || 'Failed to duplicate course.');
+            }
+        });
+
+        $(document).on('click', '.delete-course-btn', async function() {
+            const ref = $(this).data('ref');
+            if (!confirm('Delete this manual course?')) return;
+            try {
+                await jsonFetch(`/admin/api/courses/${encodeURIComponent(ref)}`, { method: 'DELETE' });
+                await loadCourses();
+            } catch (err) {
+                alert(err.message || 'Failed to delete course.');
+            }
+        });
+
+        $('#courseModalForm').on('submit', async function(e) {
+            e.preventDefault();
+            const ref = ($('#course_ref').val() || '').trim();
+            const payload = collectCoursePayload();
+            setCourseError('');
+
+            try {
+                if (ref) {
+                    await jsonFetch(`/admin/api/courses/${encodeURIComponent(ref)}`, {
+                        method: 'PUT',
+                        body: JSON.stringify(payload),
+                    });
+                } else {
+                    await jsonFetch('/admin/api/courses', {
+                        method: 'POST',
+                        body: JSON.stringify(payload),
+                    });
+                }
+                $('#courseModal').hide();
+                await loadCourses();
+            } catch (err) {
+                setCourseError(err.message || 'Unable to save course.');
+            }
+        });
+
+        loadCourses().catch((err) => {
+            $('#coursesTableBody').html(`<tr><td colspan="9" class="text-danger text-center py-4">${escapeHtml(err.message || 'Unable to load courses.')}</td></tr>`);
+        });
+    }
+
+    // ==========================================
+    // 4. FACULTY MANAGEMENT (/admin/faculty)
+    // ==========================================
+    const facultyApp = $('#facultyAdminApp');
+    if (facultyApp.length) {
+        const state = { faculty: [], courses: [], advisorAreas: [] };
+
+        const setFacultyError = (message) => {
+            const box = $('#facultyModalError');
+            if (message) {
+                box.text(message).removeClass('d-none');
+            } else {
+                box.addClass('d-none').text('');
+            }
+        };
+
+        const collectFacultyPayload = () => ({
+            name: $('#faculty_name').val().trim(),
+            email: $('#faculty_email').val().trim(),
+            course_refs: $('#faculty_course_refs').val() || [],
+            advisor_area_ids: ($('#faculty_advisor_area_ids').val() || []).map(v => Number(v)),
+        });
+
+        const renderFacultyOptions = () => {
+            $('#faculty_course_refs').html(
+                (state.courses || []).map((row) => (
+                    `<option value="${escapeHtml(row.ref)}">${escapeHtml(`${row.course_number || ''} — ${row.title || ''} (${row.day_period || ''})`)}</option>`
+                )).join('')
+            );
+
+            $('#faculty_advisor_area_ids').html(
+                (state.advisorAreas || []).map((row) => (
+                    `<option value="${row.id}">${escapeHtml(row.name)}</option>`
+                )).join('')
+            );
+        };
+
+        const setFacultyFormValues = (row = null) => {
+            $('#faculty_id').val(row?.id || '');
+            $('#faculty_name').val(row?.name || '');
+            $('#faculty_email').val(row?.email || '');
+            $('#faculty_course_refs').val(row?.course_refs || []);
+            $('#faculty_advisor_area_ids').val((row?.advisor_area_ids || []).map(v => String(v)));
+            $('#faculty_course_search').val('');
+            $('#faculty_area_search').val('');
+        };
+
+        const renderFacultyRows = () => {
+            const tbody = $('#facultyTableBody');
+            if (!state.faculty.length) {
+                tbody.html('<tr><td colspan="5" class="text-center text-muted py-4">No faculty found.</td></tr>');
+                return;
+            }
+
+            tbody.html(
+                state.faculty.map((row) => `
+                    <tr>
+                        <td>${escapeHtml(row.name || '')}</td>
+                        <td>${escapeHtml(row.email || '—')}</td>
+                        <td>${escapeHtml((row.advisor_area_names || []).join(', ') || '—')}</td>
+                        <td>${escapeHtml((row.course_labels || []).join(', ') || '—')}</td>
+                        <td>
+                            <button class="btn btn-sm btn-primary edit-faculty-btn" data-id="${row.id}">Edit</button>
+                            <button class="btn btn-sm btn-outline-danger ms-1 delete-faculty-btn" data-id="${row.id}">Delete</button>
+                        </td>
+                    </tr>
+                `).join('')
+            );
+        };
+
+        const loadFaculty = async () => {
+            const payload = await jsonFetch('/admin/api/faculty');
+            state.faculty = payload.faculty || [];
+            state.courses = payload.courses || [];
+            state.advisorAreas = payload.advisor_areas || [];
+            renderFacultyOptions();
+            renderFacultyRows();
+        };
+
+        $('#faculty_course_search').on('input', function() {
+            filterSelectOptions('#faculty_course_refs', $(this).val());
+        });
+        $('#faculty_area_search').on('input', function() {
+            filterSelectOptions('#faculty_advisor_area_ids', $(this).val());
+        });
+
+        $('#addFacultyBtn').on('click', function() {
+            $('#facultyModalTitle').text('Add Faculty');
+            setFacultyError('');
+            setFacultyFormValues(null);
+            $('#facultyModal').show();
+        });
+
+        $(document).on('click', '.edit-faculty-btn', function() {
+            const id = Number($(this).data('id'));
+            const row = state.faculty.find(item => item.id === id);
+            if (!row) return;
+            $('#facultyModalTitle').text('Edit Faculty');
+            setFacultyError('');
+            setFacultyFormValues(row);
+            $('#facultyModal').show();
+        });
+
+        $(document).on('click', '.delete-faculty-btn', async function() {
+            const id = Number($(this).data('id'));
+            if (!confirm('Delete this faculty member?')) return;
+            try {
+                await jsonFetch(`/admin/api/faculty/${id}`, { method: 'DELETE' });
+                await loadFaculty();
+            } catch (err) {
+                alert(err.message || 'Failed to delete faculty.');
+            }
+        });
+
+        $('#facultyModalForm').on('submit', async function(e) {
+            e.preventDefault();
+            const id = ($('#faculty_id').val() || '').trim();
+            const payload = collectFacultyPayload();
+            setFacultyError('');
+            try {
+                if (id) {
+                    await jsonFetch(`/admin/api/faculty/${id}`, {
+                        method: 'PUT',
+                        body: JSON.stringify(payload),
+                    });
+                } else {
+                    await jsonFetch('/admin/api/faculty', {
+                        method: 'POST',
+                        body: JSON.stringify(payload),
+                    });
+                }
+                $('#facultyModal').hide();
+                await loadFaculty();
+            } catch (err) {
+                setFacultyError(err.message || 'Unable to save faculty.');
+            }
+        });
+
+        loadFaculty().catch((err) => {
+            $('#facultyTableBody').html(`<tr><td colspan="5" class="text-danger text-center py-4">${escapeHtml(err.message || 'Unable to load faculty.')}</td></tr>`);
+        });
+    }
 });

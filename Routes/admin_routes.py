@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from functools import wraps
 from sqlalchemy import inspect, text
 import sqlalchemy as sa
-from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField, ScrapedDataset, ScrapedCourse
+from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField, ScrapedDataset, ScrapedCourse, Course, Faculty
 from utils import (
     calculate_gpa,
     ensure_default_landing_sections,
@@ -57,6 +57,12 @@ ENDPOINT_PERMISSION_MAP = {
     'admin.analytics_overrides_api': 'view_analytics',
     'admin.analytics_export': 'view_analytics',
     'admin.manage_courses': 'edit_courses',
+    'admin.manage_faculty': 'edit_courses',
+    'admin.api_courses': 'edit_courses',
+    'admin.api_course_item': 'edit_courses',
+    'admin.api_course_duplicate': 'edit_courses',
+    'admin.api_faculty': 'edit_courses',
+    'admin.api_faculty_item': 'edit_courses',
     'admin.api_update_course': 'edit_courses',
     'admin.manage_subjects': 'edit_courses',
     'admin.api_update_subject_area': 'edit_courses',
@@ -87,6 +93,8 @@ ENDPOINT_PERMISSION_MAP = {
     'admin.start_scraping': 'manage_datasets',
     'admin.pause_scraping': 'manage_datasets',
     'admin.resume_scraping': 'manage_datasets',
+    'admin.stop_scraping': 'manage_datasets',
+    'admin.scraper_config_api': 'manage_datasets',
     'admin.scraper_status': 'manage_datasets',
     'admin.scraper_diagnostics': 'manage_datasets',
     'admin.scraper_diagnostics_api': 'manage_datasets',
@@ -245,6 +253,116 @@ def _process_metrics() -> dict:
             'memory_vms_mb': None,
             'process_started_at': None,
         }
+
+
+def _course_merge_key(course_number: str, day_period: str, instructor: str) -> tuple[str, str, str]:
+    return (
+        str(course_number or '').strip().upper(),
+        str(day_period or '').strip().lower(),
+        str(instructor or '').strip().lower(),
+    )
+
+
+def _parse_course_ref(course_ref: str) -> tuple[str, int] | None:
+    raw = str(course_ref or '').strip()
+    if not raw:
+        return None
+    if ':' in raw:
+        prefix, ident = raw.split(':', 1)
+    else:
+        prefix, ident = 'manual', raw
+    prefix = prefix.strip().lower()
+    try:
+        row_id = int(ident)
+    except Exception:
+        return None
+    if prefix not in {'manual', 'scraped'}:
+        return None
+    return prefix, row_id
+
+
+def _serialize_manual_course(row: Course) -> dict:
+    return {
+        'id': row.id,
+        'ref': f'manual:{row.id}',
+        'source': 'manual',
+        'course_number': row.course_number,
+        'title': row.title,
+        'credits': row.credits,
+        'day_period': row.day_period,
+        'semester': row.semester,
+        'year': row.year,
+        'prerequisite': row.prerequisite,
+        'subject_area': row.subject_area,
+        'instructor': row.instructor,
+        'faculty_ids': [f.id for f in row.faculty],
+        'faculty_names': [f.name for f in row.faculty],
+        'editable': True,
+        'deletable': True,
+    }
+
+
+def _serialize_scraped_course(row: ScrapedCourse) -> dict:
+    return {
+        'id': row.id,
+        'ref': f'scraped:{row.id}',
+        'source': 'scraped',
+        'course_number': row.course_number,
+        'title': row.course_title,
+        'credits': row.credits,
+        'day_period': row.day_and_period,
+        'semester': getattr(row.dataset, 'semester', None) if getattr(row, 'dataset', None) else None,
+        'year': getattr(row.dataset, 'year', None) if getattr(row, 'dataset', None) else None,
+        'prerequisite': row.prerequisite,
+        'subject_area': row.area_of_study,
+        'instructor': row.instructor,
+        'faculty_ids': [],
+        'faculty_names': [],
+        'editable': True,
+        'deletable': False,
+    }
+
+
+def _merged_courses_for_admin() -> list[dict]:
+    manual_rows = Course.query.order_by(Course.updated_at.desc(), Course.id.desc()).all()
+    manual_payload = [_serialize_manual_course(r) for r in manual_rows]
+    manual_keys = {
+        _course_merge_key(r.course_number, r.day_period, r.instructor): r.id
+        for r in manual_rows
+    }
+
+    scraped_rows = (
+        ScrapedCourse.query
+        .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
+        .filter(ScrapedDataset.status == 'completed')
+        .order_by(ScrapedDataset.created_at.desc(), ScrapedCourse.id.desc())
+        .all()
+    )
+
+    scraped_payload: list[dict] = []
+    for row in scraped_rows:
+        key = _course_merge_key(row.course_number, row.day_and_period, row.instructor)
+        if key in manual_keys:
+            continue
+        scraped_payload.append(_serialize_scraped_course(row))
+
+    return manual_payload + scraped_payload
+
+
+def _serialize_faculty(row: Faculty) -> dict:
+    return {
+        'id': row.id,
+        'name': row.name,
+        'email': row.email,
+        'assigned_courses_count': len(row.courses or []),
+        'assigned_course_refs': [f'manual:{c.id}' for c in (row.courses or [])],
+        'assigned_course_labels': [f"{c.course_number} — {c.title}" for c in (row.courses or [])],
+        'course_refs': [f'manual:{c.id}' for c in (row.courses or [])],
+        'course_labels': [f"{c.course_number} — {c.title}" for c in (row.courses or [])],
+        'advisor_area_ids': [a.id for a in (row.advisor_areas or [])],
+        'advisor_area_names': [a.name for a in (row.advisor_areas or [])],
+        'advisor_areas': [a.name for a in (row.advisor_areas or [])],
+    }
 
 
 def _sanitize_session_fields(values, max_items: int = 80, max_item_len: int = 120, max_total_bytes: int = 2800) -> list[str]:
@@ -1120,65 +1238,29 @@ def api_update_subject_area(subject_id: int):
 @login_required
 @admin_required
 def manage_instructors():
-    try:
-        rows = (
-            db.session.query(ScrapedCourse.instructor, sa.func.count(ScrapedCourse.id))
-            .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
-            .filter(ScrapedDataset.status == 'completed')
-            .filter(ScrapedCourse.instructor.isnot(None))
-            .group_by(ScrapedCourse.instructor)
-            .order_by(ScrapedCourse.instructor.asc())
-            .all()
-        )
+    return redirect(url_for('admin.manage_faculty'))
 
-        instructors = [
-            {'id': idx, 'name': str(name or '').strip(), 'course_count': int(count or 0)}
-            for idx, (name, count) in enumerate(rows, 1)
-            if str(name or '').strip()
-        ]
 
-        return render_template('Admin/instructors.html', instructors=instructors)
-    except Exception:
-        return render_template('Admin/instructors.html', instructors=[])
+@admin_bp.route('/faculty')
+@login_required
+@admin_required
+def manage_faculty():
+    return render_template('Admin/manage_faculty.html')
 
 @admin_bp.route('/api/update_instructor/<int:instructor_id>', methods=['POST'])
 @login_required
 @admin_required
 def api_update_instructor(instructor_id):
     data = request.get_json(silent=True) or {}
-    old_name = (data.get('old_name') or '').strip()
     new_name = (data.get('name') or '').strip()
-    if not old_name:
-        return jsonify({'success': False, 'message': 'Current instructor name is required.'}), 400
     if not new_name:
         return jsonify({'success': False, 'message': 'New instructor name is required.'}), 400
-
-    if old_name == new_name:
-        return jsonify({'success': True, 'updated_rows': 0})
-
-    try:
-        rows = (
-            ScrapedCourse.query.join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
-            .filter(ScrapedDataset.status == 'completed', ScrapedCourse.instructor == old_name)
-            .all()
-        )
-        updated_rows = 0
-        for row in rows:
-            row.instructor = new_name
-            payload = safe_json_loads(row.data_json, {})
-            if isinstance(payload, dict):
-                for k in list(payload.keys()):
-                    k_norm = ' '.join(str(k or '').strip().lower().replace('_', ' ').replace('-', ' ').split())
-                    if k_norm in {'instructor', 'faculty', 'course instructor'}:
-                        payload[k] = new_name
-                row.data_json = safe_json_dumps(payload)
-            updated_rows += 1
-
-        db.session.commit()
-        return jsonify({'success': True, 'updated_rows': updated_rows})
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'success': False, 'message': 'Unable to update instructor.'}), 500
+    row = Faculty.query.get(instructor_id)
+    if not row:
+        return jsonify({'success': False, 'message': 'Faculty not found.'}), 404
+    row.name = new_name
+    db.session.commit()
+    return jsonify({'success': True, 'updated_rows': 1})
 
 
 @admin_bp.route('/api/instructors/delete', methods=['POST'])
@@ -1187,66 +1269,308 @@ def api_update_instructor(instructor_id):
 def api_delete_instructor():
     data = request.get_json(silent=True) or {}
     name = (data.get('name') or '').strip()
-    reassign_to = (data.get('reassign_to') or '').strip()
-
     if not name:
         return jsonify({'success': False, 'message': 'Instructor name is required.'}), 400
-
-    replacement = reassign_to or 'TBA'
-    if replacement == name:
-        return jsonify({'success': False, 'message': 'Replacement instructor must be different.'}), 400
-
-    try:
-        rows = (
-            ScrapedCourse.query.join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
-            .filter(ScrapedDataset.status == 'completed', ScrapedCourse.instructor == name)
-            .all()
-        )
-        updated_rows = 0
-        for row in rows:
-            row.instructor = replacement
-            payload = safe_json_loads(row.data_json, {})
-            if isinstance(payload, dict):
-                for k in list(payload.keys()):
-                    k_norm = ' '.join(str(k or '').strip().lower().replace('_', ' ').replace('-', ' ').split())
-                    if k_norm in {'instructor', 'faculty', 'course instructor'}:
-                        payload[k] = replacement
-                row.data_json = safe_json_dumps(payload)
-            updated_rows += 1
-
-        db.session.commit()
-        return jsonify({'success': True, 'updated_rows': updated_rows})
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'success': False, 'message': 'Unable to delete instructor.'}), 500
+    row = Faculty.query.filter(sa.func.lower(Faculty.name) == name.lower()).first()
+    if not row:
+        return jsonify({'success': False, 'message': 'Faculty not found.'}), 404
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({'success': True, 'updated_rows': 1})
 
 @admin_bp.route('/courses')
 @login_required
 @admin_required
 def manage_courses():
-    rows = (
-        db.session.query(ScrapedCourse, ScrapedDataset)
-        .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
-        .filter(ScrapedDataset.status == 'completed')
-        .order_by(ScrapedDataset.created_at.desc(), ScrapedCourse.id.asc())
-        .all()
-    )
+    faculties = Faculty.query.order_by(Faculty.name.asc()).all()
+    subject_areas = SubjectArea.query.order_by(SubjectArea.name.asc()).all()
+    return render_template('Admin/manage_courses.html', faculties=faculties, subject_areas=subject_areas)
 
-    courses = []
-    for sc, ds in rows:
-        courses.append(
+
+def _validate_course_payload(payload: dict, *, exclude_manual_id: int | None = None) -> tuple[bool, str | None]:
+    course_number = str(payload.get('course_number') or '').strip()
+    title = str(payload.get('title') or '').strip()
+    day_period = str(payload.get('day_period') or '').strip()
+    instructor = str(payload.get('instructor') or '').strip()
+
+    if not course_number:
+        return False, 'course_number is required.'
+    if not title:
+        return False, 'title is required.'
+    if not day_period:
+        return False, 'day_period is required.'
+
+    new_key = _course_merge_key(course_number, day_period, instructor)
+    merged = _merged_courses_for_admin()
+    for row in merged:
+        if row.get('source') == 'manual' and exclude_manual_id and row.get('id') == exclude_manual_id:
+            continue
+        row_key = _course_merge_key(row.get('course_number'), row.get('day_period'), row.get('instructor'))
+        if row_key == new_key:
+            return False, 'A course with the same course_number, day_period, and instructor already exists.'
+    return True, None
+
+
+def _manual_course_from_scraped(scraped_row: ScrapedCourse, overrides: dict | None = None) -> Course:
+    payload = {
+        'course_number': scraped_row.course_number,
+        'title': scraped_row.course_title,
+        'credits': scraped_row.credits,
+        'day_period': scraped_row.day_and_period,
+        'semester': scraped_row.dataset.semester if scraped_row.dataset else None,
+        'year': scraped_row.dataset.year if scraped_row.dataset else None,
+        'prerequisite': scraped_row.prerequisite,
+        'subject_area': scraped_row.area_of_study,
+        'instructor': scraped_row.instructor,
+        'source': 'manual',
+    }
+    if overrides:
+        payload.update({k: v for k, v in overrides.items() if v is not None})
+    return Course(**payload)
+
+
+def _resolve_manual_course_ref(course_ref: str) -> Course | None:
+    parsed = _parse_course_ref(course_ref)
+    if not parsed:
+        return None
+    source, row_id = parsed
+    if source == 'manual':
+        return Course.query.get(row_id)
+    scraped = ScrapedCourse.query.get(row_id)
+    if not scraped:
+        return None
+    return _manual_course_from_scraped(scraped)
+
+
+@admin_bp.route('/api/courses', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def api_courses():
+    if request.method == 'GET':
+        courses = _merged_courses_for_admin()
+        faculty_rows = Faculty.query.order_by(Faculty.name.asc()).all()
+        areas = SubjectArea.query.order_by(SubjectArea.name.asc()).all()
+        return jsonify(
             {
-                'source_table': ds.name,
-                '_rowid': sc.id,
-                'Course_Number': sc.course_number,
-                'Course_Title': sc.course_title,
-                'Credits': sc.credits,
-                'Instructor': sc.instructor,
-                'Day_and_Period': sc.day_and_period,
-                'Prerequisite': sc.prerequisite,
+                'success': True,
+                'courses': courses,
+                'faculty': [_serialize_faculty(r) for r in faculty_rows],
+                'advisor_areas': [{'id': a.id, 'name': a.name} for a in areas],
             }
         )
-    return render_template('Admin/courses.html', courses=courses)
+
+    payload = request.get_json(silent=True) or {}
+    ok, err = _validate_course_payload(payload)
+    if not ok:
+        return jsonify({'success': False, 'message': err}), 400
+
+    row = Course(
+        course_number=str(payload.get('course_number') or '').strip(),
+        title=str(payload.get('title') or '').strip(),
+        credits=_safe_float(payload.get('credits'), 0.0),
+        day_period=str(payload.get('day_period') or '').strip(),
+        semester=str(payload.get('semester') or '').strip() or None,
+        year=str(payload.get('year') or '').strip() or None,
+        prerequisite=str(payload.get('prerequisite') or '').strip() or None,
+        subject_area=str(payload.get('subject_area') or '').strip() or None,
+        instructor=str(payload.get('instructor') or '').strip() or None,
+        source='manual',
+    )
+    faculty_ids = payload.get('faculty_ids') or []
+    if isinstance(faculty_ids, list):
+        row.faculty = Faculty.query.filter(Faculty.id.in_(faculty_ids)).all() if faculty_ids else []
+
+    db.session.add(row)
+    db.session.commit()
+    return jsonify({'success': True, 'course': _serialize_manual_course(row)})
+
+
+@admin_bp.route('/api/courses/<path:course_ref>', methods=['PUT', 'DELETE'])
+@login_required
+@admin_required
+def api_course_item(course_ref: str):
+    parsed = _parse_course_ref(course_ref)
+    if not parsed:
+        return jsonify({'success': False, 'message': 'Invalid course reference.'}), 400
+    source, row_id = parsed
+
+    if request.method == 'DELETE':
+        if source != 'manual':
+            return jsonify({'success': False, 'message': 'Scraped courses cannot be deleted. Create a manual override instead.'}), 400
+        row = Course.query.get(row_id)
+        if not row:
+            return jsonify({'success': False, 'message': 'Course not found.'}), 404
+        db.session.delete(row)
+        db.session.commit()
+        return jsonify({'success': True})
+
+    payload = request.get_json(silent=True) or {}
+    if source == 'manual':
+        row = Course.query.get(row_id)
+        if not row:
+            return jsonify({'success': False, 'message': 'Course not found.'}), 404
+    else:
+        scraped = ScrapedCourse.query.get(row_id)
+        if not scraped:
+            return jsonify({'success': False, 'message': 'Course not found.'}), 404
+        row = _manual_course_from_scraped(scraped)
+
+    merged = {
+        'course_number': str(payload.get('course_number') or row.course_number or '').strip(),
+        'title': str(payload.get('title') or row.title or '').strip(),
+        'credits': payload.get('credits') if payload.get('credits') is not None else row.credits,
+        'day_period': str(payload.get('day_period') or row.day_period or '').strip(),
+        'semester': str(payload.get('semester') or row.semester or '').strip(),
+        'year': str(payload.get('year') or row.year or '').strip(),
+        'prerequisite': str(payload.get('prerequisite') or row.prerequisite or '').strip(),
+        'subject_area': str(payload.get('subject_area') or row.subject_area or '').strip(),
+        'instructor': str(payload.get('instructor') or row.instructor or '').strip(),
+    }
+
+    ok, err = _validate_course_payload(merged, exclude_manual_id=(row.id if source == 'manual' else None))
+    if not ok:
+        return jsonify({'success': False, 'message': err}), 400
+
+    row.course_number = merged['course_number']
+    row.title = merged['title']
+    row.credits = _safe_float(merged['credits'], 0.0)
+    row.day_period = merged['day_period']
+    row.semester = merged['semester'] or None
+    row.year = merged['year'] or None
+    row.prerequisite = merged['prerequisite'] or None
+    row.subject_area = merged['subject_area'] or None
+    row.instructor = merged['instructor'] or None
+    row.source = 'manual'
+
+    faculty_ids = payload.get('faculty_ids')
+    if isinstance(faculty_ids, list):
+        row.faculty = Faculty.query.filter(Faculty.id.in_(faculty_ids)).all() if faculty_ids else []
+
+    if source != 'manual':
+        db.session.add(row)
+    db.session.commit()
+    return jsonify({'success': True, 'course': _serialize_manual_course(row)})
+
+
+@admin_bp.route('/api/courses/<path:course_ref>/duplicate', methods=['POST'])
+@login_required
+@admin_required
+def api_course_duplicate(course_ref: str):
+    parsed = _parse_course_ref(course_ref)
+    if not parsed:
+        return jsonify({'success': False, 'message': 'Invalid course reference.'}), 400
+    source, row_id = parsed
+    if source == 'manual':
+        row = Course.query.get(row_id)
+        if not row:
+            return jsonify({'success': False, 'message': 'Course not found.'}), 404
+        payload = _serialize_manual_course(row)
+    else:
+        row = ScrapedCourse.query.get(row_id)
+        if not row:
+            return jsonify({'success': False, 'message': 'Course not found.'}), 404
+        payload = _serialize_scraped_course(row)
+
+    duplicate_payload = {
+        'course_number': payload.get('course_number'),
+        'title': payload.get('title'),
+        'credits': payload.get('credits'),
+        'day_period': payload.get('day_period'),
+        'semester': payload.get('semester'),
+        'year': payload.get('year'),
+        'prerequisite': payload.get('prerequisite'),
+        'subject_area': payload.get('subject_area'),
+        'instructor': payload.get('instructor'),
+        'faculty_ids': payload.get('faculty_ids') or [],
+    }
+    return jsonify({'success': True, 'course': duplicate_payload})
+
+
+@admin_bp.route('/api/faculty', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def api_faculty():
+    if request.method == 'GET':
+        rows = Faculty.query.order_by(Faculty.name.asc()).all()
+        courses = _merged_courses_for_admin()
+        areas = SubjectArea.query.order_by(SubjectArea.name.asc()).all()
+        return jsonify(
+            {
+                'success': True,
+                'faculty': [_serialize_faculty(r) for r in rows],
+                'courses': courses,
+                'advisor_areas': [{'id': a.id, 'name': a.name} for a in areas],
+            }
+        )
+
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get('name') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'message': 'Faculty name is required.'}), 400
+
+    row = Faculty(name=name, email=str(payload.get('email') or '').strip() or None)
+
+    course_refs = payload.get('course_refs') or []
+    advisor_area_ids = payload.get('advisor_area_ids') or []
+    if isinstance(course_refs, list):
+        manual_courses: list[Course] = []
+        for ref in course_refs:
+            course_obj = _resolve_manual_course_ref(str(ref))
+            if course_obj is None:
+                continue
+            if course_obj.id is None:
+                db.session.add(course_obj)
+                db.session.flush()
+            manual_courses.append(course_obj)
+        row.courses = manual_courses
+
+    if isinstance(advisor_area_ids, list):
+        row.advisor_areas = SubjectArea.query.filter(SubjectArea.id.in_(advisor_area_ids)).all() if advisor_area_ids else []
+
+    db.session.add(row)
+    db.session.commit()
+    return jsonify({'success': True, 'faculty': _serialize_faculty(row)})
+
+
+@admin_bp.route('/api/faculty/<int:faculty_id>', methods=['PUT', 'DELETE'])
+@login_required
+@admin_required
+def api_faculty_item(faculty_id: int):
+    row = Faculty.query.get(faculty_id)
+    if not row:
+        return jsonify({'success': False, 'message': 'Faculty not found.'}), 404
+
+    if request.method == 'DELETE':
+        db.session.delete(row)
+        db.session.commit()
+        return jsonify({'success': True})
+
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get('name') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'message': 'Faculty name is required.'}), 400
+    row.name = name
+    row.email = str(payload.get('email') or '').strip() or None
+
+    course_refs = payload.get('course_refs') or []
+    advisor_area_ids = payload.get('advisor_area_ids') or []
+    if isinstance(course_refs, list):
+        manual_courses: list[Course] = []
+        for ref in course_refs:
+            course_obj = _resolve_manual_course_ref(str(ref))
+            if course_obj is None:
+                continue
+            if course_obj.id is None:
+                db.session.add(course_obj)
+                db.session.flush()
+            manual_courses.append(course_obj)
+        row.courses = manual_courses
+
+    if isinstance(advisor_area_ids, list):
+        row.advisor_areas = SubjectArea.query.filter(SubjectArea.id.in_(advisor_area_ids)).all() if advisor_area_ids else []
+
+    db.session.commit()
+    return jsonify({'success': True, 'faculty': _serialize_faculty(row)})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
