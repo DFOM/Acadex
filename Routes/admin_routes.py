@@ -1,12 +1,13 @@
 # Routes/admin_routes.py
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session, current_app
 from flask_login import login_required, current_user
 import os
 import csv
 import re
-import pandas as pd
+import threading
+import subprocess
+from datetime import datetime, timezone
 from functools import wraps
-from werkzeug.utils import secure_filename
 from sqlalchemy import inspect, text
 import sqlalchemy as sa
 from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField, ScrapedDataset, ScrapedCourse
@@ -87,9 +88,14 @@ ENDPOINT_PERMISSION_MAP = {
     'admin.probe_fields': 'manage_datasets',
     'admin.probe_status': 'manage_datasets',
     'admin.start_scraping': 'manage_datasets',
+    'admin.pause_scraping': 'manage_datasets',
+    'admin.resume_scraping': 'manage_datasets',
     'admin.scraper_status': 'manage_datasets',
     'admin.scraper_diagnostics': 'manage_datasets',
     'admin.scraper_diagnostics_api': 'manage_datasets',
+    'admin.admin_health': 'manage_users',
+    'admin.health_metrics_api': 'manage_users',
+    'admin.restore_version_placeholder': 'manage_users',
 }
 
 
@@ -159,6 +165,89 @@ def _safe_float(value, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return float(default)
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _active_session_count() -> int:
+    table_name = str(current_app.config.get('SESSION_SQLALCHEMY_TABLE') or 'user_sessions')
+    if not re.match(r'^[A-Za-z0-9_]+$', table_name):
+        return 0
+    try:
+        insp = inspect(db.engine)
+        if not insp.has_table(table_name):
+            return 0
+        value = db.session.execute(text(f'SELECT COUNT(*) FROM "{table_name}"')).scalar()
+        return int(value or 0)
+    except Exception:
+        db.session.rollback()
+        return 0
+
+
+def _recent_git_versions(limit: int = 12) -> list[dict]:
+    app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    max_rows = max(1, min(int(limit), 40))
+    try:
+        out = subprocess.check_output(
+            [
+                'git', '--no-pager', 'log', f'--max-count={max_rows}',
+                '--pretty=format:%H\t%h\t%ad\t%s', '--date=iso-strict',
+            ],
+            cwd=app_root,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2.5,
+        )
+    except Exception:
+        return []
+
+    rows: list[dict] = []
+    for line in (out or '').splitlines():
+        parts = line.split('\t', 3)
+        if len(parts) != 4:
+            continue
+        rows.append(
+            {
+                'sha': parts[0],
+                'short_sha': parts[1],
+                'date': parts[2],
+                'message': parts[3],
+            }
+        )
+    return rows
+
+
+def _process_metrics() -> dict:
+    try:
+        import psutil  # type: ignore
+
+        proc = psutil.Process(os.getpid())
+        with proc.oneshot():
+            mem = proc.memory_info()
+            rss = int(getattr(mem, 'rss', 0) or 0)
+            vms = int(getattr(mem, 'vms', 0) or 0)
+            cpu = float(proc.cpu_percent(interval=0.0) or 0.0)
+            started = datetime.fromtimestamp(proc.create_time(), tz=timezone.utc)
+        return {
+            'provider': 'psutil',
+            'cpu_percent': round(cpu, 2),
+            'memory_rss_mb': round(rss / (1024 * 1024), 2),
+            'memory_vms_mb': round(vms / (1024 * 1024), 2),
+            'process_started_at': started.isoformat(),
+        }
+    except Exception:
+        return {
+            'provider': 'unavailable',
+            'cpu_percent': None,
+            'memory_rss_mb': None,
+            'memory_vms_mb': None,
+            'process_started_at': None,
+        }
 
 
 def _sanitize_session_fields(values, max_items: int = 80, max_item_len: int = 120, max_total_bytes: int = 2800) -> list[str]:
@@ -624,6 +713,13 @@ def update_app_settings_route():
     if popup_close_delay > 5.0:
         popup_close_delay = 5.0
     update_app_setting('scraper_popup_close_delay', str(popup_close_delay))
+
+    row_transition_delay = _safe_float(request.form.get('scraper_row_transition_delay_setting'), _safe_float(get_app_setting('scraper_row_transition_delay', '0.0'), 0.0))
+    if row_transition_delay < 0.0:
+        row_transition_delay = 0.0
+    if row_transition_delay > 15.0:
+        row_transition_delay = 15.0
+    update_app_setting('scraper_row_transition_delay', str(row_transition_delay))
 
     ai_enabled = 'ai_enabled_setting' in request.form
     ai_data_collection_enabled = 'ai_data_collection_enabled_setting' in request.form
@@ -1155,12 +1251,19 @@ def manage_courses():
 @login_required
 @admin_required
 def university_connection():
-    from services.scraper_service import scraper_progress, _is_chrome_running, is_scraper_running
+    from services.scraper_service import (
+        scraper_progress,
+        _is_chrome_running,
+        is_scraper_running,
+        is_scraper_paused,
+        scraper_state_label,
+    )
     import json as _json
 
     year = get_app_setting('current_year', '')
     semester = get_app_setting('current_semester', '')
     debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
+    row_transition_delay = _safe_float(get_app_setting('scraper_row_transition_delay', '0.0'), 0.0)
 
     # Past datasets for history panel
     past_datasets = ScrapedDataset.query.order_by(ScrapedDataset.created_at.desc()).limit(10).all()
@@ -1177,6 +1280,9 @@ def university_connection():
         probed_fields=session.get('scraper_probed_fields', []),
         selected_fields=session.get('scraper_selected_fields', []),
         scraper_is_running=is_scraper_running(),
+        scraper_is_paused=is_scraper_paused(),
+        scraper_state=scraper_state_label(),
+        row_transition_delay=row_transition_delay,
     )
 
 
@@ -1296,6 +1402,11 @@ def start_scraping():
     debugger_address = (data.get('debugger_address') or get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))).strip()
     popup_open_timeout = _safe_float(get_app_setting('scraper_popup_open_timeout', '10'), 10.0)
     popup_close_delay = _safe_float(get_app_setting('scraper_popup_close_delay', '0.35'), 0.35)
+    row_transition_delay = _safe_float(data.get('row_transition_delay', get_app_setting('scraper_row_transition_delay', '0.0')), 0.0)
+    if row_transition_delay < 0.0:
+        row_transition_delay = 0.0
+    if row_transition_delay > 15.0:
+        row_transition_delay = 15.0
 
     if not selected_fields:
         return jsonify({'success': False, 'message': 'No fields selected.'})
@@ -1306,6 +1417,7 @@ def start_scraping():
         session['scraper_selected_fields'] = _sanitize_session_fields(selected_fields)
         if debugger_address:
             update_app_setting('scraper_debugger_address', debugger_address)
+        update_app_setting('scraper_row_transition_delay', str(row_transition_delay))
         flask_app = current_app._get_current_object()
         result = _run(
             selected_fields,
@@ -1315,10 +1427,35 @@ def start_scraping():
             debugger_address=debugger_address,
             popup_open_timeout=popup_open_timeout,
             popup_close_delay=popup_close_delay,
+            inter_row_delay=row_transition_delay,
         )
         return jsonify(result)
     except Exception as exc:
         return jsonify({'success': False, 'message': f'Start scraping failed: {exc}'}), 500
+
+
+@admin_bp.route('/pause-scraping', methods=['POST'])
+@login_required
+@admin_required
+def pause_scraping():
+    from services.scraper_service import pause_scraper as _pause
+    try:
+        payload = _pause()
+        return jsonify(payload), (200 if payload.get('success') else 409)
+    except Exception as exc:
+        return jsonify({'success': False, 'message': f'Pause failed: {exc}', 'status': 'failed'}), 500
+
+
+@admin_bp.route('/resume-scraping', methods=['POST'])
+@login_required
+@admin_required
+def resume_scraping():
+    from services.scraper_service import resume_scraper as _resume
+    try:
+        payload = _resume()
+        return jsonify(payload), (200 if payload.get('success') else 409)
+    except Exception as exc:
+        return jsonify({'success': False, 'message': f'Resume failed: {exc}', 'status': 'failed'}), 500
 
 
 # ── GET /admin/scraper-status ─────────────────────────────────────────────
@@ -1327,13 +1464,21 @@ def start_scraping():
 @admin_required
 def scraper_status():
     try:
-        from services.scraper_service import scraper_progress as _p, _is_chrome_running, is_scraper_running
+        from services.scraper_service import (
+            scraper_progress as _p,
+            _is_chrome_running,
+            is_scraper_running,
+            is_scraper_paused,
+            scraper_state_label,
+        )
         import copy
         debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
         payload = copy.deepcopy(_p)
         payload['chrome_connected'] = _is_chrome_running(debugger_address)
         payload['debugger_address'] = debugger_address
         payload['is_running_lock'] = is_scraper_running()
+        payload['is_paused'] = is_scraper_paused()
+        payload['state'] = scraper_state_label()
 
         # Enrich with DB data when a dataset is active
         ds_id = payload.get('dataset_id')
@@ -1368,6 +1513,111 @@ def scraper_diagnostics():
 @admin_required
 def scraper_diagnostics_api():
     return scraper_diagnostics()
+
+
+@admin_bp.route('/health', methods=['GET'])
+@login_required
+@admin_required
+def admin_health():
+    return render_template(
+        'Admin/admin_health.html',
+        app_version=str(current_app.config.get('APP_VERSION') or 'unknown'),
+        app_started_at=current_app.config.get('APP_STARTED_AT'),
+        recent_versions=_recent_git_versions(limit=10),
+    )
+
+
+@admin_bp.route('/api/health-metrics', methods=['GET'])
+@login_required
+@admin_required
+def health_metrics_api():
+    from services.scraper_service import (
+        _is_chrome_running,
+        _debugger_http_health,
+        scraper_progress,
+        is_scraper_running,
+        is_scraper_paused,
+        scraper_state_label,
+    )
+
+    now_utc = datetime.now(timezone.utc)
+
+    db_ok = True
+    db_error = None
+    try:
+        db.session.execute(text('SELECT 1'))
+    except Exception as exc:
+        db_ok = False
+        db_error = str(exc)
+        db.session.rollback()
+
+    debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
+    dbg_http_ok, dbg_http_msg, dbg_http_addr = _debugger_http_health(debugger_address)
+
+    app_started_at = current_app.config.get('APP_STARTED_AT')
+    uptime_seconds = None
+    try:
+        if app_started_at:
+            started = datetime.fromisoformat(str(app_started_at).replace('Z', '+00:00'))
+            uptime_seconds = int(max(0, (now_utc - started).total_seconds()))
+    except Exception:
+        uptime_seconds = None
+
+    payload = {
+        'success': True,
+        'timestamp': now_utc.isoformat(),
+        'version': str(current_app.config.get('APP_VERSION') or 'unknown'),
+        'core': {
+            'database_ok': db_ok,
+            'database_error': db_error,
+            'uptime_seconds': uptime_seconds,
+            'app_started_at': app_started_at,
+            'active_sessions': _active_session_count(),
+            'process': _process_metrics(),
+        },
+        'scraper': {
+            'state': scraper_state_label(),
+            'is_running': is_scraper_running(),
+            'is_paused': is_scraper_paused(),
+            'progress': {
+                'status': scraper_progress.get('status'),
+                'dataset_id': scraper_progress.get('dataset_id'),
+                'current_index': scraper_progress.get('current_index'),
+                'total_courses': scraper_progress.get('total_courses'),
+                'last_course': scraper_progress.get('last_course'),
+                'error': scraper_progress.get('error'),
+            },
+            'remote_browser_connected': _is_chrome_running(debugger_address),
+            'devtools_http_ok': dbg_http_ok,
+            'devtools_http_message': dbg_http_msg,
+            'devtools_working_address': dbg_http_addr,
+            'debugger_address': debugger_address,
+        },
+        'background': {
+            'thread_count': len(threading.enumerate()),
+            'thread_names': [t.name for t in threading.enumerate()][:80],
+        },
+        'version_control': {
+            'recent_versions': _recent_git_versions(limit=15),
+            'rollback_supported': False,
+        },
+    }
+    return jsonify(payload)
+
+
+@admin_bp.route('/api/system/restore', methods=['POST'])
+@login_required
+@admin_required
+def restore_version_placeholder():
+    data = request.get_json(silent=True) or {}
+    target_sha = str(data.get('sha') or '').strip()
+    return jsonify(
+        {
+            'success': False,
+            'message': 'Restore is environment-specific and currently disabled in-app. Use deployment pipeline rollback.',
+            'target_sha': target_sha or None,
+        }
+    ), 501
 
 @admin_bp.route('/api/update_course', methods=['POST'])
 @login_required

@@ -1,0 +1,202 @@
+{% extends "Layouts/admin_base.html" %}
+{% block title %}System Health{% endblock %}
+
+{% block content %}
+<div class="ax-page-header d-flex align-items-center justify-content-between flex-wrap gap-2 mb-4">
+    <div>
+        <h1 class="ax-page-title">System Health</h1>
+        <p class="ax-page-subtitle mb-0">Real-time application, scraper, and environment telemetry.</p>
+    </div>
+    <span id="healthStamp" class="badge bg-secondary">Waiting…</span>
+</div>
+
+<div id="healthAlert"></div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100"><div class="card-body">
+            <div class="text-muted small">App Version</div>
+            <div id="appVersion" class="fs-5 fw-bold">{{ app_version }}</div>
+        </div></div>
+    </div>
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100"><div class="card-body">
+            <div class="text-muted small">Database</div>
+            <div id="dbStatus" class="fs-5 fw-bold">Unknown</div>
+        </div></div>
+    </div>
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100"><div class="card-body">
+            <div class="text-muted small">Scraper State</div>
+            <div id="scraperState" class="fs-5 fw-bold">Idle</div>
+        </div></div>
+    </div>
+    <div class="col-md-3">
+        <div class="card shadow-sm h-100"><div class="card-body">
+            <div class="text-muted small">Active Sessions</div>
+            <div id="activeSessions" class="fs-5 fw-bold">0</div>
+        </div></div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-6">
+        <div class="card shadow-sm mb-3">
+            <div class="card-header" style="background: var(--ax-surface);"><h5 class="mb-0">Core App Health</h5></div>
+            <div class="card-body small">
+                <div class="mb-2"><strong>Uptime:</strong> <span id="uptimeValue">—</span></div>
+                <div class="mb-2"><strong>CPU:</strong> <span id="cpuValue">—</span></div>
+                <div class="mb-2"><strong>Memory RSS:</strong> <span id="rssValue">—</span></div>
+                <div class="mb-0"><strong>Threads:</strong> <span id="threadCount">—</span></div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-header" style="background: var(--ax-surface);"><h5 class="mb-0">Scraper & Background Tools</h5></div>
+            <div class="card-body small">
+                <div class="mb-2"><strong>Remote Browser:</strong> <span id="browserConn">—</span></div>
+                <div class="mb-2"><strong>Ngrok / DevTools HTTP:</strong> <span id="devtoolsConn">—</span></div>
+                <div class="mb-2"><strong>Debugger Address:</strong> <span id="debuggerAddr">—</span></div>
+                <div class="mb-0"><strong>Progress:</strong> <span id="scraperProgress">0 / 0</span></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card shadow-sm mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center" style="background: var(--ax-surface);">
+                <h5 class="mb-0">Version Control / System Management</h5>
+                <button id="refreshNow" class="btn btn-sm btn-outline-secondary" type="button">Refresh</button>
+            </div>
+            <div class="card-body">
+                <div class="small text-muted mb-2">Rollback is deployment-environment specific. In-app restore is a placeholder API only.</div>
+                <div class="table-responsive" style="max-height: 320px; overflow:auto;">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr><th>Version</th><th>Date</th><th>Message</th><th class="text-end">Restore</th></tr>
+                        </thead>
+                        <tbody id="versionRows">
+                            {% for row in recent_versions %}
+                            <tr>
+                                <td class="font-monospace">{{ row.short_sha }}</td>
+                                <td class="small text-muted">{{ row.date }}</td>
+                                <td class="small">{{ row.message }}</td>
+                                <td class="text-end"><button class="btn btn-outline-secondary btn-sm" disabled>Restore</button></td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="4" class="text-center text-muted">No git history available.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-header" style="background: var(--ax-surface);"><h5 class="mb-0">Raw Metrics</h5></div>
+            <div class="card-body">
+                <pre id="rawMetrics" class="mb-0 rounded p-2" style="background:var(--ax-surface-alt); border:1px solid var(--ax-border); font-size:.74rem; max-height:240px; overflow:auto;">Waiting for first poll...</pre>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+    'use strict';
+
+    let timer = null;
+
+    function fmtDuration(sec) {
+        const v = Number(sec || 0);
+        if (!Number.isFinite(v) || v <= 0) return '0s';
+        const h = Math.floor(v / 3600);
+        const m = Math.floor((v % 3600) / 60);
+        const s = Math.floor(v % 60);
+        return `${h}h ${m}m ${s}s`;
+    }
+
+    function setText(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    }
+
+    function showAlert(msg, type='warning') {
+        const area = document.getElementById('healthAlert');
+        if (!area) return;
+        area.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+    }
+
+    function clearAlert() {
+        const area = document.getElementById('healthAlert');
+        if (area) area.innerHTML = '';
+    }
+
+    function renderVersionRows(rows) {
+        const body = document.getElementById('versionRows');
+        if (!body) return;
+        if (!rows || !rows.length) {
+            body.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No git history available.</td></tr>';
+            return;
+        }
+        body.innerHTML = rows.map(r => `
+            <tr>
+                <td class="font-monospace">${r.short_sha || ''}</td>
+                <td class="small text-muted">${r.date || ''}</td>
+                <td class="small">${(r.message || '').replace(/</g, '&lt;')}</td>
+                <td class="text-end"><button class="btn btn-outline-secondary btn-sm" disabled>Restore</button></td>
+            </tr>
+        `).join('');
+    }
+
+    function pollHealth() {
+        fetch('/admin/api/health-metrics', { headers: { 'Accept': 'application/json' } })
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) {
+                    showAlert(d.message || 'Health API returned failure.');
+                    return;
+                }
+                clearAlert();
+
+                setText('healthStamp', new Date().toLocaleTimeString());
+                setText('appVersion', d.version || 'unknown');
+                setText('dbStatus', d.core?.database_ok ? 'Connected' : 'Error');
+                setText('scraperState', d.scraper?.state || 'idle');
+                setText('activeSessions', String(d.core?.active_sessions ?? 0));
+
+                setText('uptimeValue', fmtDuration(d.core?.uptime_seconds));
+                const cpu = d.core?.process?.cpu_percent;
+                setText('cpuValue', cpu == null ? 'Unavailable' : `${cpu}%`);
+                const rss = d.core?.process?.memory_rss_mb;
+                setText('rssValue', rss == null ? 'Unavailable' : `${rss} MB`);
+                setText('threadCount', String(d.background?.thread_count ?? 0));
+
+                setText('browserConn', d.scraper?.remote_browser_connected ? 'Connected' : 'Disconnected');
+                setText('devtoolsConn', d.scraper?.devtools_http_ok ? 'Healthy' : `Issue (${d.scraper?.devtools_http_message || 'unknown'})`);
+                setText('debuggerAddr', d.scraper?.debugger_address || '—');
+
+                const cur = d.scraper?.progress?.current_index ?? 0;
+                const tot = d.scraper?.progress?.total_courses ?? 0;
+                setText('scraperProgress', `${cur} / ${tot}`);
+
+                renderVersionRows(d.version_control?.recent_versions || []);
+                setText('rawMetrics', JSON.stringify(d, null, 2));
+            })
+            .catch(err => {
+                showAlert('Health poll failed: ' + err, 'danger');
+            });
+    }
+
+    document.getElementById('refreshNow')?.addEventListener('click', pollHealth);
+    pollHealth();
+    timer = setInterval(pollHealth, 5000);
+
+    window.addEventListener('beforeunload', () => {
+        if (timer) clearInterval(timer);
+    });
+})();
+</script>
+{% endblock %}

@@ -19,6 +19,9 @@ from Routes.main_routes import main_bp
 from Routes.student_routes import student_bp
 from Routes.schedule_routes import schedule_bp
 
+VERSION = 'Beta 0.1'
+APP_STARTED_AT = datetime.utcnow().replace(tzinfo=None).isoformat() + 'Z'
+
 app = Flask(__name__)
 session_manager = Session()
 
@@ -82,6 +85,8 @@ app.config['SESSION_COOKIE_SECURE'] = _env_bool('SESSION_COOKIE_SECURE', default
 app.config['SESSION_COOKIE_PATH'] = _env_str('SESSION_COOKIE_PATH', '/') or '/'
 app.config['SESSION_COOKIE_DOMAIN'] = _env_str('SESSION_COOKIE_DOMAIN', '') or None
 app.config['SESSION_COOKIE_NAME'] = _env_str('SESSION_COOKIE_NAME', 'acadex_session') or 'acadex_session'
+app.config['APP_VERSION'] = VERSION
+app.config['APP_STARTED_AT'] = APP_STARTED_AT
 
 app.config['SESSION_TYPE'] = 'sqlalchemy'
 app.config['SESSION_SQLALCHEMY'] = db

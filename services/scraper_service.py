@@ -35,6 +35,7 @@ log = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────
 _scraper_lock = threading.Lock()          # prevents concurrent runs
 _scraper_is_running = False
+_scraper_pause_event = threading.Event()
 _active_driver = None                     # reused WebDriver instance
 _active_debugger_address = None
 _active_driver_lock = threading.Lock()
@@ -81,6 +82,56 @@ def _log_progress(msg: str) -> None:
 def is_scraper_running() -> bool:
     with _progress_lock:
         return bool(_scraper_is_running)
+
+
+def is_scraper_paused() -> bool:
+    return _scraper_pause_event.is_set()
+
+
+def pause_scraper() -> dict:
+    should_log = False
+    with _progress_lock:
+        if not _scraper_is_running:
+            return {
+                "success": False,
+                "message": "No active scraping job to pause.",
+                "status": scraper_progress.get("status") or "idle",
+            }
+        _scraper_pause_event.set()
+        if scraper_progress.get("status") != "paused":
+            scraper_progress["status"] = "paused"
+            should_log = True
+    if should_log:
+        _log_progress("⏸️ Scraper paused by admin.")
+    return {"success": True, "message": "Scraper paused.", "status": "paused"}
+
+
+def resume_scraper() -> dict:
+    should_log = False
+    with _progress_lock:
+        if not _scraper_is_running:
+            return {
+                "success": False,
+                "message": "No active scraping job to resume.",
+                "status": scraper_progress.get("status") or "idle",
+            }
+        _scraper_pause_event.clear()
+        if scraper_progress.get("status") != "running":
+            scraper_progress["status"] = "running"
+            should_log = True
+    if should_log:
+        _log_progress("▶️ Scraper resumed by admin.")
+    return {"success": True, "message": "Scraper resumed.", "status": "running"}
+
+
+def scraper_state_label() -> str:
+    with _progress_lock:
+        status = str(scraper_progress.get("status") or "idle")
+        if _scraper_is_running and _scraper_pause_event.is_set():
+            return "paused"
+        if _scraper_is_running and status not in {"running", "paused", "failed"}:
+            return "running"
+        return status
 
 
 def _set_last_backend_error(stage: str, exc: Exception | str) -> None:
@@ -729,6 +780,40 @@ def _find_visible_popup(driver, popup_open_timeout: float = 10.0):
     raise RuntimeError(f"Course detail popup did not appear within {timeout:.1f}s")
 
 
+def _wait_for_popup_closed(driver, timeout: float = 6.0) -> bool:
+    from selenium.webdriver.common.by import By
+
+    deadline = time.time() + max(1.0, float(timeout or 6.0))
+    selectors = [
+        "div.ui-dialog:not(.ui-helper-hidden)",
+        "div[id*=':dialog']:not(.ui-helper-hidden)",
+        ".ui-widget-overlay",
+    ]
+    while time.time() < deadline:
+        visible = 0
+        for sel in selectors:
+            try:
+                nodes = driver.find_elements(By.CSS_SELECTOR, sel)
+            except Exception:
+                nodes = []
+            for node in nodes:
+                try:
+                    styles = (node.get_attribute("style") or "").lower()
+                    classes = (node.get_attribute("class") or "").lower()
+                    if "display: none" in styles or "visibility: hidden" in styles:
+                        continue
+                    if "ui-helper-hidden" in classes:
+                        continue
+                    if node.is_displayed():
+                        visible += 1
+                except Exception:
+                    continue
+        if visible == 0:
+            return True
+        time.sleep(0.12)
+    return False
+
+
 def probe_available_fields(
     driver,
     syllabus_url: str = "",
@@ -955,6 +1040,7 @@ def _worker(
     syllabus_url: str = "",
     popup_open_timeout: float = 10.0,
     popup_close_delay: float = 0.35,
+    inter_row_delay: float = 0.0,
 ) -> None:
     """
     Background thread: iterates over every course row, extracts selected
@@ -1037,17 +1123,52 @@ def _worker(
         return data
 
     def _close_popup(popup) -> None:
+        closed = False
         try:
             close_btn = popup.find_element(By.CSS_SELECTOR, ".ui-dialog-titlebar-close")
             _safe_click(driver, close_btn)
-            time.sleep(max(0.0, float(popup_close_delay or 0.0)))
-            return
+            closed = _wait_for_popup_closed(driver, timeout=max(2.0, float(popup_open_timeout or 10.0)))
         except Exception:
-            pass
-        try:
-            driver.execute_script("arguments[0].style.display='none';", popup)
-        except Exception:
-            pass
+            closed = False
+
+        if not closed:
+            try:
+                from selenium.webdriver.common.keys import Keys
+
+                body = driver.find_element(By.TAG_NAME, "body")
+                body.send_keys(Keys.ESCAPE)
+                closed = _wait_for_popup_closed(driver, timeout=2.5)
+            except Exception:
+                closed = False
+
+        if not closed:
+            try:
+                driver.execute_script(
+                    "document.querySelectorAll('.ui-widget-overlay,.ui-dialog,[id*=\\':dialog\\']').forEach(function(n){n.style.display='none'; n.classList.add('ui-helper-hidden');});"
+                )
+                closed = _wait_for_popup_closed(driver, timeout=1.8)
+            except Exception:
+                closed = False
+
+        time.sleep(max(0.0, float(popup_close_delay or 0.0)))
+
+        if not closed:
+            raise RuntimeError("Popup did not close cleanly before next iteration")
+
+    def _wait_if_paused() -> None:
+        announced = False
+        while _scraper_pause_event.is_set():
+            with _progress_lock:
+                scraper_progress["status"] = "paused"
+            _update_db_progress(status="paused")
+            if not announced:
+                _log_progress("⏸️ Paused — waiting for resume.")
+                announced = True
+            time.sleep(0.3)
+        with _progress_lock:
+            if _scraper_is_running:
+                scraper_progress["status"] = "running"
+        _update_db_progress(status="running")
 
     try:
         if syllabus_url:
@@ -1067,11 +1188,16 @@ def _worker(
         _update_db_progress(total_courses=total, status="running")
 
         for i in range(total):
+            _wait_if_paused()
             with _progress_lock:
                 if scraper_progress["status"] == "failed":
                     break
 
             try:
+                try:
+                    driver.switch_to.default_content()
+                except Exception:
+                    pass
                 all_rows = wait.until(
                     EC.presence_of_all_elements_located(
                         (By.XPATH, '//*[@id="funcForm:table_data"]/tr')
@@ -1106,6 +1232,15 @@ def _worker(
                 _log_progress(f"[{i+1}/{total}] {course_title}")
 
                 _close_popup(popup)
+
+                try:
+                    driver.switch_to.default_content()
+                except Exception:
+                    pass
+
+                transition_delay = max(0.0, float(inter_row_delay or 0.0))
+                if transition_delay > 0:
+                    time.sleep(transition_delay)
 
                 # Persist the row
                 with flask_app.app_context():
@@ -1208,6 +1343,7 @@ def _worker(
         global _scraper_is_running
         with _progress_lock:
             _scraper_is_running = False
+        _scraper_pause_event.clear()
         if _scraper_lock.locked():
             _scraper_lock.release()
         release_driver()
@@ -1222,6 +1358,7 @@ def run_controlled_scraper(
     debugger_address: Optional[str] = None,
     popup_open_timeout: float = 10.0,
     popup_close_delay: float = 0.35,
+    inter_row_delay: float = 0.0,
 ) -> dict:
     """
     Spawn a background thread that runs the scraper.
@@ -1244,6 +1381,7 @@ def run_controlled_scraper(
                 "dataset_id": None,
             }
         _scraper_is_running = True
+        _scraper_pause_event.clear()
 
     try:
         driver = get_driver(debugger_address=debugger_address)
@@ -1305,6 +1443,7 @@ def run_controlled_scraper(
             syllabus_url,
             popup_open_timeout,
             popup_close_delay,
+            inter_row_delay,
         ),
         daemon=True,
         name="ScraperWorker",

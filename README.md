@@ -9,6 +9,26 @@ It supports:
 - AI recommendation + schedule-generation foundations
 - Landing page + announcement management
 
+## Version
+
+- Current version: **Beta 0.1**
+
+## Changelog
+
+### Beta 0.1 — 2026-03-18
+
+- Introduced scraper-first dataset architecture with canonical `scraped_courses` columns and dynamic attributes.
+- Added robust scraper popup lifecycle handling, configurable row transition delay, and pause/resume controls.
+- Added async-friendly scraper controls in admin integration UI and expanded scraper state reporting.
+- Added a new Admin System Health tab with real-time app/scraper metrics and version-control visibility.
+- Initialized versioning protocol for future structural changes.
+
+## Versioning Protocol
+
+- All structural changes must increment `VERSION` in `app.py`.
+- Each structural release must add a dated changelog entry in this `README.md`.
+- Commit messages for structural changes should include the target version label (for example: `Beta 0.2`).
+
 ## Tech Stack
 
 - Python + Flask

@@ -10,8 +10,8 @@
             Manually controlled scraping system — <strong>no automation, no stored credentials</strong>.
         </p>
     </div>
-    <span id="runBadge" class="badge fs-6 px-3 py-2 {{ 'bg-warning text-dark' if progress.status == 'running' else 'bg-secondary' }}">
-        {{ progress.status | capitalize }}
+    <span id="runBadge" class="badge fs-6 px-3 py-2 {{ 'bg-warning text-dark' if scraper_state == 'running' else 'bg-info text-dark' if scraper_state == 'paused' else 'bg-secondary' }}">
+        {{ scraper_state | capitalize }}
     </span>
 </div>
 
@@ -67,6 +67,13 @@
                     <input id="scrapeSemester" type="text" class="form-control form-control-sm"
                            value="{{ semester }}" placeholder="e.g. Spring">
                 </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label small">Row Transition Delay (seconds)</label>
+                <input id="rowTransitionDelay" type="number" class="form-control form-control-sm"
+                       min="0" max="15" step="0.1" value="{{ row_transition_delay }}">
+                <div class="form-text">Wait time after closing one popup before opening the next row.</div>
             </div>
 
             <div class="d-grid gap-2">
@@ -197,6 +204,19 @@
                 </svg>
                 Start Scraping
             </button>
+
+            <div class="row g-2 mb-3">
+                <div class="col-6">
+                    <button id="btnPauseScraping" class="btn btn-outline-warning btn-sm w-100" onclick="pauseScraping()" disabled>
+                        Pause
+                    </button>
+                </div>
+                <div class="col-6">
+                    <button id="btnResumeScraping" class="btn btn-outline-primary btn-sm w-100" onclick="resumeScraping()" disabled>
+                        Resume
+                    </button>
+                </div>
+            </div>
 
             <div class="flex-grow-1 d-flex flex-column" style="min-height:0;">
                 <div class="small fw-semibold mb-1 d-flex align-items-center justify-content-between">
@@ -540,9 +560,10 @@
         const year     = document.getElementById('scrapeYear').value.trim();
         const semester = document.getElementById('scrapeSemester').value.trim();
         const debugger_address = document.getElementById('debuggerAddress').value.trim();
+        const row_transition_delay = parseFloat(document.getElementById('rowTransitionDelay').value || '0') || 0;
 
         setBtn('btnStartScraping', true);
-        postJSON('/admin/start-scraping', { selected_fields: selected, year, semester, debugger_address })
+        postJSON('/admin/start-scraping', { selected_fields: selected, year, semester, debugger_address, row_transition_delay })
             .then(d => {
                 if (d.success) {
                     showAlert(d.message, 'success');
@@ -556,6 +577,24 @@
                 showAlert('Failed: ' + e, 'danger');
                 setBtn('btnStartScraping', false);
             });
+    };
+
+    window.pauseScraping = function () {
+        postJSON('/admin/pause-scraping', {})
+            .then(d => {
+                showAlert(d.message || 'Pause request sent.', d.success ? 'warning' : 'danger');
+                pollStatus();
+            })
+            .catch(e => showAlert('Pause failed: ' + e, 'danger'));
+    };
+
+    window.resumeScraping = function () {
+        postJSON('/admin/resume-scraping', {})
+            .then(d => {
+                showAlert(d.message || 'Resume request sent.', d.success ? 'success' : 'danger');
+                pollStatus();
+            })
+            .catch(e => showAlert('Resume failed: ' + e, 'danger'));
     };
 
     /* ── Polling ────────────────────────────────────────────────── */
@@ -576,14 +615,21 @@
                 /* Run status badge */
                 const map = {
                     running: 'bg-warning text-dark',
+                    paused: 'bg-info text-dark',
                     completed: 'bg-success',
                     failed: 'bg-danger',
                     idle: 'bg-secondary',
                 };
                 const rb = document.getElementById('runBadge');
-                const st = d.status || 'idle';
+                const st = d.state || d.status || 'idle';
                 rb.textContent = st.charAt(0).toUpperCase() + st.slice(1);
                 rb.className = 'badge fs-6 px-3 py-2 ' + (map[st] || 'bg-secondary');
+
+                const pauseBtn = document.getElementById('btnPauseScraping');
+                const resumeBtn = document.getElementById('btnResumeScraping');
+                const canControl = (st === 'running' || st === 'paused');
+                pauseBtn.disabled = !canControl || st === 'paused';
+                resumeBtn.disabled = !canControl || st === 'running';
 
                 /* Progress */
                 const cur = d.db_current ?? d.current_index ?? 0;
@@ -602,6 +648,8 @@
                 if (st === 'completed' || st === 'failed') {
                     clearInterval(pollingTimer); pollingTimer = null;
                     setBtn('btnStartScraping', false);
+                    document.getElementById('btnPauseScraping').disabled = true;
+                    document.getElementById('btnResumeScraping').disabled = true;
                     if (st === 'completed') {
                         showAlert('✅ Scraping completed! Catalog is now available.', 'success');
                         setTimeout(() => location.reload(), 3500);
@@ -638,6 +686,8 @@
     }
 
     {% if progress.status == 'running' %}
+    startPolling();
+    {% elif scraper_state == 'paused' %}
     startPolling();
     {% endif %}
 
