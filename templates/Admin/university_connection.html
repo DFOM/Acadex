@@ -340,6 +340,7 @@
 
     /* ── State ──────────────────────────────────────────────────── */
     let pollingTimer = null;
+    let probePollingTimer = null;
 
     /* ── A) Session Control ─────────────────────────────────────── */
 
@@ -388,16 +389,14 @@
 
         postJSON('/admin/probe-fields', { debugger_address })
             .then(d => {
-                document.getElementById('probeSpinner').classList.add('d-none');
-                if (d.success && d.fields && d.fields.length) {
-                    renderCheckboxes(d.fields);
-                    document.getElementById('probeResults').classList.remove('d-none');
-                    document.getElementById('btnStartScraping').disabled = false;
-                    showAlert(`Probe complete — ${d.fields.length} field(s) found.`, 'success');
-                } else {
+                if (!d.success) {
+                    document.getElementById('probeSpinner').classList.add('d-none');
                     document.getElementById('probeEmpty').classList.remove('d-none');
-                    showAlert(d.message || 'No fields found.', 'warning');
+                    showAlert(d.message || 'Probe failed to start.', 'warning');
+                    return;
                 }
+                showAlert(d.message || 'Probe started.', 'info');
+                startProbePolling();
             })
             .catch(e => {
                 document.getElementById('probeSpinner').classList.add('d-none');
@@ -405,8 +404,57 @@
                 showAlert('Probe request failed: ' + e, 'danger');
                 runDiagnostics();
             })
-            .finally(() => setBtn('btnProbeFields', false));
+            .finally(() => {
+                if (!probePollingTimer) setBtn('btnProbeFields', false);
+            });
     };
+
+    function startProbePolling() {
+        if (probePollingTimer) clearInterval(probePollingTimer);
+        probePollingTimer = setInterval(pollProbeStatus, 1000);
+    }
+
+    function pollProbeStatus() {
+        getJSON('/admin/probe-status')
+            .then(d => {
+                const status = d.status || 'idle';
+                if (status === 'running') {
+                    return;
+                }
+
+                if (probePollingTimer) {
+                    clearInterval(probePollingTimer);
+                    probePollingTimer = null;
+                }
+
+                setBtn('btnProbeFields', false);
+                document.getElementById('probeSpinner').classList.add('d-none');
+
+                if (status === 'completed' && d.fields && d.fields.length) {
+                    renderCheckboxes(d.fields);
+                    document.getElementById('probeResults').classList.remove('d-none');
+                    document.getElementById('probeEmpty').classList.add('d-none');
+                    document.getElementById('btnStartScraping').disabled = false;
+                    showAlert(`Probe complete — ${d.fields.length} field(s) found.`, 'success');
+                    return;
+                }
+
+                document.getElementById('probeResults').classList.add('d-none');
+                document.getElementById('probeEmpty').classList.remove('d-none');
+                showAlert(d.message || 'No fields found.', status === 'failed' ? 'danger' : 'warning');
+                if (status === 'failed') runDiagnostics();
+            })
+            .catch(e => {
+                if (probePollingTimer) {
+                    clearInterval(probePollingTimer);
+                    probePollingTimer = null;
+                }
+                setBtn('btnProbeFields', false);
+                document.getElementById('probeSpinner').classList.add('d-none');
+                document.getElementById('probeEmpty').classList.remove('d-none');
+                showAlert('Probe status failed: ' + e, 'danger');
+            });
+    }
 
     window.runDiagnostics = function () {
         const debugger_address = document.getElementById('debuggerAddress').value.trim();

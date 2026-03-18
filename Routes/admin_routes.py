@@ -85,6 +85,7 @@ ENDPOINT_PERMISSION_MAP = {
     'admin.start_browser_session': 'manage_datasets',
     'admin.check_login_status': 'manage_datasets',
     'admin.probe_fields': 'manage_datasets',
+    'admin.probe_status': 'manage_datasets',
     'admin.start_scraping': 'manage_datasets',
     'admin.scraper_status': 'manage_datasets',
     'admin.scraper_diagnostics': 'manage_datasets',
@@ -158,6 +159,30 @@ def _safe_float(value, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return float(default)
+
+
+def _sanitize_session_fields(values, max_items: int = 80, max_item_len: int = 120, max_total_bytes: int = 2800) -> list[str]:
+    if not isinstance(values, (list, tuple)):
+        return []
+
+    cleaned: list[str] = []
+    total = 2  # []
+    for raw in values:
+        item = str(raw or '').strip()
+        if not item:
+            continue
+        if len(item) > max_item_len:
+            item = item[:max_item_len]
+        size = len(item.encode('utf-8')) + 3  # quotes+comma overhead
+        if total + size > max_total_bytes:
+            break
+        if item in cleaned:
+            continue
+        cleaned.append(item)
+        total += size
+        if len(cleaned) >= max_items:
+            break
+    return cleaned
 
 
 def _setting_truthy(value: str) -> bool:
@@ -1332,7 +1357,7 @@ def check_login_status():
 @login_required
 @admin_required
 def probe_fields():
-    from services.scraper_service import get_driver, probe_available_fields as _probe, _set_last_backend_error
+    from services.scraper_service import start_probe_job as _start_probe, _set_last_backend_error
     try:
         data = request.get_json(force=True, silent=True) or {}
         debugger_address = (data.get('debugger_address') or get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))).strip()
@@ -1341,24 +1366,40 @@ def probe_fields():
 
         if debugger_address:
             update_app_setting('scraper_debugger_address', debugger_address)
-
-        driver = get_driver(debugger_address=debugger_address)
     except Exception as exc:
-        _set_last_backend_error('admin.probe_fields.get_driver', exc)
+        _set_last_backend_error('admin.probe_fields.payload', exc)
         return jsonify({'success': False, 'fields': [], 'message': str(exc)})
 
     try:
-        result = _probe(
-            driver,
+        result = _start_probe(
+            debugger_address=debugger_address,
             popup_open_timeout=popup_open_timeout,
             popup_close_delay=popup_close_delay,
         )
-        if result.get('success'):
-            session['scraper_probed_fields'] = list(result.get('fields') or [])
         return jsonify(result)
     except Exception as exc:
         _set_last_backend_error('admin.probe_fields', exc)
         return jsonify({'success': False, 'fields': [], 'message': f'Probe failed: {exc}'}), 500
+
+
+@admin_bp.route('/probe-status', methods=['GET'])
+@login_required
+@admin_required
+def probe_status():
+    from services.scraper_service import get_probe_progress as _get_probe_progress, _set_last_backend_error
+    try:
+        payload = dict(_get_probe_progress())
+        status = str(payload.get('status') or 'idle')
+
+        if status == 'completed' and payload.get('fields'):
+            safe_fields = _sanitize_session_fields(payload.get('fields') or [])
+            session['scraper_probed_fields'] = safe_fields
+            payload['fields'] = safe_fields
+
+        return jsonify({'success': True, **payload})
+    except Exception as exc:
+        _set_last_backend_error('admin.probe_status', exc)
+        return jsonify({'success': False, 'status': 'failed', 'fields': [], 'message': f'Probe status failed: {exc}'}), 500
 
 
 # ── POST /admin/start-scraping ────────────────────────────────────────────
@@ -1396,7 +1437,7 @@ def start_scraping():
         return jsonify({'success': False, 'message': 'Year and Semester must be configured in Settings.'})
 
     try:
-        session['scraper_selected_fields'] = selected_fields
+        session['scraper_selected_fields'] = _sanitize_session_fields(selected_fields)
         if debugger_address:
             update_app_setting('scraper_debugger_address', debugger_address)
         flask_app = current_app._get_current_object()

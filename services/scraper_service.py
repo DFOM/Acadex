@@ -56,6 +56,18 @@ _last_backend_error: dict = {
     "traceback": None,
 }
 
+_probe_lock = threading.Lock()
+probe_progress: dict = {
+    "status": "idle",            # idle | running | completed | failed
+    "job_id": None,
+    "fields": [],
+    "message": None,
+    "error": None,
+    "started_at": None,
+    "finished_at": None,
+}
+_probe_progress_lock = threading.Lock()
+
 
 def _log_progress(msg: str) -> None:
     """Thread-safe append to the in-memory log."""
@@ -101,6 +113,22 @@ def _clear_last_backend_error() -> None:
 def get_last_backend_error() -> dict:
     with _progress_lock:
         return dict(_last_backend_error)
+
+
+def get_probe_progress() -> dict:
+    with _probe_progress_lock:
+        return dict(probe_progress)
+
+
+def _set_probe_progress(**kwargs) -> None:
+    with _probe_progress_lock:
+        for key, value in kwargs.items():
+            probe_progress[key] = value
+
+
+def is_probe_running() -> bool:
+    with _probe_progress_lock:
+        return probe_progress.get("status") == "running"
 
 
 def get_scraper_diagnostics(debugger_address: Optional[str] = None) -> dict:
@@ -730,6 +758,112 @@ def probe_available_fields(
             "fields": [],
             "message": f"Probe error: {exc}",
         }
+
+
+def _probe_worker(
+    debugger_address: str,
+    popup_open_timeout: float,
+    popup_close_delay: float,
+) -> None:
+    try:
+        _set_probe_progress(
+            status="running",
+            fields=[],
+            message="Probe started.",
+            error=None,
+            finished_at=None,
+        )
+        driver = get_driver(debugger_address=debugger_address)
+        result = probe_available_fields(
+            driver,
+            popup_open_timeout=popup_open_timeout,
+            popup_close_delay=popup_close_delay,
+        )
+        if result.get("success"):
+            _set_probe_progress(
+                status="completed",
+                fields=list(result.get("fields") or []),
+                message=str(result.get("message") or "Probe completed."),
+                error=None,
+                finished_at=datetime.utcnow().isoformat() + "Z",
+            )
+        else:
+            _set_probe_progress(
+                status="failed",
+                fields=[],
+                message=str(result.get("message") or "Probe failed."),
+                error=str(result.get("message") or "Probe failed."),
+                finished_at=datetime.utcnow().isoformat() + "Z",
+            )
+    except Exception as exc:
+        _set_last_backend_error("probe_worker", exc)
+        _set_probe_progress(
+            status="failed",
+            fields=[],
+            message=f"Probe failed: {exc}",
+            error=str(exc),
+            finished_at=datetime.utcnow().isoformat() + "Z",
+        )
+    finally:
+        if _probe_lock.locked():
+            _probe_lock.release()
+
+
+def start_probe_job(
+    debugger_address: str,
+    popup_open_timeout: float = 10.0,
+    popup_close_delay: float = 0.35,
+) -> dict:
+    if not _probe_lock.acquire(blocking=False):
+        return {
+            "success": False,
+            "started": False,
+            "message": "A probe job is already running.",
+            "job_id": probe_progress.get("job_id"),
+        }
+
+    job_id = datetime.utcnow().strftime("probe-%Y%m%d%H%M%S%f")
+    _set_probe_progress(
+        status="running",
+        job_id=job_id,
+        fields=[],
+        message="Probe queued.",
+        error=None,
+        started_at=datetime.utcnow().isoformat() + "Z",
+        finished_at=None,
+    )
+
+    t = threading.Thread(
+        target=_probe_worker,
+        args=(debugger_address, float(popup_open_timeout or 10.0), float(popup_close_delay or 0.35)),
+        daemon=True,
+        name="ProbeWorker",
+    )
+    try:
+        t.start()
+    except Exception as exc:
+        if _probe_lock.locked():
+            _probe_lock.release()
+        _set_last_backend_error("start_probe_job", exc)
+        _set_probe_progress(
+            status="failed",
+            message=f"Failed to start probe worker: {exc}",
+            error=str(exc),
+            finished_at=datetime.utcnow().isoformat() + "Z",
+        )
+        return {
+            "success": False,
+            "started": False,
+            "message": f"Failed to start probe worker: {exc}",
+            "job_id": job_id,
+        }
+
+    return {
+        "success": True,
+        "started": True,
+        "message": "Probe started. Poll /admin/probe-status for results.",
+        "job_id": job_id,
+    }
 
 
 # ──────────────────────────────────────────────────────
