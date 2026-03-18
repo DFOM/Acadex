@@ -276,6 +276,13 @@ def health_schema_check():
         'catalog_statuses': {'id', 'term', 'status', 'dataset', 'updated_at'},
         'scraped_datasets': {'id', 'name', 'status', 'selected_fields_json'},
         'scraped_courses': {'id', 'dataset_id', 'data_json'},
+        'subject_areas': {
+            'id', 'name', 'area_type', 'is_active', 'is_required',
+            'required_for_paths', 'min_depth_credits', 'min_major_credits', 'min_minor_credits',
+        },
+        'announcements': {'id', 'title', 'content', 'date_posted', 'is_active', 'ann_type', 'updated_at'},
+        'landing_page_sections': {'id', 'name', 'enabled', 'display_order', 'content_json', 'updated_at'},
+        'schedules': {'id', 'user_id', 'session_id', 'schedule_name', 'year', 'semester', 'schedule_type'},
         app.config.get('SESSION_SQLALCHEMY_TABLE', 'user_sessions'): {'id', 'data', 'expiry'},
     }
 
@@ -394,6 +401,57 @@ def _ensure_runtime_schema_compatibility() -> None:
         if 'dataset' not in cat_cols:
             with db.engine.begin() as conn:
                 conn.execute(sa_text('ALTER TABLE catalog_statuses ADD COLUMN IF NOT EXISTS dataset VARCHAR(150)'))
+
+    if 'subject_areas' in tables:
+        subject_cols = {c['name'] for c in insp.get_columns('subject_areas')}
+        with db.engine.begin() as conn:
+            if 'area_type' not in subject_cols:
+                conn.execute(sa_text('ALTER TABLE subject_areas ADD COLUMN IF NOT EXISTS area_type VARCHAR(20)'))
+                conn.execute(sa_text("UPDATE subject_areas SET area_type = 'generic' WHERE area_type IS NULL"))
+            if 'is_active' not in subject_cols:
+                conn.execute(sa_text('ALTER TABLE subject_areas ADD COLUMN IF NOT EXISTS is_active BOOLEAN'))
+                conn.execute(sa_text('UPDATE subject_areas SET is_active = TRUE WHERE is_active IS NULL'))
+            if 'is_required' not in subject_cols:
+                conn.execute(sa_text('ALTER TABLE subject_areas ADD COLUMN IF NOT EXISTS is_required BOOLEAN'))
+                conn.execute(sa_text('UPDATE subject_areas SET is_required = FALSE WHERE is_required IS NULL'))
+            if 'required_for_paths' not in subject_cols:
+                conn.execute(sa_text('ALTER TABLE subject_areas ADD COLUMN IF NOT EXISTS required_for_paths TEXT'))
+            if 'min_depth_credits' not in subject_cols:
+                conn.execute(sa_text('ALTER TABLE subject_areas ADD COLUMN IF NOT EXISTS min_depth_credits DOUBLE PRECISION'))
+                conn.execute(sa_text('UPDATE subject_areas SET min_depth_credits = 0 WHERE min_depth_credits IS NULL'))
+            if 'min_major_credits' not in subject_cols:
+                conn.execute(sa_text('ALTER TABLE subject_areas ADD COLUMN IF NOT EXISTS min_major_credits DOUBLE PRECISION'))
+                conn.execute(sa_text('UPDATE subject_areas SET min_major_credits = 0 WHERE min_major_credits IS NULL'))
+            if 'min_minor_credits' not in subject_cols:
+                conn.execute(sa_text('ALTER TABLE subject_areas ADD COLUMN IF NOT EXISTS min_minor_credits DOUBLE PRECISION'))
+                conn.execute(sa_text('UPDATE subject_areas SET min_minor_credits = 0 WHERE min_minor_credits IS NULL'))
+
+    if 'announcements' in tables:
+        ann_cols = {c['name'] for c in insp.get_columns('announcements')}
+        with db.engine.begin() as conn:
+            if 'ann_type' not in ann_cols:
+                conn.execute(sa_text('ALTER TABLE announcements ADD COLUMN IF NOT EXISTS ann_type VARCHAR(20)'))
+                conn.execute(sa_text("UPDATE announcements SET ann_type = 'info' WHERE ann_type IS NULL"))
+            if 'updated_at' not in ann_cols:
+                conn.execute(sa_text('ALTER TABLE announcements ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP'))
+                conn.execute(sa_text('UPDATE announcements SET updated_at = COALESCE(updated_at, date_posted)'))
+
+    if 'landing_page_sections' in tables:
+        section_cols = {c['name'] for c in insp.get_columns('landing_page_sections')}
+        with db.engine.begin() as conn:
+            if 'content_json' not in section_cols:
+                conn.execute(sa_text('ALTER TABLE landing_page_sections ADD COLUMN IF NOT EXISTS content_json TEXT'))
+            if 'updated_at' not in section_cols:
+                conn.execute(sa_text('ALTER TABLE landing_page_sections ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP'))
+
+    if 'schedules' in tables:
+        sched_cols = {c['name'] for c in insp.get_columns('schedules')}
+        with db.engine.begin() as conn:
+            if 'session_id' not in sched_cols:
+                conn.execute(sa_text('ALTER TABLE schedules ADD COLUMN IF NOT EXISTS session_id VARCHAR(255)'))
+            if 'schedule_type' not in sched_cols:
+                conn.execute(sa_text('ALTER TABLE schedules ADD COLUMN IF NOT EXISTS schedule_type VARCHAR(50)'))
+                conn.execute(sa_text("UPDATE schedules SET schedule_type = 'future' WHERE schedule_type IS NULL"))
 
 
 def _seed_security_defaults() -> None:
