@@ -46,6 +46,16 @@ def upgrade() -> None:
     bind = op.get_bind()
     insp = inspect(bind)
 
+    def _safe_exec(sql_text: str, params=None) -> None:
+        try:
+            if params is None:
+                bind.execute(sa.text(sql_text))
+            else:
+                bind.execute(sa.text(sql_text), params)
+        except Exception:
+            # Non-critical data seeding / backfill should not block schema upgrade
+            pass
+
     if not _table_exists(insp, 'roles'):
         op.create_table(
             'roles',
@@ -169,81 +179,78 @@ def upgrade() -> None:
     except Exception:
         pass
 
-    op.execute(sa.text("""
+    _safe_exec(
+        """
         INSERT INTO permissions (key, label, description)
         SELECT :key, :label, :description
         WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE key = :key)
-    """), DEFAULT_PERMISSION_ROWS)
+        """,
+        DEFAULT_PERMISSION_ROWS,
+    )
 
     role_rows = [
         {'name': 'admin', 'description': 'Full administrative access', 'is_system': True},
         {'name': 'moderator', 'description': 'Limited admin access', 'is_system': True},
         {'name': 'user', 'description': 'Default user role', 'is_system': True},
     ]
-    op.execute(sa.text("""
+    _safe_exec(
+        """
         INSERT INTO roles (name, description, is_system)
         SELECT :name, :description, :is_system
         WHERE NOT EXISTS (SELECT 1 FROM roles WHERE name = :name)
-    """), role_rows)
+        """,
+        role_rows,
+    )
 
     for role_name, perm_keys in ROLE_PERMISSION_KEYS.items():
         for perm_key in perm_keys:
-            op.execute(
-                sa.text(
-                    """
-                    INSERT INTO role_permissions (role_id, permission_id)
-                    SELECT r.id, p.id
-                    FROM roles r, permissions p
-                    WHERE r.name = :role_name
-                      AND p.key = :perm_key
-                      AND NOT EXISTS (
-                        SELECT 1
-                        FROM role_permissions rp
-                        WHERE rp.role_id = r.id AND rp.permission_id = p.id
-                      )
-                    """
-                ),
-                {'role_name': role_name, 'perm_key': perm_key},
+                        _safe_exec(
+                                """
+                                INSERT INTO role_permissions (role_id, permission_id)
+                                SELECT r.id, p.id
+                                FROM roles r, permissions p
+                                WHERE r.name = :role_name
+                                    AND p.key = :perm_key
+                                    AND NOT EXISTS (
+                                        SELECT 1
+                                        FROM role_permissions rp
+                                        WHERE rp.role_id = r.id AND rp.permission_id = p.id
+                                    )
+                                """,
+                                {'role_name': role_name, 'perm_key': perm_key},
             )
 
     # Assign default role_id values.  Wrap in try/except for DB-dialect safety
     # (SQLite stores booleans as 0/1; PostgreSQL uses TRUE/FALSE).
-    try:
-        op.execute(
-            sa.text(
-                """
-                UPDATE users
-                SET role_id = (SELECT id FROM roles WHERE name = 'admin')
-                WHERE (is_admin = TRUE OR lower(coalesce(role, '')) = 'admin')
-                  AND role_id IS NULL
-                """
-            )
-        )
-    except Exception:
-        pass  # Non-critical; _seed_security_defaults() handles role assignment at startup.
+    _safe_exec(
+        """
+        UPDATE users
+        SET role_id = (SELECT id FROM roles WHERE name = 'admin')
+        WHERE (is_admin = TRUE OR lower(coalesce(role, '')) = 'admin')
+          AND role_id IS NULL
+        """
+    )
 
-    try:
-        op.execute(
-            sa.text(
-                """
-                UPDATE users
-                SET role_id = (SELECT id FROM roles WHERE name = 'user')
-                WHERE role_id IS NULL
-                """
-            )
-        )
-    except Exception:
-        pass
+    _safe_exec(
+        """
+        UPDATE users
+        SET role_id = (SELECT id FROM roles WHERE name = 'user')
+        WHERE role_id IS NULL
+        """
+    )
 
     reg_rows = [
         {'field_key': 'career_interests', 'label': 'Career Interests', 'input_type': 'textarea', 'options_json': None, 'is_required': False, 'is_active': True, 'display_order': 10},
         {'field_key': 'gender', 'label': 'Gender', 'input_type': 'select', 'options_json': '["Male", "Female", "Prefer not to say"]', 'is_required': False, 'is_active': True, 'display_order': 20},
     ]
-    op.execute(sa.text("""
+    _safe_exec(
+        """
         INSERT INTO registration_fields (field_key, label, input_type, options_json, is_required, is_active, display_order)
         SELECT :field_key, :label, :input_type, :options_json, :is_required, :is_active, :display_order
         WHERE NOT EXISTS (SELECT 1 FROM registration_fields WHERE field_key = :field_key)
-    """), reg_rows)
+        """,
+        reg_rows,
+    )
 
 
 def downgrade() -> None:
