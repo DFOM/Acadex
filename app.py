@@ -9,6 +9,7 @@ from collections import defaultdict, deque
 from pathlib import Path
 from datetime import timedelta, datetime
 from werkzeug.security import generate_password_hash
+from sqlalchemy import inspect as sa_inspect
 from models import db, User, Role, Permission, RegistrationField, RBAC_PERMISSION_KEYS
 from flask_migrate import Migrate, upgrade, stamp
 
@@ -257,6 +258,59 @@ app.register_blueprint(schedule_bp, url_prefix='/schedule')
 @app.get('/health')
 def health_check():
     return jsonify({'status': 'ok'}), 200
+
+
+@app.get('/health/schema')
+def health_schema_check():
+    required_columns = {
+        'users': {
+            'id', 'username', 'email', 'password', 'role', 'role_id', 'is_admin',
+            'full_name', 'major_subject_area_id', 'minor_subject_area_id',
+        },
+        'roles': {'id', 'name'},
+        'permissions': {'id', 'key'},
+        'role_permissions': {'role_id', 'permission_id'},
+        'registration_fields': {'id', 'field_key', 'is_active'},
+        'login_attempts': {'id', 'identity', 'ip_address', 'success', 'attempted_at'},
+        'settings': {'key', 'value'},
+        'catalog_statuses': {'id', 'term', 'status', 'dataset', 'updated_at'},
+        'scraped_datasets': {'id', 'name', 'status', 'selected_fields_json'},
+        'scraped_courses': {'id', 'dataset_id', 'data_json'},
+        app.config.get('SESSION_SQLALCHEMY_TABLE', 'user_sessions'): {'id', 'data', 'expiry'},
+    }
+
+    try:
+        inspector = sa_inspect(db.engine)
+        existing_tables = set(inspector.get_table_names())
+    except Exception as exc:
+        app.logger.exception('health_schema_inspect_error error=%s', exc)
+        return jsonify({'status': 'error', 'ok': False, 'message': f'Unable to inspect schema: {exc}'}), 500
+
+    missing_tables = []
+    missing_columns: dict[str, list[str]] = {}
+    for table_name, expected_cols in required_columns.items():
+        if table_name not in existing_tables:
+            missing_tables.append(table_name)
+            continue
+        try:
+            actual_cols = {c['name'] for c in inspector.get_columns(table_name)}
+            missing = sorted(expected_cols - actual_cols)
+            if missing:
+                missing_columns[table_name] = missing
+        except Exception as exc:
+            missing_columns[table_name] = [f'!inspect_error: {exc}']
+
+    ok = (len(missing_tables) == 0 and len(missing_columns) == 0)
+    status_code = 200 if ok else 503
+
+    payload = {
+        'status': 'ok' if ok else 'schema_mismatch',
+        'ok': ok,
+        'required_tables': sorted(required_columns.keys()),
+        'missing_tables': sorted(missing_tables),
+        'missing_columns': missing_columns,
+    }
+    return jsonify(payload), status_code
 
 
 def _bootstrap_database() -> None:

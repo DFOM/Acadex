@@ -261,6 +261,9 @@
 (function () {
     'use strict';
 
+    const INITIAL_PROBED_FIELDS = {{ (probed_fields or [])|tojson }};
+    const INITIAL_SELECTED_FIELDS = {{ (selected_fields or [])|tojson }};
+
     /* ── Utility ────────────────────────────────────────────────── */
     function showAlert(msg, type) {
         const area = document.getElementById('alertArea');
@@ -376,12 +379,15 @@
         'Prerequisites', 'Course Instructor', 'Year Available', 'Subject Area',
     ];
 
-    function renderCheckboxes(fields) {
+    function renderCheckboxes(fields, selected = []) {
         const c = document.getElementById('fieldCheckboxes');
         c.innerHTML = '';
+        const selectedSet = new Set(selected);
         fields.forEach(f => {
             const id = 'fld_' + f.replace(/\s+/g, '_');
-            const checked = DEFAULT_FIELDS.includes(f);
+            const checked = selectedSet.size
+                ? selectedSet.has(f)
+                : DEFAULT_FIELDS.includes(f);
             c.insertAdjacentHTML('beforeend', `
                 <div class="form-check" style="padding-left:1.6em;">
                     <input class="form-check-input field-cb" type="checkbox"
@@ -403,9 +409,10 @@
 
         const year     = document.getElementById('scrapeYear').value.trim();
         const semester = document.getElementById('scrapeSemester').value.trim();
+        const syllabus_url = document.getElementById('syllabusUrl').value.trim();
 
         setBtn('btnStartScraping', true);
-        postJSON('/admin/start-scraping', { selected_fields: selected, year, semester })
+        postJSON('/admin/start-scraping', { selected_fields: selected, year, semester, syllabus_url })
             .then(d => {
                 if (d.success) {
                     showAlert(d.message, 'success');
@@ -493,6 +500,13 @@
     };
 
     /* ── Auto-resume if job was running before page load ─────────── */
+    if (INITIAL_PROBED_FIELDS.length) {
+        renderCheckboxes(INITIAL_PROBED_FIELDS, INITIAL_SELECTED_FIELDS);
+        document.getElementById('probeResults').classList.remove('d-none');
+        document.getElementById('probeEmpty').classList.add('d-none');
+        document.getElementById('btnStartScraping').disabled = false;
+    }
+
     {% if progress.status == 'running' %}
     startPolling();
     {% endif %}

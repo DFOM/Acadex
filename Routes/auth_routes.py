@@ -6,6 +6,7 @@ import re
 import json
 from datetime import datetime, timedelta
 from sqlalchemy import or_
+from flask_migrate import upgrade
 from models import db, User, SubjectArea, Setting, Role, RegistrationField, LoginAttempt
 from utils import get_available_dataset_years
 
@@ -72,6 +73,31 @@ def _registration_fields():
         result.append({'field': field, 'options': options})
     return result
 
+
+def _safe_lookup_user(username: str, identity: str):
+    return User.query.filter(or_(User.username == username, User.email == identity)).first()
+
+
+def _attempt_login_schema_recovery(exc: Exception) -> bool:
+    current_app.logger.warning('auth_login_schema_recovery_attempt error=%s', exc)
+    try:
+        db.session.rollback()
+    except Exception:
+        pass
+
+    try:
+        upgrade()
+        db.session.remove()
+        current_app.logger.warning('auth_login_schema_recovery_succeeded')
+        return True
+    except Exception as heal_exc:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        current_app.logger.exception('auth_login_schema_recovery_failed error=%s', heal_exc)
+        return False
+
 # FIXED: Changed from '/' to '/login' so the new Landing Page can take the root URL
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
@@ -92,13 +118,23 @@ def login():
             return render_template('Student/login.html')
 
         try:
-            user = User.query.filter(or_(User.username == username, User.email == identity)).first()
+            user = _safe_lookup_user(username, identity)
             valid_credentials = bool(user and check_password_hash(user.password, password))
         except Exception as exc:
-            db.session.rollback()
-            current_app.logger.exception('auth_login_query_error identity=%s ip=%s error=%s', identity, ip_address, exc)
-            flash('Sign in is temporarily unavailable due to a server/session issue. Please try again.', 'error')
-            return render_template('Student/login.html')
+            recovered = _attempt_login_schema_recovery(exc)
+            if not recovered:
+                current_app.logger.exception('auth_login_query_error identity=%s ip=%s error=%s', identity, ip_address, exc)
+                flash('Sign in is temporarily unavailable due to a server/session issue. Please try again.', 'error')
+                return render_template('Student/login.html')
+
+            try:
+                user = _safe_lookup_user(username, identity)
+                valid_credentials = bool(user and check_password_hash(user.password, password))
+            except Exception as retry_exc:
+                db.session.rollback()
+                current_app.logger.exception('auth_login_query_retry_error identity=%s ip=%s error=%s', identity, ip_address, retry_exc)
+                flash('Sign in is temporarily unavailable due to a server/session issue. Please try again.', 'error')
+                return render_template('Student/login.html')
 
         if valid_credentials:
             try:

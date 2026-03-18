@@ -1,5 +1,5 @@
 # Routes/admin_routes.py
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_login import login_required, current_user
 import os
 import csv
@@ -1246,7 +1246,7 @@ def manage_courses():
 @login_required
 @admin_required
 def university_connection():
-    from services.scraper_service import scraper_progress, _is_chrome_running
+    from services.scraper_service import scraper_progress, _is_chrome_running, is_scraper_running
     import json as _json
 
     year = get_app_setting('current_year', '')
@@ -1265,6 +1265,9 @@ def university_connection():
         chrome_connected=chrome_connected,
         past_datasets=past_datasets,
         progress=dict(scraper_progress),
+        probed_fields=session.get('scraper_probed_fields', []),
+        selected_fields=session.get('scraper_selected_fields', []),
+        scraper_is_running=is_scraper_running(),
     )
 
 
@@ -1311,6 +1314,8 @@ def probe_fields():
         return jsonify({'success': False, 'fields': [], 'message': str(exc)})
 
     result = _probe(driver, syllabus_url=syllabus_url)
+    if result.get('success'):
+        session['scraper_probed_fields'] = list(result.get('fields') or [])
     return jsonify(result)
 
 
@@ -1321,24 +1326,31 @@ def probe_fields():
 def start_scraping():
     import json as _json
     from flask import current_app
-    from services.scraper_service import run_controlled_scraper as _run, scraper_progress
+    from services.scraper_service import run_controlled_scraper as _run, scraper_progress, is_scraper_running
 
     # Reject if already running
-    if scraper_progress.get('status') == 'running':
+    if scraper_progress.get('status') == 'running' or is_scraper_running():
         return jsonify({'success': False, 'message': 'A scraping job is already running.'})
 
     data = request.get_json(force=True, silent=True) or {}
     selected_fields = data.get('selected_fields') or []
+    if isinstance(selected_fields, tuple):
+        selected_fields = list(selected_fields)
+    if not isinstance(selected_fields, list):
+        selected_fields = []
+    selected_fields = [str(f).strip() for f in selected_fields if str(f).strip()]
     year = (data.get('year') or get_app_setting('current_year', '')).strip()
     semester = (data.get('semester') or get_app_setting('current_semester', '')).strip()
+    syllabus_url = (data.get('syllabus_url') or get_app_setting('scraper_syllabus_url', '')).strip()
 
     if not selected_fields:
         return jsonify({'success': False, 'message': 'No fields selected.'})
     if not year or not semester:
         return jsonify({'success': False, 'message': 'Year and Semester must be configured in Settings.'})
 
+    session['scraper_selected_fields'] = selected_fields
     flask_app = current_app._get_current_object()
-    result = _run(selected_fields, year, semester, flask_app)
+    result = _run(selected_fields, year, semester, flask_app, syllabus_url=syllabus_url)
     return jsonify(result)
 
 
@@ -1347,10 +1359,11 @@ def start_scraping():
 @login_required
 @admin_required
 def scraper_status():
-    from services.scraper_service import scraper_progress as _p, _is_chrome_running
+    from services.scraper_service import scraper_progress as _p, _is_chrome_running, is_scraper_running
     import copy
     payload = copy.deepcopy(_p)
     payload['chrome_connected'] = _is_chrome_running()
+    payload['is_running_lock'] = is_scraper_running()
 
     # Enrich with DB data when a dataset is active
     ds_id = payload.get('dataset_id')

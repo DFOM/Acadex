@@ -17,7 +17,6 @@ import json
 import logging
 import platform
 import subprocess
-import sys
 import threading
 import time
 from datetime import datetime
@@ -29,6 +28,7 @@ log = logging.getLogger(__name__)
 #  Global in-process scraper state
 # ──────────────────────────────────────────────────────
 _scraper_lock = threading.Lock()          # prevents concurrent runs
+_scraper_is_running = False
 _active_driver = None                     # reused WebDriver instance
 _active_driver_lock = threading.Lock()
 
@@ -51,6 +51,11 @@ def _log_progress(msg: str) -> None:
         scraper_progress["log"].append(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
         if len(scraper_progress["log"]) > 200:
             scraper_progress["log"] = scraper_progress["log"][-200:]
+
+
+def is_scraper_running() -> bool:
+    with _progress_lock:
+        return bool(_scraper_is_running)
 
 
 # ──────────────────────────────────────────────────────
@@ -330,7 +335,7 @@ def probe_available_fields(driver, syllabus_url: str = "") -> dict:
 #  Controlled scraper — runs in background thread
 # ──────────────────────────────────────────────────────
 
-def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app) -> None:
+def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app, syllabus_url: str = "") -> None:
     """
     Background thread: iterates over every course row, extracts selected
     fields and persists them.  Updates scraper_progress in real time.
@@ -357,18 +362,42 @@ def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app) -> N
         except Exception as exc:
             _log_progress(f"[DB] progress update failed: {exc}")
 
-    def _get_popup_info(popup, label: str) -> str:
+    def _extract_popup_fields(popup) -> dict[str, str]:
+        data: dict[str, str] = {}
+        for header in popup.find_elements(By.CSS_SELECTOR, "div.ui-widget-header"):
+            label = (header.text or "").strip()
+            if not label:
+                continue
+            value = ""
+            try:
+                sibling = header.find_element(By.XPATH, "following-sibling::div[1]")
+                rich = sibling.find_elements(By.CSS_SELECTOR, ".fr-view")
+                if rich:
+                    value = (rich[0].text or "").strip()
+                else:
+                    value = (sibling.text or "").strip()
+            except Exception:
+                value = ""
+            data[label] = value
+        return data
+
+    def _close_popup(popup) -> None:
         try:
-            xpath = (
-                f".//div[contains(@class, 'ui-widget-header') "
-                f"and normalize-space(.)=\"{label}\"]"
-                f"/following-sibling::div[1]//div[contains(@class, 'fr-view')]"
-            )
-            return popup.find_element(By.XPATH, xpath).text
-        except NoSuchElementException:
-            return ""
+            popup.find_element(By.CLASS_NAME, "ui-dialog-titlebar-close").click()
+            wait.until(EC.invisibility_of_element_located((By.ID, "pkx02301:dialog")))
+            return
+        except Exception:
+            pass
+        try:
+            driver.execute_script("arguments[0].style.display='none';", popup)
+        except Exception:
+            pass
 
     try:
+        if syllabus_url:
+            driver.get(syllabus_url)
+            _log_progress("Opened syllabus URL before scraping.")
+
         # Wait for table
         wait.until(EC.visibility_of_element_located((By.ID, "funcForm:table_data")))
 
@@ -402,20 +431,14 @@ def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app) -> N
 
                 # Always capture Day and Period
                 course_data: dict = {"Day and Period": day_and_period}
+                popup_values = _extract_popup_fields(popup)
                 for field in selected_fields:
-                    course_data[field] = _get_popup_info(popup, field)
+                    course_data[field] = popup_values.get(field, "")
 
                 course_title = course_data.get("Course Title", f"Row {i+1}")
                 _log_progress(f"[{i+1}/{total}] {course_title}")
 
-                # Close popup
-                try:
-                    popup.find_element(By.CLASS_NAME, "ui-dialog-titlebar-close").click()
-                    wait.until(
-                        EC.invisibility_of_element_located((By.ID, "pkx02301:dialog"))
-                    )
-                except Exception:
-                    pass
+                _close_popup(popup)
 
                 # Persist the row
                 with flask_app.app_context():
@@ -435,7 +458,7 @@ def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app) -> N
                     scraper_progress["current_index"] = i + 1
                     scraper_progress["last_course"] = course_title
 
-            except (TimeoutException, StaleElementReferenceException) as exc:
+            except (TimeoutException, StaleElementReferenceException, NoSuchElementException) as exc:
                 msg = f"[{i+1}/{total}] Skipped — {type(exc).__name__}: {exc}"
                 _log_progress(msg)
                 # Attempt page recovery
@@ -469,6 +492,10 @@ def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app) -> N
                 else:
                     cs.status = "available"
                     cs.updated_at = datetime.utcnow()
+                try:
+                    cs.dataset = ds.name if ds else None
+                except Exception:
+                    pass
                 db.session.commit()
 
             # Broadcast notification to all users
@@ -502,8 +529,11 @@ def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app) -> N
             pass
 
     finally:
-        with _scraper_lock:
-            pass  # lock released automatically when thread exits
+        global _scraper_is_running
+        with _progress_lock:
+            _scraper_is_running = False
+        if _scraper_lock.locked():
+            _scraper_lock.release()
         release_driver()
 
 
@@ -512,22 +542,35 @@ def run_controlled_scraper(
     year: str,
     semester: str,
     flask_app,
+    syllabus_url: str = "",
 ) -> dict:
     """
     Spawn a background thread that runs the scraper.
 
     Returns {"success": bool, "message": str, "dataset_id": int | None}
     """
+    global _scraper_is_running
     if not _scraper_lock.acquire(blocking=False):
         return {
             "success": False,
             "message": "A scraping job is already running.",
             "dataset_id": None,
         }
+    with _progress_lock:
+        if _scraper_is_running:
+            _scraper_lock.release()
+            return {
+                "success": False,
+                "message": "A scraping job is already running.",
+                "dataset_id": None,
+            }
+        _scraper_is_running = True
 
     try:
         driver = get_driver()
     except RuntimeError as exc:
+        with _progress_lock:
+            _scraper_is_running = False
         _scraper_lock.release()
         return {"success": False, "message": str(exc), "dataset_id": None}
 
@@ -548,6 +591,8 @@ def run_controlled_scraper(
             db.session.commit()
             dataset_id = ds.id
     except Exception as exc:
+        with _progress_lock:
+            _scraper_is_running = False
         _scraper_lock.release()
         return {
             "success": False,
@@ -573,11 +618,22 @@ def run_controlled_scraper(
 
     t = threading.Thread(
         target=_worker,
-        args=(driver, selected_fields, dataset_id, flask_app),
+        args=(driver, selected_fields, dataset_id, flask_app, syllabus_url),
         daemon=True,
         name="ScraperWorker",
     )
-    t.start()
+    try:
+        t.start()
+    except Exception as exc:
+        with _progress_lock:
+            _scraper_is_running = False
+        if _scraper_lock.locked():
+            _scraper_lock.release()
+        return {
+            "success": False,
+            "message": f"Failed to start scraper worker: {exc}",
+            "dataset_id": None,
+        }
 
     return {
         "success": True,

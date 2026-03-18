@@ -206,6 +206,7 @@ class CatalogStatus(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     term = db.Column(db.String(100), unique=True, nullable=False)  # e.g. "Spring 2026"
     status = db.Column(db.String(20), default='available', nullable=False)  # processing | available
+    dataset = db.Column(db.String(150), nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
