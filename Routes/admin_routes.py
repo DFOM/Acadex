@@ -348,6 +348,8 @@ def index():
                            current_year_setting=get_app_setting('current_year', '2025'), 
                            current_semester_setting=get_app_setting('current_semester', 'Spring'),
                            graduation_credits_setting=get_app_setting('graduation_credits', '124'),
+                           scraper_popup_open_timeout_setting=get_app_setting('scraper_popup_open_timeout', '10'),
+                           scraper_popup_close_delay_setting=get_app_setting('scraper_popup_close_delay', '0.35'),
                            ai_enabled_setting=get_app_setting('ai_enabled', 'false'),
                            ai_data_collection_enabled_setting=get_app_setting('ai_data_collection_enabled', 'false'))
 
@@ -717,6 +719,20 @@ def update_app_settings_route():
     if grad_credits <= 0:
         grad_credits = 124.0
     update_app_setting('graduation_credits', str(grad_credits))
+
+    popup_open_timeout = _safe_float(request.form.get('scraper_popup_open_timeout_setting'), 10.0)
+    if popup_open_timeout < 2.0:
+        popup_open_timeout = 2.0
+    if popup_open_timeout > 40.0:
+        popup_open_timeout = 40.0
+    update_app_setting('scraper_popup_open_timeout', str(popup_open_timeout))
+
+    popup_close_delay = _safe_float(request.form.get('scraper_popup_close_delay_setting'), 0.35)
+    if popup_close_delay < 0.0:
+        popup_close_delay = 0.0
+    if popup_close_delay > 5.0:
+        popup_close_delay = 5.0
+    update_app_setting('scraper_popup_close_delay', str(popup_close_delay))
 
     ai_enabled = 'ai_enabled_setting' in request.form
     ai_data_collection_enabled = 'ai_data_collection_enabled_setting' in request.form
@@ -1253,7 +1269,6 @@ def university_connection():
 
     year = get_app_setting('current_year', '')
     semester = get_app_setting('current_semester', '')
-    syllabus_url = get_app_setting('scraper_syllabus_url', '')
     debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
 
     # Past datasets for history panel
@@ -1264,7 +1279,6 @@ def university_connection():
         'Admin/university_connection.html',
         year=year,
         semester=semester,
-        syllabus_url=syllabus_url,
         debugger_address=debugger_address,
         chrome_connected=chrome_connected,
         past_datasets=past_datasets,
@@ -1321,12 +1335,10 @@ def probe_fields():
     from services.scraper_service import get_driver, probe_available_fields as _probe, _set_last_backend_error
     try:
         data = request.get_json(force=True, silent=True) or {}
-        syllabus_url = (data.get('syllabus_url') or '').strip()
         debugger_address = (data.get('debugger_address') or get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))).strip()
+        popup_open_timeout = _safe_float(get_app_setting('scraper_popup_open_timeout', '10'), 10.0)
+        popup_close_delay = _safe_float(get_app_setting('scraper_popup_close_delay', '0.35'), 0.35)
 
-        # Persist the URL for future use
-        if syllabus_url:
-            update_app_setting('scraper_syllabus_url', syllabus_url)
         if debugger_address:
             update_app_setting('scraper_debugger_address', debugger_address)
 
@@ -1336,7 +1348,11 @@ def probe_fields():
         return jsonify({'success': False, 'fields': [], 'message': str(exc)})
 
     try:
-        result = _probe(driver, syllabus_url=syllabus_url)
+        result = _probe(
+            driver,
+            popup_open_timeout=popup_open_timeout,
+            popup_close_delay=popup_close_delay,
+        )
         if result.get('success'):
             session['scraper_probed_fields'] = list(result.get('fields') or [])
         return jsonify(result)
@@ -1370,8 +1386,9 @@ def start_scraping():
     selected_fields = [str(f).strip() for f in selected_fields if str(f).strip()]
     year = (data.get('year') or get_app_setting('current_year', '')).strip()
     semester = (data.get('semester') or get_app_setting('current_semester', '')).strip()
-    syllabus_url = (data.get('syllabus_url') or get_app_setting('scraper_syllabus_url', '')).strip()
     debugger_address = (data.get('debugger_address') or get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))).strip()
+    popup_open_timeout = _safe_float(get_app_setting('scraper_popup_open_timeout', '10'), 10.0)
+    popup_close_delay = _safe_float(get_app_setting('scraper_popup_close_delay', '0.35'), 0.35)
 
     if not selected_fields:
         return jsonify({'success': False, 'message': 'No fields selected.'})
@@ -1388,8 +1405,9 @@ def start_scraping():
             year,
             semester,
             flask_app,
-            syllabus_url=syllabus_url,
             debugger_address=debugger_address,
+            popup_open_timeout=popup_open_timeout,
+            popup_close_delay=popup_close_delay,
         )
         return jsonify(result)
     except Exception as exc:

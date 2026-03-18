@@ -49,14 +49,6 @@
             <hr class="my-3" style="border-color:var(--ax-border);">
 
             <div class="mb-3">
-                <label class="form-label small">Syllabus Page URL <span class="text-muted">(optional)</span></label>
-                <input id="syllabusUrl" type="url" class="form-control form-control-sm"
-                       placeholder="https://portal.university.edu/syllabus"
-                       value="{{ syllabus_url }}">
-                <div class="form-text">If set, the probe will navigate here automatically.</div>
-            </div>
-
-            <div class="mb-3">
                 <label class="form-label small">Debugger Endpoint</label>
                 <input id="debuggerAddress" type="text" class="form-control form-control-sm"
                        placeholder="localhost:9222 or 192.168.1.30:9222"
@@ -388,14 +380,13 @@
     /* ── B) Probe ───────────────────────────────────────────────── */
 
     window.probeFields = function () {
-        const url = document.getElementById('syllabusUrl').value.trim();
         const debugger_address = document.getElementById('debuggerAddress').value.trim();
         setBtn('btnProbeFields', true);
         document.getElementById('probeSpinner').classList.remove('d-none');
         document.getElementById('probeResults').classList.add('d-none');
         document.getElementById('probeEmpty').classList.add('d-none');
 
-        postJSON('/admin/probe-fields', { syllabus_url: url, debugger_address })
+        postJSON('/admin/probe-fields', { debugger_address })
             .then(d => {
                 document.getElementById('probeSpinner').classList.add('d-none');
                 if (d.success && d.fields && d.fields.length) {
@@ -477,11 +468,10 @@
 
         const year     = document.getElementById('scrapeYear').value.trim();
         const semester = document.getElementById('scrapeSemester').value.trim();
-        const syllabus_url = document.getElementById('syllabusUrl').value.trim();
         const debugger_address = document.getElementById('debuggerAddress').value.trim();
 
         setBtn('btnStartScraping', true);
-        postJSON('/admin/start-scraping', { selected_fields: selected, year, semester, syllabus_url, debugger_address })
+        postJSON('/admin/start-scraping', { selected_fields: selected, year, semester, debugger_address })
             .then(d => {
                 if (d.success) {
                     showAlert(d.message, 'success');

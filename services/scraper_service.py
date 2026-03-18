@@ -591,9 +591,8 @@ def _extract_row_table_values(row, headers: list[str]) -> dict[str, str]:
     return values
 
 
-def _find_visible_popup(driver, wait):
+def _find_visible_popup(driver, popup_open_timeout: float = 10.0):
     from selenium.webdriver.common.by import By
-    from selenium.webdriver.support import expected_conditions as EC
 
     candidates = [
         (By.ID, "pkx02301:dialog"),
@@ -606,15 +605,32 @@ def _find_visible_popup(driver, wait):
             "//*[contains(@id,':dialog') and not(contains(@style,'display: none')) and not(contains(@class,'ui-helper-hidden'))]",
         ),
     ]
-    for locator in candidates:
-        try:
-            return wait.until(EC.visibility_of_element_located(locator))
-        except Exception:
-            continue
-    raise RuntimeError("Course detail popup did not appear")
+
+    timeout = max(1.0, float(popup_open_timeout or 10.0))
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        for locator in candidates:
+            try:
+                nodes = driver.find_elements(*locator)
+            except Exception:
+                nodes = []
+            for node in nodes:
+                try:
+                    if node.is_displayed():
+                        return node
+                except Exception:
+                    continue
+        time.sleep(0.2)
+
+    raise RuntimeError(f"Course detail popup did not appear within {timeout:.1f}s")
 
 
-def probe_available_fields(driver, syllabus_url: str = "") -> dict:
+def probe_available_fields(
+    driver,
+    syllabus_url: str = "",
+    popup_open_timeout: float = 10.0,
+    popup_close_delay: float = 0.35,
+) -> dict:
     """
     Navigate to the syllabus page, open the first course popup and extract
     all available field labels.
@@ -662,7 +678,16 @@ def probe_available_fields(driver, syllabus_url: str = "") -> dict:
         )
         first_link.click()
 
-        popup = _find_visible_popup(driver, wait)
+        # Read row values before opening popup
+        first_row = driver.find_element(By.XPATH, '//*[@id="funcForm:table_data"]/tr[1]')
+        row_values = _extract_row_table_values(first_row, table_headers)
+        for key in row_values.keys():
+            key_text = (key or "").strip()
+            if key_text and key_text not in seen:
+                fields.append(key_text)
+                seen.add(key_text)
+
+        popup = _find_visible_popup(driver, popup_open_timeout=popup_open_timeout)
 
         popup_headers = popup.find_elements(By.CSS_SELECTOR, "div.ui-widget-header")
         for header in popup_headers:
@@ -681,6 +706,7 @@ def probe_available_fields(driver, syllabus_url: str = "") -> dict:
         # Close popup
         try:
             popup.find_element(By.CSS_SELECTOR, ".ui-dialog-titlebar-close").click()
+            time.sleep(max(0.0, float(popup_close_delay or 0.0)))
         except Exception:
             pass
 
@@ -710,7 +736,15 @@ def probe_available_fields(driver, syllabus_url: str = "") -> dict:
 #  Controlled scraper — runs in background thread
 # ──────────────────────────────────────────────────────
 
-def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app, syllabus_url: str = "") -> None:
+def _worker(
+    driver,
+    selected_fields: List[str],
+    dataset_id: int,
+    flask_app,
+    syllabus_url: str = "",
+    popup_open_timeout: float = 10.0,
+    popup_close_delay: float = 0.35,
+) -> None:
     """
     Background thread: iterates over every course row, extracts selected
     fields and persists them.  Updates scraper_progress in real time.
@@ -794,7 +828,7 @@ def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app, syll
     def _close_popup(popup) -> None:
         try:
             popup.find_element(By.CSS_SELECTOR, ".ui-dialog-titlebar-close").click()
-            time.sleep(0.2)
+            time.sleep(max(0.0, float(popup_close_delay or 0.0)))
             return
         except Exception:
             pass
@@ -837,7 +871,7 @@ def _worker(driver, selected_fields: List[str], dataset_id: int, flask_app, syll
                 subject_link = row.find_element(By.XPATH, ".//td[2]/a")
                 subject_link.click()
 
-                popup = _find_visible_popup(driver, wait)
+                popup = _find_visible_popup(driver, popup_open_timeout=popup_open_timeout)
 
                 # Always capture Day and Period
                 course_data: dict = dict(row_values)
@@ -965,6 +999,8 @@ def run_controlled_scraper(
     flask_app,
     syllabus_url: str = "",
     debugger_address: Optional[str] = None,
+    popup_open_timeout: float = 10.0,
+    popup_close_delay: float = 0.35,
 ) -> dict:
     """
     Spawn a background thread that runs the scraper.
@@ -1040,7 +1076,15 @@ def run_controlled_scraper(
 
     t = threading.Thread(
         target=_worker,
-        args=(driver, selected_fields, dataset_id, flask_app, syllabus_url),
+        args=(
+            driver,
+            selected_fields,
+            dataset_id,
+            flask_app,
+            syllabus_url,
+            popup_open_timeout,
+            popup_close_delay,
+        ),
         daemon=True,
         name="ScraperWorker",
     )
