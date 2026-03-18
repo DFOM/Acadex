@@ -25,6 +25,11 @@ DEFAULT_PERMISSIONS = [
     ('edit_landing_page', 'Edit landing page', 'Manage announcements and landing content'),
 ]
 
+DEFAULT_PERMISSION_ROWS = [
+    {'key': key, 'label': label, 'description': description}
+    for (key, label, description) in DEFAULT_PERMISSIONS
+]
+
 
 ROLE_PERMISSION_KEYS = {
     'admin': [p[0] for p in DEFAULT_PERMISSIONS],
@@ -127,7 +132,7 @@ def upgrade() -> None:
         INSERT INTO permissions (key, label, description)
         SELECT :key, :label, :description
         WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE key = :key)
-    """), DEFAULT_PERMISSIONS)
+    """), DEFAULT_PERMISSION_ROWS)
 
     role_rows = [
         {'name': 'admin', 'description': 'Full administrative access', 'is_system': True},
