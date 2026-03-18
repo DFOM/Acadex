@@ -12,13 +12,8 @@ from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
 from models import db, User, Schedule, ScheduleCourse, Period, Setting, Announcement, AIEvent, BehaviorEvent, Notification, SubjectArea, ScrapedDataset, ScrapedCourse
 from utils import (
-    get_best_course_table,
-    get_course_data_tables,
     get_available_dataset_years,
     calculate_gpa,
-    is_valid_table_name,
-    semester_label_for_dataset,
-    table_has_column,
     format_display_course_number,
 )
 from services.eligibility import normalize_course_code_for_prereqs
@@ -1634,29 +1629,46 @@ def edit_schedule(schedule_id):
 
     log_behavior_event_safe('schedule_editor_view', schedule_id=schedule.id)
         
-    table_name, needs_sem_filter = get_best_course_table(schedule.year, schedule.semester)
-    semester_label = None
-    if needs_sem_filter and table_name and table_has_column(table_name, 'Semester'):
-        semester_label = semester_label_for_dataset(schedule.year, schedule.semester)
-    
     current_courses = []
-    if table_name and is_valid_table_name(table_name):
-        try:
-            sql = (
-                f'''SELECT sc.id as entry_id, sc.grade, c.*
-                    FROM schedule_courses sc
-                    JOIN "{table_name}" c ON sc.course_number = c."Course_Number"
-                    WHERE sc.schedule_id = :sched_id'''
-            )
-            params = {'sched_id': schedule.id}
-            if semester_label:
-                sql += ' AND c."Semester" = :semester_label'
-                params['semester_label'] = semester_label
-            result = db.session.execute(text(sql), params).fetchall()
-            current_courses = [_add_display_fields(dict(r._mapping)) for r in result]
-        except Exception as e:
-            db.session.rollback()
-            print(f"Error fetching current courses: {e}")
+    try:
+        rows = db.session.execute(
+            text(
+                '''
+                SELECT sc.id as entry_id, sc.grade, sc.course_number
+                FROM schedule_courses sc
+                WHERE sc.schedule_id = :sched_id
+                '''
+            ),
+            {'sched_id': schedule.id},
+        ).fetchall()
+        catalog_rows, _dataset_id = _load_scraped_catalog_for_term(schedule.year, schedule.semester)
+        catalog_by_number = {
+            _normalize_course_number(r.get('Course_Number')): r
+            for r in catalog_rows
+            if _normalize_course_number(r.get('Course_Number'))
+        }
+        meta_index = _build_course_metadata_index()
+
+        for row in rows:
+            code = _normalize_course_number(row.course_number)
+            payload = dict(catalog_by_number.get(code) or {})
+            if not payload:
+                meta = meta_index.get(code, {})
+                payload = {
+                    'Course_Number': row.course_number,
+                    'Course_Title': meta.get('title') or row.course_number,
+                    'Credits': float(meta.get('credits') or 0.0),
+                    'Instructor': meta.get('instructor') or '',
+                    'Day_and_Period': meta.get('day_and_period') or '',
+                    'Area_of_Study': meta.get('area') or '',
+                    'Prerequisite': '',
+                }
+            payload['entry_id'] = row.entry_id
+            payload['grade'] = row.grade
+            current_courses.append(_add_display_fields(payload))
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error fetching current courses: {e}")
     if not current_courses:
         current_courses = _load_schedule_courses_fallback(schedule.id)
 
@@ -1859,27 +1871,45 @@ def api_schedule_courses(schedule_id: int):
 
     log_behavior_event_safe('schedule_courses_loaded', schedule_id=schedule.id)
 
-    table_name, needs_sem_filter = get_best_course_table(schedule.year, schedule.semester)
-    if not table_name or not is_valid_table_name(table_name):
-        return jsonify({'success': True, 'courses': _load_schedule_courses_fallback(schedule.id)})
-
-    semester_label = None
-    if needs_sem_filter and table_has_column(table_name, 'Semester'):
-        semester_label = semester_label_for_dataset(schedule.year, schedule.semester)
-
     try:
-        sql = (
-            f'''SELECT sc.id as entry_id, sc.grade, c.*
+        rows = db.session.execute(
+            text(
+                '''
+                SELECT sc.id as entry_id, sc.grade, sc.course_number
                 FROM schedule_courses sc
-                JOIN "{table_name}" c ON sc.course_number = c."Course_Number"
-                WHERE sc.schedule_id = :sched_id'''
-        )
-        params = {'sched_id': schedule.id}
-        if semester_label:
-            sql += ' AND c."Semester" = :semester_label'
-            params['semester_label'] = semester_label
-        result = db.session.execute(text(sql), params).fetchall()
-        courses = [_add_display_fields(dict(r._mapping)) for r in result]
+                WHERE sc.schedule_id = :sched_id
+                '''
+            ),
+            {'sched_id': schedule.id},
+        ).fetchall()
+
+        catalog_rows, _dataset_id = _load_scraped_catalog_for_term(schedule.year, schedule.semester)
+        catalog_by_number = {
+            _normalize_course_number(r.get('Course_Number')): r
+            for r in catalog_rows
+            if _normalize_course_number(r.get('Course_Number'))
+        }
+        meta_index = _build_course_metadata_index()
+
+        courses = []
+        for row in rows:
+            code = _normalize_course_number(row.course_number)
+            payload = dict(catalog_by_number.get(code) or {})
+            if not payload:
+                meta = meta_index.get(code, {})
+                payload = {
+                    'Course_Number': row.course_number,
+                    'Course_Title': meta.get('title') or row.course_number,
+                    'Credits': float(meta.get('credits') or 0.0),
+                    'Instructor': meta.get('instructor') or '',
+                    'Day_and_Period': meta.get('day_and_period') or '',
+                    'Area_of_Study': meta.get('area') or '',
+                    'Prerequisite': '',
+                }
+            payload['entry_id'] = row.entry_id
+            payload['grade'] = row.grade
+            courses.append(_add_display_fields(payload))
+
         if not courses:
             courses = _load_schedule_courses_fallback(schedule.id)
         return jsonify({'success': True, 'courses': courses})
@@ -1925,10 +1955,9 @@ def add_course():
         )
 
     # --- Prerequisite enforcement ---
-    # Fetch the prerequisite string for the selected course from the schedule's course catalog.
-    table_name, needs_sem_filter = get_best_course_table(sched.year, sched.semester)
-    if not table_name or not is_valid_table_name(table_name):
-        print(f"Prereq check blocked: invalid/missing course catalog table for schedule {sched.id}")
+    catalog_rows, dataset_id = _load_scraped_catalog_for_term(sched.year, sched.semester)
+    if not catalog_rows:
+        print(f"Prereq check blocked: missing scraped dataset for schedule {sched.id}")
         return (
             jsonify(
                 {
@@ -1940,47 +1969,26 @@ def add_course():
             400,
         )
 
-    prereq_str = ''
-    candidate_day_period = ''
-    try:
-        semester_label = None
-        if needs_sem_filter and table_has_column(table_name, 'Semester'):
-            semester_label = semester_label_for_dataset(sched.year, sched.semester)
-
-        sql = f'SELECT "Prerequisite", "Day_and_Period" FROM "{table_name}" WHERE "Course_Number" = :cn'
-        params = {'cn': course_num}
-        if semester_label:
-            sql += ' AND "Semester" = :semester_label'
-            params['semester_label'] = semester_label
-        sql += ' LIMIT 1'
-
-        prereq_row = db.session.execute(text(sql), params).fetchone()
-        if not prereq_row:
-            return (
-                jsonify(
-                    {
-                        'success': False,
-                        'error': 'Unknown course',
-                        'message': 'Unknown course.'
-                    }
-                ),
-                400,
-            )
-        prereq_str = prereq_row[0]
-        candidate_day_period = prereq_row[1]
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error fetching prerequisites for {course_num} from {table_name}: {e}")
+    course_map = {
+        _normalize_course_number(r.get('Course_Number')): r
+        for r in catalog_rows
+        if _normalize_course_number(r.get('Course_Number'))
+    }
+    candidate = course_map.get(_normalize_course_number(course_num))
+    if not candidate:
         return (
             jsonify(
                 {
                     'success': False,
-                    'error': 'Unable to validate prerequisites',
-                    'message': 'Could not validate prerequisites for this course.'
+                    'error': 'Unknown course',
+                    'message': 'Unknown course.'
                 }
             ),
             400,
         )
+
+    prereq_str = candidate.get('Prerequisite')
+    candidate_day_period = candidate.get('Day_and_Period')
 
     completed_passing = []
     if current_user.is_authenticated:
@@ -2012,24 +2020,19 @@ def add_course():
 
     # --- Conflict enforcement ---
     try:
-        semester_label = None
-        if needs_sem_filter and table_has_column(table_name, 'Semester'):
-            semester_label = semester_label_for_dataset(sched.year, sched.semester)
-
-        sql = (
-            f'''SELECT c."Day_and_Period"
-                FROM schedule_courses sc
-                JOIN "{table_name}" c ON sc.course_number = c."Course_Number"
-                WHERE sc.schedule_id = :sid'''
-        )
-        params = {'sid': sched.id}
-        if semester_label:
-            sql += ' AND c."Semester" = :semester_label'
-            params['semester_label'] = semester_label
-        existing_rows = db.session.execute(text(sql), params).fetchall()
+        existing_rows = db.session.execute(
+            text('SELECT course_number FROM schedule_courses WHERE schedule_id = :sid'),
+            {'sid': sched.id},
+        ).fetchall()
         occupied_blocks = set()
+        meta_index = _build_course_metadata_index()
         for r in existing_rows:
-            occupied_blocks |= parse_day_period_blocks(r[0])
+            code = _normalize_course_number(r[0])
+            existing = course_map.get(code)
+            existing_dp = (existing or {}).get('Day_and_Period') if existing else None
+            if not existing_dp:
+                existing_dp = meta_index.get(code, {}).get('day_and_period')
+            occupied_blocks |= parse_day_period_blocks(existing_dp)
 
         candidate_blocks = parse_day_period_blocks(candidate_day_period)
         if has_conflict(occupied_blocks, candidate_blocks):
@@ -2045,7 +2048,7 @@ def add_course():
             )
     except Exception as e:
         db.session.rollback()
-        print(f"Error checking conflicts for {course_num} on schedule {sched.id}: {e}")
+        print(f"Error checking conflicts for {course_num} on schedule {sched.id}, dataset {dataset_id}: {e}")
         return (
             jsonify(
                 {
@@ -2395,13 +2398,9 @@ def api_generate_schedule():
     if not sched:
         return jsonify({'success': False, 'error': 'Unauthorized', 'message': 'Unauthorized'}), 403
 
-    table_name, needs_sem_filter = get_best_course_table(sched.year, sched.semester)
-    if not table_name or not is_valid_table_name(table_name):
+    catalog, dataset_name = _load_catalog_for_term(sched.year, sched.semester)
+    if not dataset_name or not catalog:
         return jsonify({'success': False, 'error': 'Catalog unavailable', 'message': 'Catalog unavailable'}), 400
-
-    semester_label = None
-    if needs_sem_filter and table_has_column(table_name, 'Semester'):
-        semester_label = semester_label_for_dataset(sched.year, sched.semester)
 
     completed_passing = []
     if current_user.is_authenticated:
@@ -2413,38 +2412,29 @@ def api_generate_schedule():
             return jsonify({'success': False, 'error': 'Unable to validate prerequisites', 'message': 'Unable to validate prerequisites'}), 400
 
     try:
-        sql = (
-            f'''SELECT c."Day_and_Period"
-                FROM schedule_courses sc
-                JOIN "{table_name}" c ON sc.course_number = c."Course_Number"
-                WHERE sc.schedule_id = :sid'''
-        )
-        params = {'sid': sched.id}
-        if semester_label:
-            sql += ' AND c."Semester" = :semester_label'
-            params['semester_label'] = semester_label
-        existing_dp_rows = db.session.execute(text(sql), params).fetchall()
-        existing_day_period = [r[0] for r in existing_dp_rows]
+        rows = db.session.execute(
+            text('SELECT course_number FROM schedule_courses WHERE schedule_id = :sid'),
+            {'sid': sched.id},
+        ).fetchall()
+        catalog_map = {
+            _normalize_course_number(r.get('Course_Number')): r
+            for r in catalog
+            if _normalize_course_number(r.get('Course_Number'))
+        }
+        meta_index = _build_course_metadata_index()
+        existing_day_period = []
+        for row in rows:
+            code = _normalize_course_number(row[0])
+            mapped = catalog_map.get(code)
+            value = (mapped or {}).get('Day_and_Period') if mapped else None
+            if not value:
+                value = meta_index.get(code, {}).get('day_and_period')
+            if value:
+                existing_day_period.append(value)
     except Exception as e:
         db.session.rollback()
         print(f"Error loading existing day/period for generator: {e}")
         existing_day_period = []
-
-    try:
-        sql = (
-            f'''SELECT "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Area_of_Study", "Prerequisite"
-                FROM "{table_name}"'''
-        )
-        params = {}
-        if semester_label:
-            sql += ' WHERE "Semester" = :semester_label'
-            params['semester_label'] = semester_label
-        rows = db.session.execute(text(sql), params).fetchall()
-        catalog = [dict(r._mapping) for r in rows]
-    except Exception as e:
-        db.session.rollback()
-        print(f"Error loading catalog for generator from {table_name}: {e}")
-        return jsonify({'success': False, 'error': 'Failed to load catalog', 'message': 'Failed to load catalog'}), 400
 
     user_areas = _resolve_user_area_names()
     generated, errors = generate_schedule_courses(
@@ -2461,7 +2451,7 @@ def api_generate_schedule():
     log_ai_event_safe(
         'ai_generate_schedule',
         schedule_id=sched.id,
-        metadata={'target_count': target_count, 'generated_count': len(generated)},
+        metadata={'target_count': target_count, 'generated_count': len(generated), 'table_name': dataset_name},
     )
 
     return jsonify({'success': True, 'courses': generated})

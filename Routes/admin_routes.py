@@ -12,13 +12,10 @@ from sqlalchemy import inspect, text
 import sqlalchemy as sa
 from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField, ScrapedDataset, ScrapedCourse
 from utils import (
-    get_course_data_tables,
     calculate_gpa,
-    is_valid_table_name,
     ensure_default_landing_sections,
     safe_json_loads,
     safe_json_dumps,
-    format_course_catalog_name,
 )
 from flask import Response
 import json
@@ -321,28 +318,22 @@ def _area_type_from_form(form) -> str:
 
 
 def _sync_subject_areas_from_catalogs() -> int:
-    """Ensure subject_areas includes all Area_of_Study values from uploaded catalogs."""
-    tables = [t for t in get_course_data_tables() if is_valid_table_name(t)]
-    if not tables:
+    """Ensure subject_areas includes all Area_of_Study values from completed scraped datasets."""
+    rows = (
+        db.session.query(ScrapedCourse.area_of_study)
+        .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
+        .filter(ScrapedDataset.status == 'completed')
+        .filter(ScrapedCourse.area_of_study.isnot(None))
+        .all()
+    )
+    if not rows:
         return 0
 
     discovered = set()
-    insp = inspect(db.engine)
-    for table_name in tables:
-        try:
-            cols = {c['name'] for c in insp.get_columns(table_name)}
-            if 'Area_of_Study' not in cols:
-                continue
-            rows = db.session.execute(
-                text(f'''SELECT DISTINCT "Area_of_Study" as area FROM "{table_name}" WHERE "Area_of_Study" IS NOT NULL''')
-            ).fetchall()
-            for r in rows:
-                name = str(getattr(r, 'area', '') or '').strip()
-                if name:
-                    discovered.add(name)
-        except Exception:
-            db.session.rollback()
-            continue
+    for (area,) in rows:
+        name = str(area or '').strip()
+        if name:
+            discovered.add(name)
 
     if not discovered:
         return 0
@@ -370,51 +361,43 @@ def _sync_subject_areas_from_catalogs() -> int:
 
 
 def _subject_area_credit_caps_from_catalogs() -> dict[str, float]:
-    """Return max available credits by area from uploaded catalogs.
+    """Return max available credits by area from completed scraped datasets.
 
     Credits are summed by unique (area, course_number), using the maximum
     observed credits for that course to avoid inflating across duplicate rows.
     """
-    tables = [t for t in get_course_data_tables() if is_valid_table_name(t)]
-    if not tables:
+    rows = (
+        db.session.query(
+            ScrapedCourse.area_of_study,
+            ScrapedCourse.course_number,
+            ScrapedCourse.credits,
+        )
+        .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
+        .filter(ScrapedDataset.status == 'completed')
+        .all()
+    )
+    if not rows:
         return {}
 
     try:
-        insp = inspect(db.engine)
         course_credit_by_area: dict[tuple[str, str], float] = {}
         area_case: dict[str, str] = {}
 
-        for table_name in tables:
-            cols = {c['name'] for c in insp.get_columns(table_name)}
-            if not {'Area_of_Study', 'Course_Number', 'Credits'}.issubset(cols):
+        for area_raw, course_raw, credits_raw in rows:
+            area_name = str(area_raw or '').strip()
+            course_number = str(course_raw or '').strip().upper()
+            if not area_name or not course_number:
                 continue
+            try:
+                credits = max(0.0, float(credits_raw or 0.0))
+            except Exception:
+                credits = 0.0
 
-            rows = db.session.execute(
-                text(
-                    f'''SELECT "Area_of_Study" as area, "Course_Number" as course_number, "Credits" as credits
-                        FROM "{table_name}"
-                        WHERE "Area_of_Study" IS NOT NULL
-                          AND TRIM("Area_of_Study") != ''
-                          AND "Course_Number" IS NOT NULL
-                          AND TRIM("Course_Number") != '' '''
-                )
-            ).fetchall()
-
-            for row in rows:
-                area_name = str(row.area or '').strip()
-                course_number = str(row.course_number or '').strip().upper()
-                if not area_name or not course_number:
-                    continue
-                try:
-                    credits = max(0.0, float(row.credits or 0.0))
-                except Exception:
-                    credits = 0.0
-
-                key = (area_name.lower(), course_number)
-                area_case.setdefault(area_name.lower(), area_name)
-                prev = float(course_credit_by_area.get(key, 0.0))
-                if credits > prev:
-                    course_credit_by_area[key] = credits
+            key = (area_name.lower(), course_number)
+            area_case.setdefault(area_name.lower(), area_name)
+            prev = float(course_credit_by_area.get(key, 0.0))
+            if credits > prev:
+                course_credit_by_area[key] = credits
 
         totals: dict[str, float] = {}
         for (area_lower, _course), credits in course_credit_by_area.items():
@@ -440,7 +423,7 @@ def logout():
 def index():
     user_count = User.query.count()
     schedule_count = Schedule.query.count()
-    course_tables = get_course_data_tables()
+    course_tables = [d.name for d in ScrapedDataset.query.filter_by(status='completed').all()]
     notification_count = Notification.query.count()
     announcement_count = Announcement.query.count()
     
@@ -464,6 +447,7 @@ def index():
                            graduation_credits_setting=get_app_setting('graduation_credits', '124'),
                            scraper_popup_open_timeout_setting=get_app_setting('scraper_popup_open_timeout', '10'),
                            scraper_popup_close_delay_setting=get_app_setting('scraper_popup_close_delay', '0.35'),
+                           scraper_row_transition_delay_setting=get_app_setting('scraper_row_transition_delay', '0.0'),
                            ai_enabled_setting=get_app_setting('ai_enabled', 'false'),
                            ai_data_collection_enabled_setting=get_app_setting('ai_data_collection_enabled', 'false'))
 
@@ -564,7 +548,10 @@ def manage_landing():
     features_cfg = safe_json_loads(getattr(features_section, 'content_json', None), {})
 
     # Suggest catalog terms from existing tables
-    discovered_terms = [format_course_catalog_name(t) for t in get_course_data_tables()]
+    discovered_terms = [
+        f"{(d.semester or '').strip()} {(d.year or '').strip()}".strip()
+        for d in ScrapedDataset.query.filter_by(status='completed').all()
+    ]
     try:
         catalog_rows = CatalogStatus.query.order_by(CatalogStatus.term.asc()).all()
     except Exception:
@@ -1134,30 +1121,21 @@ def api_update_subject_area(subject_id: int):
 @admin_required
 def manage_instructors():
     try:
-        course_tables = [t for t in get_course_data_tables() if is_valid_table_name(t)]
-        if not course_tables:
-            return render_template('Admin/instructors.html', instructors=[])
+        rows = (
+            db.session.query(ScrapedCourse.instructor, sa.func.count(ScrapedCourse.id))
+            .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
+            .filter(ScrapedDataset.status == 'completed')
+            .filter(ScrapedCourse.instructor.isnot(None))
+            .group_by(ScrapedCourse.instructor)
+            .order_by(ScrapedCourse.instructor.asc())
+            .all()
+        )
 
-        union_parts = [
-            f'''SELECT "Instructor" as instructor_name, COUNT(*) as course_count
-                FROM "{t}"
-                WHERE "Instructor" IS NOT NULL AND TRIM("Instructor") != ''
-                GROUP BY "Instructor"'''
-            for t in course_tables
+        instructors = [
+            {'id': idx, 'name': str(name or '').strip(), 'course_count': int(count or 0)}
+            for idx, (name, count) in enumerate(rows, 1)
+            if str(name or '').strip()
         ]
-        sql = " UNION ALL ".join(union_parts)
-        rows = db.session.execute(
-            text(
-                f'''SELECT instructor_name as name, SUM(course_count) as course_count
-                    FROM ({sql}) x
-                    GROUP BY instructor_name
-                    ORDER BY instructor_name ASC'''
-            )
-        ).fetchall()
-
-        instructors = []
-        for idx, row in enumerate(rows, 1):
-            instructors.append({'id': idx, 'name': row.name, 'course_count': int(row.course_count or 0)})
 
         return render_template('Admin/instructors.html', instructors=instructors)
     except Exception:
@@ -1179,15 +1157,22 @@ def api_update_instructor(instructor_id):
         return jsonify({'success': True, 'updated_rows': 0})
 
     try:
+        rows = (
+            ScrapedCourse.query.join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
+            .filter(ScrapedDataset.status == 'completed', ScrapedCourse.instructor == old_name)
+            .all()
+        )
         updated_rows = 0
-        for table_name in [t for t in get_course_data_tables() if is_valid_table_name(t)]:
-            res = db.session.execute(
-                text(f'''UPDATE "{table_name}"
-                         SET "Instructor" = :new_name
-                         WHERE "Instructor" = :old_name'''),
-                {'new_name': new_name, 'old_name': old_name},
-            )
-            updated_rows += int(getattr(res, 'rowcount', 0) or 0)
+        for row in rows:
+            row.instructor = new_name
+            payload = safe_json_loads(row.data_json, {})
+            if isinstance(payload, dict):
+                for k in list(payload.keys()):
+                    k_norm = ' '.join(str(k or '').strip().lower().replace('_', ' ').replace('-', ' ').split())
+                    if k_norm in {'instructor', 'faculty', 'course instructor'}:
+                        payload[k] = new_name
+                row.data_json = safe_json_dumps(payload)
+            updated_rows += 1
 
         db.session.commit()
         return jsonify({'success': True, 'updated_rows': updated_rows})
@@ -1212,15 +1197,22 @@ def api_delete_instructor():
         return jsonify({'success': False, 'message': 'Replacement instructor must be different.'}), 400
 
     try:
+        rows = (
+            ScrapedCourse.query.join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
+            .filter(ScrapedDataset.status == 'completed', ScrapedCourse.instructor == name)
+            .all()
+        )
         updated_rows = 0
-        for table_name in [t for t in get_course_data_tables() if is_valid_table_name(t)]:
-            res = db.session.execute(
-                text(f'''UPDATE "{table_name}"
-                         SET "Instructor" = :replacement
-                         WHERE "Instructor" = :name'''),
-                {'replacement': replacement, 'name': name},
-            )
-            updated_rows += int(getattr(res, 'rowcount', 0) or 0)
+        for row in rows:
+            row.instructor = replacement
+            payload = safe_json_loads(row.data_json, {})
+            if isinstance(payload, dict):
+                for k in list(payload.keys()):
+                    k_norm = ' '.join(str(k or '').strip().lower().replace('_', ' ').replace('-', ' ').split())
+                    if k_norm in {'instructor', 'faculty', 'course instructor'}:
+                        payload[k] = replacement
+                row.data_json = safe_json_dumps(payload)
+            updated_rows += 1
 
         db.session.commit()
         return jsonify({'success': True, 'updated_rows': updated_rows})
@@ -1232,15 +1224,29 @@ def api_delete_instructor():
 @login_required
 @admin_required
 def manage_courses():
-    course_tables = [t for t in get_course_data_tables() if is_valid_table_name(t)]
-    if not course_tables:
-        return render_template('Admin/courses.html', courses=[])
-    
-    union_parts = [f'SELECT \'{t}\' as source_table, "Course_Number" as _rowid, "Course_Number", "Course_Title", "Credits", "Instructor", "Day_and_Period", "Prerequisite" FROM "{t}"' for t in course_tables]
-    full_query = " UNION ALL ".join(union_parts)
-    
-    courses = db.session.execute(text(f"SELECT * FROM ({full_query})")).fetchall()
-    return render_template('Admin/courses.html', courses=[dict(row._mapping) for row in courses])
+    rows = (
+        db.session.query(ScrapedCourse, ScrapedDataset)
+        .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
+        .filter(ScrapedDataset.status == 'completed')
+        .order_by(ScrapedDataset.created_at.desc(), ScrapedCourse.id.asc())
+        .all()
+    )
+
+    courses = []
+    for sc, ds in rows:
+        courses.append(
+            {
+                'source_table': ds.name,
+                '_rowid': sc.id,
+                'Course_Number': sc.course_number,
+                'Course_Title': sc.course_title,
+                'Credits': sc.credits,
+                'Instructor': sc.instructor,
+                'Day_and_Period': sc.day_and_period,
+                'Prerequisite': sc.prerequisite,
+            }
+        )
+    return render_template('Admin/courses.html', courses=courses)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1625,13 +1631,34 @@ def restore_version_placeholder():
 def api_update_course():
     data = request.get_json()
     try:
-        table = data.get("source_table")
-        if table and is_valid_table_name(table) and table in get_course_data_tables():
-            db.session.execute(text(f'UPDATE "{table}" SET "Course_Title" = :title, "Credits" = :creds WHERE "Course_Number" = :rid'), 
-                        {'title': data.get('Course_Title'), 'creds': data.get('Credits'), 'rid': data.get('_rowid')})
-            db.session.commit()
-            return jsonify({'success': True})
-        return jsonify({'success': False, 'message': 'Invalid table'})
+        course_id = data.get('_rowid')
+        try:
+            course_id = int(course_id)
+        except Exception:
+            return jsonify({'success': False, 'message': 'Invalid course identifier'})
+
+        row = db.session.get(ScrapedCourse, course_id)
+        if not row:
+            return jsonify({'success': False, 'message': 'Course not found'})
+
+        row.course_title = (data.get('Course_Title') or '').strip() or row.course_title
+        try:
+            row.credits = float(data.get('Credits'))
+        except Exception:
+            pass
+
+        payload = safe_json_loads(row.data_json, {})
+        if isinstance(payload, dict):
+            for key in list(payload.keys()):
+                key_norm = ' '.join(str(key or '').strip().lower().replace('_', ' ').replace('-', ' ').split())
+                if key_norm in {'course title', 'subject'}:
+                    payload[key] = row.course_title
+                if key_norm in {'credits', 'credit'} and row.credits is not None:
+                    payload[key] = str(row.credits)
+            row.data_json = safe_json_dumps(payload)
+
+        db.session.commit()
+        return jsonify({'success': True})
     except Exception as e:
         db.session.rollback()
         return jsonify({'success': False, 'message': 'Unable to update course.'}), 500
@@ -1886,47 +1913,45 @@ def _subject_area_options_by_type():
 
 def _build_admin_catalog_index():
     catalog = {}
-    course_tables = [t for t in get_course_data_tables() if is_valid_table_name(t)]
-    if not course_tables:
+    rows = (
+        db.session.query(ScrapedCourse)
+        .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
+        .filter(ScrapedDataset.status == 'completed')
+        .order_by(ScrapedDataset.created_at.desc(), ScrapedCourse.id.asc())
+        .all()
+    )
+    if not rows:
         return catalog
 
     try:
-        inspector = inspect(db.engine)
-        union_parts = []
-        for table_name in course_tables:
-            cols = {c['name'] for c in inspector.get_columns(table_name)}
-            course_number_expr = '"Course_Number"' if 'Course_Number' in cols else 'NULL'
-            title_expr = '"Course_Title"' if 'Course_Title' in cols else 'NULL'
-            credits_expr = '"Credits"' if 'Credits' in cols else '0'
-            instructor_expr = '"Instructor"' if 'Instructor' in cols else 'NULL'
-            area_expr = '"Area_of_Study"' if 'Area_of_Study' in cols else 'NULL'
-            day_expr = '"Day"' if 'Day' in cols else 'NULL'
-            period_expr = '"Period"' if 'Period' in cols else 'NULL'
-            union_parts.append(
-                f'''SELECT {course_number_expr} AS course_number,
-                           {title_expr} AS course_title,
-                           {credits_expr} AS credits,
-                           {instructor_expr} AS instructor,
-                           {area_expr} AS area_of_study,
-                           {day_expr} AS day,
-                           {period_expr} AS period
-                    FROM "{table_name}"'''
-            )
-        if not union_parts:
-            return catalog
-        rows = db.session.execute(text(f'SELECT * FROM ({" UNION ALL ".join(union_parts)})')).fetchall()
-        for row in rows:
-            mapped = dict(row._mapping)
-            course_number = (mapped.get('course_number') or '').strip()
+        for sc in rows:
+            course_number = str(sc.course_number or '').strip()
             if not course_number or course_number in catalog:
                 continue
+
+            day = ''
+            period = ''
+            dp = str(sc.day_and_period or '').strip()
+            if dp:
+                try:
+                    day_m = re.search(r'(Mon|Tue|Wed|Thu|Fri)', dp, re.I)
+                    period_m = re.search(r'\b(\d{1,2})\b', dp)
+                    if day_m:
+                        day = day_m.group(1).title()[:3]
+                    if period_m:
+                        period = period_m.group(1)
+                except Exception:
+                    day = ''
+                    period = ''
+
             catalog[course_number] = {
-                'course_title': (mapped.get('course_title') or '').strip() or course_number,
-                'credits': _safe_float(mapped.get('credits'), 0.0),
-                'instructor': (mapped.get('instructor') or 'TBA').strip() or 'TBA',
-                'area_of_study': (mapped.get('area_of_study') or '').strip(),
-                'day': (mapped.get('day') or '').strip(),
-                'period': (mapped.get('period') or '').strip(),
+                'course_title': str(sc.course_title or '').strip() or course_number,
+                'credits': _safe_float(sc.credits, 0.0),
+                'instructor': str(sc.instructor or 'TBA').strip() or 'TBA',
+                'area_of_study': str(sc.area_of_study or '').strip(),
+                'day': day,
+                'period': period,
+                'day_and_period': dp,
             }
     except Exception:
         db.session.rollback()
@@ -2614,38 +2639,41 @@ def ai_dashboard():
             db.session.rollback()
             print(f"AI dashboard schedule_courses query failed: {e}")
 
-    # Build a union of dataset tables for metadata lookups, but only fetch metadata
-    # for course_numbers present in the selected schedules.
-    course_tables = [t for t in get_course_data_tables() if is_valid_table_name(t)]
+    # Build metadata lookup from completed scraped datasets for selected schedule courses.
     catalog = {}
     areas = set()
 
     course_numbers_needed = sorted({r.course_number for r in sc_rows if getattr(r, 'course_number', None)})
-    if course_tables and course_numbers_needed:
+    if course_numbers_needed:
         try:
-            insp = inspect(db.engine)
-            union_parts = []
-            for t in course_tables:
-                try:
-                    cols = {c['name'] for c in insp.get_columns(t)}
-                except Exception:
-                    cols = set()
-
-                # Some datasets may lack Area_of_Study; select NULL in that case.
-                area_expr = '"Area_of_Study"' if 'Area_of_Study' in cols else 'NULL'
-                union_parts.append(
-                    f'SELECT "Course_Number" as course_number, "Course_Title" as course_title, "Credits" as credits, "Instructor" as instructor, "Day_and_Period" as day_and_period, {area_expr} as area_of_study FROM "{t}"'
+            rows = (
+                db.session.query(
+                    ScrapedCourse.course_number,
+                    ScrapedCourse.course_title,
+                    ScrapedCourse.credits,
+                    ScrapedCourse.instructor,
+                    ScrapedCourse.day_and_period,
+                    ScrapedCourse.area_of_study,
+                    ScrapedDataset.created_at,
                 )
-
-            union_sql = " UNION ALL ".join(union_parts)
-            rows = db.session.execute(
-                text(f"SELECT * FROM ({union_sql}) WHERE course_number IN :course_numbers")
-                .bindparams(sa.bindparam('course_numbers', expanding=True)),
-                {'course_numbers': course_numbers_needed},
-            ).fetchall()
+                .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
+                .filter(
+                    ScrapedDataset.status == 'completed',
+                    ScrapedCourse.course_number.in_(course_numbers_needed),
+                )
+                .order_by(ScrapedDataset.created_at.desc())
+                .all()
+            )
 
             for r in rows:
-                d = dict(r._mapping)
+                d = {
+                    'course_number': r.course_number,
+                    'course_title': r.course_title,
+                    'credits': r.credits,
+                    'instructor': r.instructor,
+                    'day_and_period': r.day_and_period,
+                    'area_of_study': r.area_of_study,
+                }
                 cn = d.get('course_number')
                 if not cn:
                     continue

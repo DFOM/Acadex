@@ -5,13 +5,10 @@ from typing import Optional
 
 import uuid
 
-from models import Announcement, Schedule, Setting, CatalogStatus
+from models import Announcement, Schedule, Setting, CatalogStatus, ScrapedDataset
 from utils import (
-    get_course_data_tables,
     ensure_default_landing_sections,
     safe_json_loads,
-    format_course_catalog_name,
-    parse_course_catalog_metadata,
 )
 
 
@@ -52,7 +49,12 @@ def landing_page():
             .all()
         )
 
-    available_tables = get_course_data_tables()
+    completed_datasets = (
+        ScrapedDataset.query.filter_by(status='completed')
+        .order_by(ScrapedDataset.created_at.desc())
+        .all()
+    )
+    available_tables = [d.name for d in completed_datasets]
 
     # Course Catalog Status panel: merge DB statuses with discovered tables.
     catalog_status_map = {}
@@ -63,16 +65,19 @@ def landing_page():
         catalog_status_map = {}
 
     parsed_catalogs = []
-    for table_name in available_tables:
-        parsed = parse_course_catalog_metadata(table_name)
-        if not parsed:
+    for ds in completed_datasets:
+        term_label = f"{(ds.semester or '').strip()} {(ds.year or '').strip()}".strip()
+        if not term_label:
             continue
-        label = format_course_catalog_name(table_name)
-        if not label:
-            continue
-        parsed_catalogs.append({'label': label, **parsed})
+        try:
+            year_sort = int(str(ds.year or '').strip())
+        except Exception:
+            year_sort = 0
+        sem_sort = str(ds.semester or '').strip().lower()
+        sem_rank = {'spring': 0, 'fall': 1}.get(sem_sort, 9)
+        parsed_catalogs.append({'label': term_label, 'year_sort': year_sort, 'sem_rank': sem_rank})
 
-    parsed_catalogs.sort(key=lambda c: (int(c['year']), {'spring': 0, 'fall': 1, 'full': 2}.get(str(c['semester_type']), 9)), reverse=True)
+    parsed_catalogs.sort(key=lambda c: (c['year_sort'], c['sem_rank']), reverse=True)
 
     seen_labels = set()
     course_catalog_statuses = []

@@ -11,9 +11,17 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 0.1**
+- Current version: **Beta 0.2**
 
 ## Changelog
+
+### Beta 0.2 — 2026-03-18
+
+- Completed migration of remaining route flows from legacy CSV table helpers to scraper-backed models.
+- Refactored student schedule editor, add-course validation, schedule course APIs, and AI generation to use `ScrapedDataset`/`ScrapedCourse` metadata.
+- Refactored admin instructors/courses management and analytics metadata paths to use scraper datasets.
+- Refactored landing and dashboard catalog visibility to derive from completed scraped datasets.
+- Removed deprecated legacy CSV helper functions from `utils.py` (`get_course_data_tables`, `get_best_course_table`, semester/table column helpers).
 
 ### Beta 0.1 — 2026-03-18
 
