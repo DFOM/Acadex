@@ -9,7 +9,7 @@ from collections import defaultdict, deque
 from pathlib import Path
 from datetime import timedelta, datetime
 from werkzeug.security import generate_password_hash
-from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import inspect as sa_inspect, text as sa_text
 from models import db, User, Role, Permission, RegistrationField, RBAC_PERMISSION_KEYS
 from flask_migrate import Migrate, upgrade, stamp
 
@@ -349,6 +349,51 @@ def _bootstrap_database() -> None:
             if app.config.get('STRICT_MIGRATIONS', False):
                 raise
             app.logger.warning('Security defaults bootstrap skipped until schema is updated: %s', exc)
+
+        try:
+            _ensure_runtime_schema_compatibility()
+        except Exception as exc:
+            if app.config.get('STRICT_MIGRATIONS', False):
+                raise
+            app.logger.warning('Runtime schema compatibility heal skipped: %s', exc)
+
+
+def _ensure_runtime_schema_compatibility() -> None:
+    """Best-effort healer for drifted production schemas.
+
+    This is intentionally idempotent and targets only columns that are
+    required by request-time code paths (landing/login/register/admin checks).
+    """
+    insp = sa_inspect(db.engine)
+    tables = set(insp.get_table_names())
+
+    if 'users' in tables:
+        user_cols = {c['name'] for c in insp.get_columns('users')}
+        with db.engine.begin() as conn:
+            if 'email' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255)'))
+            if 'is_admin' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN'))
+                conn.execute(sa_text('UPDATE users SET is_admin = FALSE WHERE is_admin IS NULL'))
+                conn.execute(sa_text('ALTER TABLE users ALTER COLUMN is_admin SET DEFAULT FALSE'))
+                try:
+                    conn.execute(sa_text('ALTER TABLE users ALTER COLUMN is_admin SET NOT NULL'))
+                except Exception:
+                    pass
+            if 'full_name' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(150)'))
+            if 'role_id' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS role_id INTEGER'))
+            if 'major_subject_area_id' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS major_subject_area_id INTEGER'))
+            if 'minor_subject_area_id' not in user_cols:
+                conn.execute(sa_text('ALTER TABLE users ADD COLUMN IF NOT EXISTS minor_subject_area_id INTEGER'))
+
+    if 'catalog_statuses' in tables:
+        cat_cols = {c['name'] for c in insp.get_columns('catalog_statuses')}
+        if 'dataset' not in cat_cols:
+            with db.engine.begin() as conn:
+                conn.execute(sa_text('ALTER TABLE catalog_statuses ADD COLUMN IF NOT EXISTS dataset VARCHAR(150)'))
 
 
 def _seed_security_defaults() -> None:
