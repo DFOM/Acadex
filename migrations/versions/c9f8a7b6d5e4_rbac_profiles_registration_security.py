@@ -112,11 +112,22 @@ def upgrade() -> None:
 
     user_cols = {c['name'] for c in inspect(bind).get_columns('users')}
     with op.batch_alter_table('users', schema=None) as batch_op:
+        if 'email' not in user_cols:
+            batch_op.add_column(sa.Column('email', sa.String(length=255), nullable=True))
+        if 'is_admin' not in user_cols:
+            batch_op.add_column(sa.Column('is_admin', sa.Boolean(), nullable=False, server_default=sa.false()))
         if 'full_name' not in user_cols:
             batch_op.add_column(sa.Column('full_name', sa.String(length=150), nullable=True))
         if 'role_id' not in user_cols:
             batch_op.add_column(sa.Column('role_id', sa.Integer(), nullable=True))
-            batch_op.create_foreign_key('fk_users_role_id_roles', 'roles', ['role_id'], ['id'])
+            try:
+                batch_op.create_foreign_key('fk_users_role_id_roles', 'roles', ['role_id'], ['id'])
+            except Exception:
+                pass
+        if 'major_subject_area_id' not in user_cols:
+            batch_op.add_column(sa.Column('major_subject_area_id', sa.Integer(), nullable=True))
+        if 'minor_subject_area_id' not in user_cols:
+            batch_op.add_column(sa.Column('minor_subject_area_id', sa.Integer(), nullable=True))
         if 'career_interests' not in user_cols:
             batch_op.add_column(sa.Column('career_interests', sa.Text(), nullable=True))
         if 'extra_profile_json' not in user_cols:
@@ -127,6 +138,36 @@ def upgrade() -> None:
             batch_op.add_column(sa.Column('two_factor_enabled', sa.Boolean(), nullable=False, server_default=sa.false()))
         if 'two_factor_secret' not in user_cols:
             batch_op.add_column(sa.Column('two_factor_secret', sa.String(length=255), nullable=True))
+
+    # Best-effort compatibility fixes for mixed historical schemas.
+    try:
+        with op.batch_alter_table('users', schema=None) as batch_op:
+            batch_op.create_foreign_key('fk_users_major_subject_area_id', 'subject_areas', ['major_subject_area_id'], ['id'])
+    except Exception:
+        pass
+    try:
+        with op.batch_alter_table('users', schema=None) as batch_op:
+            batch_op.create_foreign_key('fk_users_minor_subject_area_id', 'subject_areas', ['minor_subject_area_id'], ['id'])
+    except Exception:
+        pass
+
+    try:
+        indexes = {ix['name'] for ix in inspect(bind).get_indexes('users')}
+    except Exception:
+        indexes = set()
+    if op.f('ix_users_email') not in indexes and 'ix_users_email' not in indexes and 'email' in {c['name'] for c in inspect(bind).get_columns('users')}:
+        try:
+            op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
+        except Exception:
+            pass
+
+    try:
+        cat_cols = {c['name'] for c in inspect(bind).get_columns('catalog_statuses')}
+        if 'dataset' not in cat_cols:
+            with op.batch_alter_table('catalog_statuses', schema=None) as batch_op:
+                batch_op.add_column(sa.Column('dataset', sa.String(length=150), nullable=True))
+    except Exception:
+        pass
 
     op.execute(sa.text("""
         INSERT INTO permissions (key, label, description)
