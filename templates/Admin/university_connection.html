@@ -219,6 +219,18 @@
 
 </div>{# /row #}
 
+<div class="ax-admin-card mt-4">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+        <h5 class="mb-0">Diagnostics</h5>
+        <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-secondary" onclick="runDiagnostics()">Run Diagnostics</button>
+            <button class="btn btn-outline-secondary" onclick="copyDiagnostics()">Copy</button>
+        </div>
+    </div>
+    <p class="text-muted small mb-2">Use this when probe/scrape fails. It reports debugger reachability, Selenium availability, and backend error state.</p>
+    <pre id="diagOutput" class="rounded p-2 mb-0" style="max-height:240px; overflow:auto; background:var(--ax-surface-alt); border:1px solid var(--ax-border); font-size:.74rem;">No diagnostics yet.</pre>
+</div>
+
 {# ══════════════════════════════════════════════════════════════════
    D) SCRAPE HISTORY
 ══════════════════════════════════════════════════════════════════ #}
@@ -326,6 +338,10 @@
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
+    function prettyJSON(obj) {
+        try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
+    }
+
     /* ── State ──────────────────────────────────────────────────── */
     let pollingTimer = null;
 
@@ -392,8 +408,34 @@
                 document.getElementById('probeSpinner').classList.add('d-none');
                 document.getElementById('probeEmpty').classList.remove('d-none');
                 showAlert('Probe request failed: ' + e, 'danger');
+                runDiagnostics();
             })
             .finally(() => setBtn('btnProbeFields', false));
+    };
+
+    window.runDiagnostics = function () {
+        const debugger_address = document.getElementById('debuggerAddress').value.trim();
+        getJSON('/admin/scraper-diagnostics?debugger_address=' + encodeURIComponent(debugger_address))
+            .then(d => {
+                const out = document.getElementById('diagOutput');
+                out.textContent = prettyJSON(d);
+                if (!d.success) showAlert(d.message || 'Diagnostics failed.', 'warning');
+            })
+            .catch(e => {
+                const out = document.getElementById('diagOutput');
+                out.textContent = 'Diagnostics request failed: ' + e;
+                showAlert('Diagnostics request failed: ' + e, 'danger');
+            });
+    };
+
+    window.copyDiagnostics = async function () {
+        const txt = document.getElementById('diagOutput').textContent || '';
+        try {
+            await navigator.clipboard.writeText(txt);
+            showAlert('Diagnostics copied to clipboard.', 'success');
+        } catch {
+            showAlert('Unable to copy diagnostics.', 'warning');
+        }
     };
 
     const DEFAULT_FIELDS = [

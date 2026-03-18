@@ -21,6 +21,7 @@ import shutil
 import subprocess
 import threading
 import time
+import traceback
 from datetime import datetime
 from urllib.parse import urlparse
 from typing import List, Optional
@@ -47,6 +48,12 @@ scraper_progress: dict = {
     "error": None,
 }
 _progress_lock = threading.Lock()
+_last_backend_error: dict = {
+    "timestamp": None,
+    "stage": None,
+    "message": None,
+    "traceback": None,
+}
 
 
 def _log_progress(msg: str) -> None:
@@ -60,6 +67,79 @@ def _log_progress(msg: str) -> None:
 def is_scraper_running() -> bool:
     with _progress_lock:
         return bool(_scraper_is_running)
+
+
+def _set_last_backend_error(stage: str, exc: Exception | str) -> None:
+    message = str(exc)
+    tb = None
+    if isinstance(exc, Exception):
+        tb = traceback.format_exc(limit=12)
+    with _progress_lock:
+        _last_backend_error.update(
+            {
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "stage": str(stage or "unknown"),
+                "message": message,
+                "traceback": tb,
+            }
+        )
+
+
+def _clear_last_backend_error() -> None:
+    with _progress_lock:
+        _last_backend_error.update(
+            {
+                "timestamp": None,
+                "stage": None,
+                "message": None,
+                "traceback": None,
+            }
+        )
+
+
+def get_last_backend_error() -> dict:
+    with _progress_lock:
+        return dict(_last_backend_error)
+
+
+def get_scraper_diagnostics(debugger_address: Optional[str] = None) -> dict:
+    host, port, normalized = _split_debugger_address(debugger_address)
+    selenium_available = True
+    selenium_version = None
+    selenium_error = None
+    try:
+        import selenium  # type: ignore
+        selenium_version = getattr(selenium, "__version__", None)
+    except Exception as exc:
+        selenium_available = False
+        selenium_error = str(exc)
+
+    chrome_exec = None
+    chrome_exec_error = None
+    if _is_localhost(host):
+        try:
+            chrome_exec = _chrome_executable()
+        except Exception as exc:
+            chrome_exec_error = str(exc)
+
+    return {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "hosted_environment": _is_hosted_environment(),
+        "debugger_address": normalized,
+        "debugger_host": host,
+        "debugger_port": port,
+        "debugger_reachable": _is_chrome_running(normalized),
+        "target_is_local": _is_localhost(host),
+        "selenium_available": selenium_available,
+        "selenium_version": selenium_version,
+        "selenium_error": selenium_error,
+        "chrome_executable": chrome_exec,
+        "chrome_executable_error": chrome_exec_error,
+        "active_driver_cached": _active_driver is not None,
+        "active_debugger_address": _active_debugger_address,
+        "last_backend_error": get_last_backend_error(),
+        "progress_status": dict(scraper_progress),
+    }
 
 
 # ──────────────────────────────────────────────────────
@@ -135,7 +215,6 @@ def _chrome_executable() -> str:
             "/Applications/Chromium.app/Contents/MacOS/Chromium",
         ]
     elif system == "Windows":
-        import os
         candidates = [
             os.path.join(os.environ.get("PROGRAMFILES", "C:\\Program Files"),
                          "Google", "Chrome", "Application", "chrome.exe"),
@@ -183,6 +262,7 @@ def start_browser_session(debugger_address: Optional[str] = None) -> dict:
     """
     host, port, normalized = _split_debugger_address(debugger_address)
     if _is_chrome_running(normalized):
+        _clear_last_backend_error()
         return {
             "success": True,
             "message": f"Chrome debugger already reachable at {normalized} — session reused.",
@@ -193,6 +273,7 @@ def start_browser_session(debugger_address: Optional[str] = None) -> dict:
     is_local_target = _is_localhost(host)
 
     if _is_hosted_environment() and is_local_target:
+        _set_last_backend_error("start_browser_session", "Hosted environment cannot launch local manual Chrome session")
         return {
             "success": False,
             "message": (
@@ -205,6 +286,7 @@ def start_browser_session(debugger_address: Optional[str] = None) -> dict:
         }
 
     if not is_local_target:
+        _set_last_backend_error("start_browser_session", f"Debugger endpoint not reachable: {normalized}")
         return {
             "success": False,
             "message": (
@@ -218,6 +300,7 @@ def start_browser_session(debugger_address: Optional[str] = None) -> dict:
     try:
         exe = _chrome_executable()
     except FileNotFoundError as exc:
+        _set_last_backend_error("start_browser_session", exc)
         return {
             "success": False,
             "message": str(exc),
@@ -245,6 +328,7 @@ def start_browser_session(debugger_address: Optional[str] = None) -> dict:
         for _ in range(15):
             time.sleep(0.5)
             if _is_chrome_running(normalized):
+                _clear_last_backend_error()
                 return {
                     "success": True,
                     "message": f"Chrome launched successfully with debugger at {normalized}.",
@@ -258,6 +342,7 @@ def start_browser_session(debugger_address: Optional[str] = None) -> dict:
             "debugger_address": normalized,
         }
     except Exception as exc:
+        _set_last_backend_error("start_browser_session", exc)
         return {
             "success": False,
             "message": f"Failed to launch Chrome: {exc}",
@@ -287,6 +372,7 @@ def get_driver(debugger_address: Optional[str] = None):
             _active_debugger_address = None
 
         if not _is_chrome_running(normalized):
+            _set_last_backend_error("get_driver", f"Debugger endpoint not reachable: {normalized}")
             raise RuntimeError(
                 f"Chrome debugger is not reachable at {normalized}. "
                 "Use 'Start Browser Session' first."
@@ -297,6 +383,7 @@ def get_driver(debugger_address: Optional[str] = None):
             from selenium import webdriver
             from selenium.webdriver.chrome.options import Options
         except ImportError:
+            _set_last_backend_error("get_driver", "selenium package missing")
             raise RuntimeError(
                 "selenium is not installed. "
                 "Run: pip install selenium"
@@ -307,6 +394,7 @@ def get_driver(debugger_address: Optional[str] = None):
         driver = webdriver.Chrome(options=options)
         _active_driver = driver
         _active_debugger_address = normalized
+        _clear_last_backend_error()
         return driver
 
 
@@ -424,6 +512,7 @@ def probe_available_fields(driver, syllabus_url: str = "") -> dict:
         }
 
     except Exception as exc:
+        _set_last_backend_error("probe_available_fields", exc)
         return {
             "success": False,
             "fields": [],
