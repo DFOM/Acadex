@@ -298,8 +298,8 @@ def _normalize_faculty_name(name: str) -> str:
     return cleaned
 
 
-def _extract_faculty_names(raw_instructor: str | None) -> list[str]:
-    text = str(raw_instructor or '').strip()
+def _extract_faculty_names(raw_faculty: str | None) -> list[str]:
+    text = str(raw_faculty or '').strip()
     if not text:
         return []
 
@@ -322,8 +322,40 @@ def _extract_faculty_names(raw_instructor: str | None) -> list[str]:
     return normalized
 
 
-def _sync_course_faculty_from_instructor(course: Course, instructor_value: str | None) -> None:
-    names = _extract_faculty_names(instructor_value)
+def _extract_faculty_names_from_payload(payload: dict | None = None, *, fallback_text: str | None = None) -> list[str]:
+    src = payload or {}
+    candidates = [
+        src.get('faculty') if isinstance(src, dict) else None,
+        src.get('faculty_names') if isinstance(src, dict) else None,
+        src.get('instructor') if isinstance(src, dict) else None,
+        fallback_text,
+    ]
+    normalized: list[str] = []
+    seen: set[str] = set()
+
+    for value in candidates:
+        items: list[str]
+        if isinstance(value, list):
+            items = [str(v or '').strip() for v in value]
+        else:
+            parsed = _extract_faculty_names(str(value or ''))
+            items = parsed if parsed else ([str(value or '').strip()] if str(value or '').strip() else [])
+
+        for name in items:
+            normalized_name = _normalize_faculty_name(name)
+            if not normalized_name:
+                continue
+            key = _faculty_name_key(normalized_name)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            normalized.append(normalized_name)
+
+    return normalized
+
+
+def _sync_course_faculty_from_names(course: Course, faculty_names: list[str] | None) -> None:
+    names = [n for n in (faculty_names or []) if str(n or '').strip()]
     if names:
         existing_rows = Faculty.query.filter(sa.func.lower(Faculty.name).in_([n.lower() for n in names])).all()
         existing_map = {_faculty_name_key(r.name): r for r in existing_rows}
@@ -341,8 +373,12 @@ def _sync_course_faculty_from_instructor(course: Course, instructor_value: str |
         return
 
     course.faculty = []
-    clean_instructor = str(instructor_value or '').strip()
-    course.instructor = clean_instructor or None
+
+
+def _sync_course_faculty_from_payload(course: Course, payload: dict | None = None, *, fallback_text: str | None = None) -> list[str]:
+    names = _extract_faculty_names_from_payload(payload, fallback_text=fallback_text)
+    _sync_course_faculty_from_names(course, names)
+    return names
 
 
 def _parse_course_ref(course_ref: str) -> tuple[str, int] | None:
@@ -379,6 +415,7 @@ def _serialize_local_course(row: Course) -> dict:
         'year': row.year,
         'prerequisite': row.prerequisite,
         'subject_area': row.subject_area,
+        'faculty': '; '.join(f.name for f in row.faculty) if row.faculty else (row.instructor or ''),
         'instructor': row.instructor,
         'dataset_name': row.dataset_name,
         'last_updated': (row.last_updated or row.updated_at or row.created_at).isoformat() if (row.last_updated or row.updated_at or row.created_at) else None,
@@ -394,6 +431,7 @@ def _serialize_scraped_course(row: ScrapedCourse) -> dict:
     dataset_name = getattr(dataset_obj, 'name', None)
     semester = getattr(dataset_obj, 'semester', None)
     year = getattr(dataset_obj, 'year', None)
+    parsed_names = _extract_faculty_names(row.instructor)
     return {
         'id': row.id,
         'ref': f'scraped:{row.id}',
@@ -406,11 +444,12 @@ def _serialize_scraped_course(row: ScrapedCourse) -> dict:
         'year': year,
         'prerequisite': row.prerequisite,
         'subject_area': row.area_of_study,
+        'faculty': '; '.join(parsed_names) if parsed_names else (row.instructor or ''),
         'instructor': row.instructor,
         'dataset_name': dataset_name,
         'last_updated': getattr(dataset_obj, 'updated_at', None).isoformat() if getattr(dataset_obj, 'updated_at', None) else None,
         'faculty_ids': [],
-        'faculty_names': _extract_faculty_names(row.instructor),
+        'faculty_names': parsed_names,
         'editable': True,
         'deletable': False,
     }
@@ -812,7 +851,7 @@ def _build_integrity_payload() -> dict:
     courses_missing_faculty = int(
         Course.query.filter(~Course.faculty.any()).count() or 0
     )
-    courses_missing_faculty_with_instructor = int(
+    courses_missing_faculty_with_legacy_text = int(
         Course.query.filter(
             ~Course.faculty.any(),
             Course.instructor.isnot(None),
@@ -822,8 +861,7 @@ def _build_integrity_payload() -> dict:
     )
     if courses_missing_faculty > 0:
         fixes = []
-        if courses_missing_faculty_with_instructor > 0:
-            fixes.append({'action': 'link_faculty_from_instructors', 'label': 'Auto-link faculty from instructor names'})
+        fixes.append({'action': 'reprocess_faculty_links', 'label': 'Reprocess faculty links'})
         checks.append(
             {
                 'id': 'course_faculty_links',
@@ -831,7 +869,7 @@ def _build_integrity_payload() -> dict:
                 'title': 'Courses missing faculty links',
                 'message': (
                     f'{courses_missing_faculty} courses have no faculty relations. '
-                    f'{courses_missing_faculty_with_instructor} include parseable instructor text.'
+                    f'{courses_missing_faculty_with_legacy_text} include parseable legacy text.'
                 ),
                 'fixes': fixes,
             }
@@ -1357,7 +1395,7 @@ def upload_dataset():
         'year': {'year', 'academicyear', 'yearoffered', 'yearavailable'},
         'prerequisite': {'prerequisite', 'prerequisites', 'prereq'},
         'subject_area': {'subjectarea', 'areaofstudy', 'subject', 'area'},
-        'instructor': {'instructor', 'faculty', 'teacher', 'lecturer'},
+        'faculty': {'faculty', 'instructor', 'teacher', 'lecturer'},
     }
 
     def _pick(row: dict, key: str) -> str:
@@ -1427,6 +1465,7 @@ def upload_dataset():
                 .first()
             )
 
+            faculty_text = _pick(raw_row, 'faculty')
             payload = {
                 'course_number': course_number,
                 'title': title,
@@ -1436,7 +1475,7 @@ def upload_dataset():
                 'year': year,
                 'prerequisite': _pick(raw_row, 'prerequisite') or None,
                 'subject_area': _pick(raw_row, 'subject_area') or None,
-                'instructor': _pick(raw_row, 'instructor') or None,
+                'faculty': faculty_text or None,
                 'dataset_name': dataset_name or None,
                 'source': 'csv',
             }
@@ -1446,12 +1485,16 @@ def upload_dataset():
                     skipped_manual += 1
                     continue
                 for key, value in payload.items():
+                    if key == 'faculty':
+                        continue
                     setattr(existing, key, value)
-                _sync_course_faculty_from_instructor(existing, payload.get('instructor'))
+                parsed_names = _sync_course_faculty_from_payload(existing, payload, fallback_text=faculty_text)
+                existing.instructor = '; '.join(parsed_names) if parsed_names else None
                 updated += 1
             else:
-                new_row = Course(**payload)
-                _sync_course_faculty_from_instructor(new_row, payload.get('instructor'))
+                new_row = Course(**{k: v for k, v in payload.items() if k != 'faculty'})
+                parsed_names = _sync_course_faculty_from_payload(new_row, payload, fallback_text=faculty_text)
+                new_row.instructor = '; '.join(parsed_names) if parsed_names else None
                 db.session.add(new_row)
                 inserted += 1
 
@@ -2168,6 +2211,7 @@ def _validate_course_payload(payload: dict, *, exclude_ref: str | None = None) -
 
 
 def _manual_course_from_scraped(scraped_row: ScrapedCourse, overrides: dict | None = None) -> Course:
+    faculty_names = _extract_faculty_names(getattr(scraped_row, 'instructor', None))
     payload = {
         'course_number': scraped_row.course_number,
         'title': scraped_row.course_title,
@@ -2177,16 +2221,20 @@ def _manual_course_from_scraped(scraped_row: ScrapedCourse, overrides: dict | No
         'year': scraped_row.dataset.year if scraped_row.dataset else None,
         'prerequisite': scraped_row.prerequisite,
         'subject_area': scraped_row.area_of_study,
-        'instructor': scraped_row.instructor,
+        'faculty': faculty_names,
         'source': 'manual',
         'dataset_name': getattr(scraped_row.dataset, 'name', None) if getattr(scraped_row, 'dataset', None) else None,
     }
     if overrides:
         payload.update({k: v for k, v in overrides.items() if v is not None})
-    return Course(**payload)
+    row = Course(**{k: v for k, v in payload.items() if k != 'faculty'})
+    resolved_names = _sync_course_faculty_from_payload(row, payload, fallback_text=scraped_row.instructor)
+    row.instructor = '; '.join(resolved_names) if resolved_names else None
+    return row
 
 
 def _manual_course_from_local(local_row: Course, overrides: dict | None = None) -> Course:
+    faculty_names = [f.name for f in (local_row.faculty or [])] or _extract_faculty_names(local_row.instructor)
     payload = {
         'course_number': local_row.course_number,
         'title': local_row.title,
@@ -2196,13 +2244,16 @@ def _manual_course_from_local(local_row: Course, overrides: dict | None = None) 
         'year': local_row.year,
         'prerequisite': local_row.prerequisite,
         'subject_area': local_row.subject_area,
-        'instructor': local_row.instructor,
+        'faculty': faculty_names,
         'source': 'manual',
         'dataset_name': local_row.dataset_name,
     }
     if overrides:
         payload.update({k: v for k, v in overrides.items() if v is not None})
-    return Course(**payload)
+    row = Course(**{k: v for k, v in payload.items() if k != 'faculty'})
+    resolved_names = _sync_course_faculty_from_payload(row, payload, fallback_text=local_row.instructor)
+    row.instructor = '; '.join(resolved_names) if resolved_names else None
+    return row
 
 
 def _resolve_manual_course_ref(course_ref: str) -> Course | None:
@@ -2249,16 +2300,20 @@ def api_courses():
         year=str(payload.get('year') or '').strip() or None,
         prerequisite=str(payload.get('prerequisite') or '').strip() or None,
         subject_area=str(payload.get('subject_area') or '').strip() or None,
-        instructor=str(payload.get('instructor') or '').strip() or None,
         source='manual',
     )
-    faculty_ids = payload.get('faculty_ids') or []
+    faculty_ids = payload.get('faculty_ids')
     if isinstance(faculty_ids, list):
         row.faculty = Faculty.query.filter(Faculty.id.in_(faculty_ids)).all() if faculty_ids else []
-    if not row.faculty:
-        _sync_course_faculty_from_instructor(row, row.instructor)
-    elif not row.instructor:
+
+    faculty_names = _extract_faculty_names_from_payload(payload)
+    if not row.faculty and faculty_names:
+        _sync_course_faculty_from_names(row, faculty_names)
+
+    if row.faculty:
         row.instructor = '; '.join(f.name for f in row.faculty) or None
+    else:
+        row.instructor = '; '.join(faculty_names) if faculty_names else None
 
     db.session.add(row)
     db.session.commit()
@@ -2313,7 +2368,7 @@ def api_course_item(course_ref: str):
         'year': str(payload.get('year') or row.year or '').strip(),
         'prerequisite': str(payload.get('prerequisite') or row.prerequisite or '').strip(),
         'subject_area': str(payload.get('subject_area') or row.subject_area or '').strip(),
-        'instructor': str(payload.get('instructor') or row.instructor or '').strip(),
+        'faculty': payload.get('faculty') if payload.get('faculty') is not None else ([f.name for f in row.faculty] or _extract_faculty_names(row.instructor)),
     }
 
     ok, err = _validate_course_payload(merged, exclude_ref=editing_ref)
@@ -2328,16 +2383,15 @@ def api_course_item(course_ref: str):
     row.year = merged['year'] or None
     row.prerequisite = merged['prerequisite'] or None
     row.subject_area = merged['subject_area'] or None
-    row.instructor = merged['instructor'] or None
     row.source = 'manual'
 
     faculty_ids = payload.get('faculty_ids')
     if isinstance(faculty_ids, list):
         row.faculty = Faculty.query.filter(Faculty.id.in_(faculty_ids)).all() if faculty_ids else []
-        if row.faculty and not row.instructor:
-            row.instructor = '; '.join(f.name for f in row.faculty) or None
-    if not isinstance(faculty_ids, list):
-        _sync_course_faculty_from_instructor(row, row.instructor)
+        row.instructor = '; '.join(f.name for f in row.faculty) or None
+    else:
+        faculty_names = _sync_course_faculty_from_payload(row, merged, fallback_text=row.instructor)
+        row.instructor = '; '.join(faculty_names) if faculty_names else None
 
     if source != 'manual':
         db.session.add(row)
@@ -2373,7 +2427,8 @@ def api_course_duplicate(course_ref: str):
         'year': payload.get('year'),
         'prerequisite': payload.get('prerequisite'),
         'subject_area': payload.get('subject_area'),
-        'instructor': payload.get('instructor'),
+        'faculty': payload.get('faculty') or '; '.join(payload.get('faculty_names') or []),
+        'faculty_names': payload.get('faculty_names') or [],
         'faculty_ids': payload.get('faculty_ids') or [],
     }
     return jsonify({'success': True, 'course': duplicate_payload})
@@ -2941,21 +2996,19 @@ def health_fix_api():
             _set_active_registry_dataset(chosen)
             return jsonify({'success': True, 'message': f'Active dataset set to {chosen}.', 'action': action, 'active_dataset_name': chosen})
 
-        if action == 'link_faculty_from_instructors':
+        if action in {'reprocess_faculty_links', 'link_faculty_from_instructors'}:
             updated_courses = 0
-            rows = Course.query.filter(
-                ~Course.faculty.any(),
-                Course.instructor.isnot(None),
-                sa.func.length(sa.func.trim(Course.instructor)) > 0,
-            ).all()
+            rows = Course.query.all()
             for row in rows:
                 before = len(row.faculty or [])
-                _sync_course_faculty_from_instructor(row, row.instructor)
+                fallback_text = row.instructor
+                _sync_course_faculty_from_payload(row, {'faculty': [f.name for f in row.faculty]}, fallback_text=fallback_text)
                 after = len(row.faculty or [])
-                if before == 0 and after > 0:
+                if after != before:
                     updated_courses += 1
+                row.instructor = '; '.join(f.name for f in row.faculty) if row.faculty else None
             db.session.commit()
-            return jsonify({'success': True, 'message': f'Linked faculty for {updated_courses} courses.', 'action': action, 'updated_courses': updated_courses})
+            return jsonify({'success': True, 'message': f'Reprocessed faculty links for {updated_courses} courses.', 'action': action, 'updated_courses': updated_courses})
 
         if action == 'remove_orphan_faculty':
             orphan_rows = Faculty.query.filter(~Faculty.courses.any()).all()

@@ -12,7 +12,7 @@
                     <th>Source Table</th>
                     <th>Title</th>
                     <th>Credits</th>
-                    <th>Instructor</th>
+                    <th>Faculty</th>
                     <th>Time / Period</th>
                     <th>Actions</th>
                 </tr>
@@ -23,7 +23,7 @@
                     <td><span class="badge bg-secondary">{{ course.source_table }}</span></td>
                     <td>{{ course.Course_Title }}</td>
                     <td>{{ course.Credits }}</td>
-                    <td>{{ course.Instructor }}</td>
+                    <td>{{ course.Faculty or course.Instructor }}</td>
                     <td>{{ course.Day_and_Period }}</td>
                     <td>
                         <button class="btn btn-sm btn-primary edit-course-btn" 

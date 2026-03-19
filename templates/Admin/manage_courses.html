@@ -37,15 +37,14 @@
                             <th>Title</th>
                             <th>Credits</th>
                             <th>Day / Period</th>
-                            <th>Instructor</th>
+                            <th>Faculty</th>
                             <th>Subject Area</th>
                             <th>Source</th>
-                            <th>Faculty</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="coursesTableBody">
-                        <tr><td colspan="9" class="text-center text-muted py-4">Loading courses…</td></tr>
+                        <tr><td colspan="8" class="text-center text-muted py-4">Loading courses…</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -81,9 +80,9 @@
                             <input class="form-control" id="course_day_period" required>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label">Instructor</label>
-                            <input class="form-control" id="course_instructor" list="courseInstructorSuggestions">
-                            <datalist id="courseInstructorSuggestions"></datalist>
+                            <label class="form-label">Faculty</label>
+                            <input class="form-control" id="course_faculty_text" list="courseFacultySuggestions" placeholder="e.g. Jane Doe; John Smith">
+                            <datalist id="courseFacultySuggestions"></datalist>
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Semester</label>

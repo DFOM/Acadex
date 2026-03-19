@@ -187,7 +187,7 @@ $(document).ready(function() {
             year: $('#course_year').val().trim(),
             prerequisite: $('#course_prerequisite').val().trim(),
             subject_area: $('#course_subject_area').val().trim(),
-            instructor: $('#course_instructor').val().trim(),
+            faculty: $('#course_faculty_text').val().trim(),
             faculty_ids: ($('#course_faculty_ids').val() || []).map(v => Number(v)),
         });
 
@@ -210,7 +210,8 @@ $(document).ready(function() {
             $('#course_year').val(row?.year || '');
             $('#course_prerequisite').val(row?.prerequisite || '');
             $('#course_subject_area').val(row?.subject_area || '');
-            $('#course_instructor').val(row?.instructor || '');
+            const names = Array.isArray(row?.faculty_names) ? row.faculty_names : [];
+            $('#course_faculty_text').val(row?.faculty || names.join('; ') || '');
             $('#course_faculty_ids').val((row?.faculty_ids || []).map(v => String(v)));
         };
 
@@ -220,16 +221,30 @@ $(document).ready(function() {
                 .join('');
             $('#course_faculty_ids').html(options);
 
-            const instructorNames = Array.from(
+            const facultyNames = Array.from(
                 new Set([
                     ...state.faculty.map(f => (f.name || '').trim()).filter(Boolean),
-                    ...state.courses.map(c => (c.instructor || '').trim()).filter(Boolean),
+                    ...state.courses.flatMap((c) => (Array.isArray(c.faculty_names) ? c.faculty_names : [])).map(v => (v || '').trim()).filter(Boolean),
                 ])
             ).sort();
 
-            $('#courseInstructorSuggestions').html(
-                instructorNames.map(name => `<option value="${escapeHtml(name)}"></option>`).join('')
+            $('#courseFacultySuggestions').html(
+                facultyNames.map(name => `<option value="${escapeHtml(name)}"></option>`).join('')
             );
+        };
+
+        const renderFacultyCell = (row) => {
+            const names = (row.faculty_names || []).filter(Boolean);
+            if (!names.length) {
+                const fallback = (row.faculty || '').trim();
+                return fallback ? escapeHtml(fallback) : '—';
+            }
+            if (names.length <= 2) {
+                return escapeHtml(names.join(', '));
+            }
+            const compact = `${names[0]}, ${names[1]} +${names.length - 2}`;
+            const tooltip = escapeHtml(names.join(', '));
+            return `<span title="${tooltip}">${escapeHtml(compact)}</span>`;
         };
 
         const renderCourses = () => {
@@ -249,12 +264,11 @@ $(document).ready(function() {
             });
 
             if (!filteredCourses.length) {
-                tbody.html('<tr><td colspan="9" class="text-center text-muted py-4">No courses found.</td></tr>');
+                tbody.html('<tr><td colspan="8" class="text-center text-muted py-4">No courses found.</td></tr>');
                 return;
             }
 
             const rows = filteredCourses.map((row) => {
-                const faculty = (row.faculty_names || []).length ? row.faculty_names.join(', ') : '—';
                 let sourceBadge = '<span class="badge bg-secondary">scraped</span>';
                 if ((row.source || '').toLowerCase() === 'manual') {
                     sourceBadge = '<span class="badge bg-success">manual</span>';
@@ -270,10 +284,9 @@ $(document).ready(function() {
                         <td>${escapeHtml(row.title || '')}</td>
                         <td>${escapeHtml(row.credits ?? '')}</td>
                         <td>${escapeHtml(row.day_period || '')}</td>
-                        <td>${escapeHtml(row.instructor || '')}</td>
+                        <td>${renderFacultyCell(row)}</td>
                         <td>${escapeHtml(row.subject_area || '')}</td>
                         <td>${sourceBadge}</td>
-                        <td>${escapeHtml(faculty)}</td>
                         <td>
                             <button class="btn btn-sm btn-primary edit-course-btn" data-ref="${escapeHtml(row.ref)}">Edit</button>
                             <button class="btn btn-sm btn-outline-secondary ms-1 duplicate-course-btn" data-ref="${escapeHtml(row.ref)}">Duplicate</button>
@@ -365,7 +378,7 @@ $(document).ready(function() {
         });
 
         loadCourses().catch((err) => {
-            $('#coursesTableBody').html(`<tr><td colspan="9" class="text-danger text-center py-4">${escapeHtml(err.message || 'Unable to load courses.')}</td></tr>`);
+            $('#coursesTableBody').html(`<tr><td colspan="8" class="text-danger text-center py-4">${escapeHtml(err.message || 'Unable to load courses.')}</td></tr>`);
         });
     }
 
