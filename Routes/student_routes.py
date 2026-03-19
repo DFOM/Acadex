@@ -70,6 +70,92 @@ def _dataset_registry_supported() -> bool:
         return False
 
 
+def _normalize_year_text(value: Any) -> str:
+    return str(value or '').strip().lower()
+
+
+def _normalize_semester_text(value: Any) -> str:
+    return str(value or '').strip().lower()
+
+
+def _is_full_year_semester(value: Any) -> bool:
+    sem = _normalize_semester_text(value)
+    return sem in {'full', 'fullyear', 'full_year', 'year', 'annual', 'all'}
+
+
+def _resolve_registry_entry_for_context(year: Any, semester: Any, *, source: str | None = None) -> DatasetRegistry | None:
+    if not _dataset_registry_supported():
+        return None
+
+    year_text = _normalize_year_text(year)
+    sem_text = _normalize_semester_text(semester)
+    source_text = str(source or '').strip().lower()
+
+    query = DatasetRegistry.query
+    if source_text:
+        query = query.filter(func.lower(func.coalesce(DatasetRegistry.source, '')) == source_text)
+
+    if year_text and sem_text:
+        exact = (
+            query.filter(
+                func.lower(func.coalesce(DatasetRegistry.year, '')) == year_text,
+                func.lower(func.coalesce(DatasetRegistry.semester, '')) == sem_text,
+            )
+            .order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc())
+            .first()
+        )
+        if exact:
+            return exact
+
+    if year_text:
+        full_year = (
+            query.filter(
+                func.lower(func.coalesce(DatasetRegistry.year, '')) == year_text,
+                func.lower(func.coalesce(DatasetRegistry.dataset_type, 'term')) == 'full_year',
+            )
+            .order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc())
+            .first()
+        )
+        if full_year:
+            return full_year
+
+    return query.order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
+
+
+def _resolve_contextual_dataset_name(year: Any, semester: Any, *, source: str | None = None) -> str:
+    row = _resolve_registry_entry_for_context(year, semester, source=source)
+    return str(getattr(row, 'name', '') or '').strip()
+
+
+def _humanize_day_and_period(value: Any) -> str:
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+
+    matches = re.findall(r'(Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s*[-:]?\s*(\d+)', raw, flags=re.IGNORECASE)
+    if matches:
+        return ', '.join(f"{d.title()} Period {int(p)}" for d, p in matches)
+
+    blocks = sorted(parse_day_period_blocks(raw))
+    if not blocks:
+        return raw
+
+    readable = []
+    for block in blocks:
+        day = str(block[:3] or '').title()
+        period = str(block[3:] or '').strip()
+        if day and period:
+            readable.append(f"{day} Period {period}")
+    return ', '.join(readable) if readable else raw
+
+
+def _normalize_instructor(value: Any) -> str:
+    instructor = str(value or '').strip()
+    if not instructor or instructor.lower() in {'tba', 'n/a', 'na', 'none'}:
+        return ''
+    return instructor
+
+
 def _resolve_active_dataset_name() -> str:
     setting_name = str(get_str_setting('active_dataset_name', '') or '').strip()
 
@@ -327,12 +413,13 @@ def _catalog_resolution_key(course_number: Any, day_period: Any, semester: Any, 
 
 
 def _manual_or_csv_course_to_catalog_row(row: Course) -> Dict[str, Any]:
+    instructor = _normalize_instructor(row.instructor)
     return {
         'Course_Number': str(row.course_number or '').strip(),
         'Course_Title': str(row.title or '').strip(),
         'Credits': float(row.credits or 0.0),
-        'Instructor': str(row.instructor or '').strip(),
-        'Day_and_Period': str(row.day_period or '').strip(),
+        'Instructor': instructor,
+        'Day_and_Period': _humanize_day_and_period(row.day_period),
         'Area_of_Study': str(row.subject_area or '').strip(),
         'Prerequisite': str(row.prerequisite or '').strip(),
         'dataset_id': None,
@@ -591,38 +678,49 @@ def _build_learning_signals(
 def _dataset_for_term(year: Any, semester: Any) -> ScrapedDataset | None:
     year_text = str(year or '').strip()
     sem_text = str(semester or '').strip().lower()
-    if not year_text:
-        return None
 
-    active_dataset_name = _resolve_active_dataset_name()
-    if active_dataset_name:
-        active_query = ScrapedDataset.query.filter(
-            ScrapedDataset.status == 'completed',
-            ScrapedDataset.name == active_dataset_name,
+    registry_row = _resolve_registry_entry_for_context(year_text, sem_text, source='scraped')
+    if registry_row and registry_row.name:
+        by_registry = (
+            ScrapedDataset.query.filter(
+                ScrapedDataset.status == 'completed',
+                func.lower(func.coalesce(ScrapedDataset.name, '')) == str(registry_row.name).strip().lower(),
+            )
+            .order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc())
+            .first()
         )
-        active_row = active_query.order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc()).first()
-        if active_row:
-            return active_row
+        if by_registry:
+            return by_registry
 
-    query = ScrapedDataset.query.filter(
+    if year_text and sem_text:
+        exact = (
+            ScrapedDataset.query.filter(
+                ScrapedDataset.status == 'completed',
+                func.lower(func.coalesce(ScrapedDataset.year, '')) == year_text.lower(),
+                func.lower(func.coalesce(ScrapedDataset.semester, '')) == sem_text,
+            )
+            .order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc())
+            .first()
+        )
+        if exact:
+            return exact
+
+    if year_text:
+        full_year = (
+            ScrapedDataset.query.filter(
+                ScrapedDataset.status == 'completed',
+                func.lower(func.coalesce(ScrapedDataset.year, '')) == year_text.lower(),
+            )
+            .filter(func.lower(func.coalesce(ScrapedDataset.semester, '')).in_(['full', 'fullyear', 'full_year', 'year', 'annual', 'all']))
+            .order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc())
+            .first()
+        )
+        if full_year:
+            return full_year
+
+    return ScrapedDataset.query.filter(
         ScrapedDataset.status == 'completed',
-        ScrapedDataset.year == year_text,
-    )
-    if sem_text:
-        query = query.filter(func.lower(ScrapedDataset.semester) == sem_text)
-
-    row = query.order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc()).first()
-    if row:
-        return row
-
-    return (
-        ScrapedDataset.query.filter(
-            ScrapedDataset.status == 'completed',
-            ScrapedDataset.year == year_text,
-        )
-        .order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc())
-        .first()
-    )
+    ).order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc()).first()
 
 
 def _scraped_course_to_catalog_row(sc: ScrapedCourse) -> Dict[str, Any]:
@@ -637,7 +735,7 @@ def _scraped_course_to_catalog_row(sc: ScrapedCourse) -> Dict[str, Any]:
 
     course_number = str(getattr(sc, 'course_number', None) or pick('Course Number', 'Course') or '').strip()
     course_title = str(getattr(sc, 'course_title', None) or pick('Course Title', 'Subject') or '').strip()
-    instructor = str(getattr(sc, 'instructor', None) or pick('Instructor', 'Faculty', 'Course Instructor') or '').strip()
+    instructor = _normalize_instructor(getattr(sc, 'instructor', None) or pick('Instructor', 'Faculty', 'Course Instructor'))
     day_and_period = str(getattr(sc, 'day_and_period', None) or pick('Day and Period') or '').strip()
     area_of_study = str(getattr(sc, 'area_of_study', None) or pick('Area of Study', 'Subject Area') or '').strip()
     prerequisite = str(getattr(sc, 'prerequisite', None) or pick('Prerequisite', 'Prerequisites') or '').strip()
@@ -655,7 +753,7 @@ def _scraped_course_to_catalog_row(sc: ScrapedCourse) -> Dict[str, Any]:
         'Course_Title': course_title,
         'Credits': float(credits_value or 0.0),
         'Instructor': instructor,
-        'Day_and_Period': day_and_period,
+        'Day_and_Period': _humanize_day_and_period(day_and_period),
         'Area_of_Study': area_of_study,
         'Prerequisite': prerequisite,
         'dataset_id': sc.dataset_id,
@@ -670,11 +768,16 @@ def _scraped_course_to_catalog_row(sc: ScrapedCourse) -> Dict[str, Any]:
 def _load_scraped_catalog_for_term(year: Any, semester: Any) -> tuple[list[Dict[str, Any]], int | None]:
     year_text = str(year or '').strip()
     sem_text = str(semester or '').strip().lower()
-    active_dataset_name = _resolve_active_dataset_name()
+    contextual_dataset_name = _resolve_contextual_dataset_name(year_text, sem_text)
 
     local_query = Course.query
-    if active_dataset_name:
-        local_query = local_query.filter(func.lower(func.coalesce(Course.dataset_name, '')) == active_dataset_name.lower())
+    if contextual_dataset_name:
+        local_query = local_query.filter(
+            or_(
+                func.lower(func.coalesce(Course.dataset_name, '')) == contextual_dataset_name.lower(),
+                func.lower(func.coalesce(Course.source, '')) == 'manual',
+            )
+        )
     else:
         if year_text:
             local_query = local_query.filter(Course.year == year_text)
@@ -694,11 +797,29 @@ def _load_scraped_catalog_for_term(year: Any, semester: Any) -> tuple[list[Dict[
         )
         candidates.extend(_scraped_course_to_catalog_row(r) for r in scraped_rows)
 
-    if not candidates:
+    filtered_candidates: list[Dict[str, Any]] = []
+    skipped_missing_instructor = 0
+    for row in candidates:
+        instructor = _normalize_instructor(row.get('Instructor'))
+        if not instructor:
+            skipped_missing_instructor += 1
+            continue
+        row['Instructor'] = instructor
+        filtered_candidates.append(row)
+
+    if skipped_missing_instructor:
+        current_app.logger.warning(
+            'Catalog resolution skipped %s course rows without valid instructor (year=%s semester=%s).',
+            skipped_missing_instructor,
+            year_text or 'latest',
+            sem_text or 'latest',
+        )
+
+    if not filtered_candidates:
         return [], dataset_id
 
     winner_by_key: Dict[tuple[str, str, str, str], Dict[str, Any]] = {}
-    for row in candidates:
+    for row in filtered_candidates:
         key = _catalog_resolution_key(
             row.get('Course_Number'),
             row.get('Day_and_Period'),
@@ -1324,11 +1445,13 @@ def api_course_detail():
 
     if sched:
         catalog_rows, dataset_id = _load_scraped_catalog_for_term(sched.year, sched.semester)
+        active_dataset_name = _resolve_contextual_dataset_name(sched.year, sched.semester)
     else:
         catalog_rows, dataset_id = _load_scraped_catalog_for_term('', '')
+        active_dataset_name = _resolve_contextual_dataset_name('', '')
 
     if not catalog_rows:
-        return jsonify({'success': False, 'message': 'Course catalog unavailable for the active dataset.'}), 404
+        return jsonify({'success': False, 'message': 'Course catalog unavailable for this schedule context.'}), 404
 
     normalized_target_code = _normalize_course_number(course_number_raw)
     matches = [
@@ -1370,7 +1493,7 @@ def api_course_detail():
         {
             'success': True,
             'dataset_id': dataset_id,
-            'active_dataset_name': _resolve_active_dataset_name() or None,
+            'active_dataset_name': active_dataset_name or None,
             'course': {
                 'course_number': target_row.get('Course_Number'),
                 'display_course_number': target_row.get('display_course_number'),
@@ -1392,7 +1515,7 @@ def api_course_detail():
 @student_bp.route('/courses')
 @login_required
 def courses_view():
-    active_dataset_name = _resolve_active_dataset_name()
+    active_dataset_name = _resolve_contextual_dataset_name('', '')
     catalog_rows, _dataset_id = _load_scraped_catalog_for_term('', '')
     rows = [_add_display_fields(dict(r)) for r in catalog_rows]
 

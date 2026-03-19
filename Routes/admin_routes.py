@@ -542,6 +542,13 @@ def _dataset_table_name_from_name(name: str, source: str) -> str:
     return f'{source}_{safe_name}'
 
 
+def _infer_dataset_type(semester: str | None) -> str:
+    sem = str(semester or '').strip().lower()
+    if sem in {'full', 'fullyear', 'full_year', 'year', 'annual', 'all'}:
+        return 'full_year'
+    return 'term'
+
+
 def _set_active_registry_dataset(dataset_name: str | None) -> None:
     if not _dataset_registry_supported():
         update_app_setting('active_dataset_name', str(dataset_name or '').strip())
@@ -577,7 +584,16 @@ def _resolve_effective_active_dataset_name() -> str:
     return str(active_row.name).strip() if active_row and active_row.name else ''
 
 
-def _upsert_dataset_registry_entry(name: str, source: str, table_name: str | None = None, *, make_active: bool = False) -> DatasetRegistry | None:
+def _upsert_dataset_registry_entry(
+    name: str,
+    source: str,
+    table_name: str | None = None,
+    *,
+    year: str | None = None,
+    semester: str | None = None,
+    dataset_type: str | None = None,
+    make_active: bool = False,
+) -> DatasetRegistry | None:
     if not _dataset_registry_supported():
         return None
 
@@ -587,12 +603,27 @@ def _upsert_dataset_registry_entry(name: str, source: str, table_name: str | Non
         return None
 
     table_value = str(table_name or '').strip() or _dataset_table_name_from_name(ds_name, ds_source)
+    ds_year = str(year or '').strip() or None
+    ds_semester = str(semester or '').strip() or None
+    ds_type = str(dataset_type or '').strip().lower() or _infer_dataset_type(ds_semester)
+    if ds_type not in {'term', 'full_year'}:
+        ds_type = 'term'
 
     row = DatasetRegistry.query.filter(sa.func.lower(DatasetRegistry.name) == ds_name.lower(), sa.func.lower(DatasetRegistry.source) == ds_source).order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
     if not row:
-        row = DatasetRegistry(name=ds_name, source=ds_source, table_name=table_value)
+        row = DatasetRegistry(
+            name=ds_name,
+            source=ds_source,
+            year=ds_year,
+            semester=ds_semester,
+            dataset_type=ds_type,
+            table_name=table_value,
+        )
         db.session.add(row)
     else:
+        row.year = ds_year
+        row.semester = ds_semester
+        row.dataset_type = ds_type
         row.table_name = table_value
 
     if make_active:
@@ -612,7 +643,14 @@ def _ensure_dataset_registry_synced() -> None:
         if not ds_name:
             continue
         table_name = f'scraped_dataset_{getattr(ds, "id", "")}' if getattr(ds, 'id', None) else _dataset_table_name_from_name(ds_name, 'scraped')
-        _upsert_dataset_registry_entry(ds_name, 'scraped', table_name)
+        _upsert_dataset_registry_entry(
+            ds_name,
+            'scraped',
+            table_name,
+            year=str(getattr(ds, 'year', '') or '').strip() or None,
+            semester=str(getattr(ds, 'semester', '') or '').strip() or None,
+            dataset_type=_infer_dataset_type(getattr(ds, 'semester', None)),
+        )
 
     csv_dataset_names = [
         r[0]
@@ -623,7 +661,20 @@ def _ensure_dataset_registry_synced() -> None:
         if r and r[0]
     ]
     for ds_name in csv_dataset_names:
-        _upsert_dataset_registry_entry(ds_name, 'csv', _dataset_table_name_from_name(ds_name, 'csv'))
+        sample_row = Course.query.filter(
+            sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv',
+            sa.func.lower(sa.func.coalesce(Course.dataset_name, '')) == ds_name.lower(),
+        ).order_by(Course.last_updated.desc(), Course.id.desc()).first()
+        ds_year = str(getattr(sample_row, 'year', '') or '').strip() if sample_row else ''
+        ds_sem = str(getattr(sample_row, 'semester', '') or '').strip() if sample_row else ''
+        _upsert_dataset_registry_entry(
+            ds_name,
+            'csv',
+            _dataset_table_name_from_name(ds_name, 'csv'),
+            year=ds_year or None,
+            semester=ds_sem or None,
+            dataset_type=_infer_dataset_type(ds_sem),
+        )
 
     active_setting = str(get_app_setting('active_dataset_name', '') or '').strip()
     active_row = DatasetRegistry.query.filter(DatasetRegistry.is_active.is_(True)).first()

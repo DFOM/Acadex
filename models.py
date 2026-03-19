@@ -265,6 +265,9 @@ class DatasetRegistry(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(150), nullable=False, index=True)
     source = db.Column(db.String(20), nullable=False, index=True)  # csv | scraped
+    year = db.Column(db.String(20), nullable=True, index=True)
+    semester = db.Column(db.String(50), nullable=True, index=True)
+    dataset_type = db.Column(db.String(20), nullable=False, default='term', index=True)  # term | full_year
     table_name = db.Column(db.String(150), nullable=False, unique=True, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     is_active = db.Column(db.Boolean, default=False, nullable=False, index=True)
