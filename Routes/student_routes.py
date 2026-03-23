@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Set, Iterable
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
-from models import db, User, Schedule, ScheduleCourse, Period, Setting, Announcement, AIEvent, BehaviorEvent, Notification, SubjectArea, ScrapedDataset, ScrapedCourse, Course, DatasetRegistry
+from models import db, User, Schedule, ScheduleCourse, Period, Setting, Announcement, AIEvent, BehaviorEvent, Notification, SubjectArea, Course, DatasetRegistry
 from utils import (
     get_available_dataset_years,
     calculate_gpa,
@@ -611,96 +611,6 @@ def _build_learning_signals(
     }
 
 
-def _dataset_for_term(year: Any, semester: Any) -> ScrapedDataset | None:
-    year_text = str(year or '').strip()
-    sem_text = normalize_dataset_semester(semester)
-
-    registry_row = resolve_dataset(year_text, sem_text, source='scraped')
-    if registry_row and registry_row.name:
-        by_registry = (
-            ScrapedDataset.query.filter(
-                ScrapedDataset.status == 'completed',
-                func.lower(func.coalesce(ScrapedDataset.name, '')) == str(registry_row.name).strip().lower(),
-            )
-            .order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc())
-            .first()
-        )
-        if by_registry:
-            return by_registry
-
-    if year_text and sem_text:
-        exact = (
-            ScrapedDataset.query.filter(
-                ScrapedDataset.status == 'completed',
-                func.lower(func.coalesce(ScrapedDataset.year, '')) == year_text.lower(),
-                func.lower(func.coalesce(ScrapedDataset.semester, '')) == sem_text,
-            )
-            .order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc())
-            .first()
-        )
-        if exact:
-            return exact
-
-    if year_text:
-        full_year = (
-            ScrapedDataset.query.filter(
-                ScrapedDataset.status == 'completed',
-                func.lower(func.coalesce(ScrapedDataset.year, '')) == year_text.lower(),
-            )
-            .filter(func.lower(func.coalesce(ScrapedDataset.semester, '')).in_(['full', 'fullyear', 'full_year', 'full-year', 'full year', 'year', 'annual', 'all']))
-            .order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc())
-            .first()
-        )
-        if full_year:
-            return full_year
-
-    return ScrapedDataset.query.filter(
-        ScrapedDataset.status == 'completed',
-    ).order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc()).first()
-
-
-def _scraped_course_to_catalog_row(sc: ScrapedCourse) -> Dict[str, Any]:
-    raw = _safe_json_load_dict(getattr(sc, 'data_json', None))
-
-    def pick(*keys: str) -> str:
-        for key in keys:
-            value = raw.get(key)
-            if value not in (None, ''):
-                return str(value).strip()
-        return ''
-
-    course_number = str(getattr(sc, 'course_number', None) or pick('Course Number', 'Course') or '').strip()
-    course_title = str(getattr(sc, 'course_title', None) or pick('Course Title', 'Subject') or '').strip()
-    instructor = _normalize_instructor(getattr(sc, 'instructor', None) or pick('Instructor', 'Faculty', 'Course Instructor'))
-    day_and_period = str(getattr(sc, 'day_and_period', None) or pick('Day and Period') or '').strip()
-    area_of_study = str(getattr(sc, 'area_of_study', None) or pick('Area of Study', 'Subject Area') or '').strip()
-    prerequisite = str(getattr(sc, 'prerequisite', None) or pick('Prerequisite', 'Prerequisites') or '').strip()
-
-    credits_value = getattr(sc, 'credits', None)
-    if credits_value is None:
-        c = pick('Credits')
-        try:
-            credits_value = float(c) if c else 0.0
-        except Exception:
-            credits_value = 0.0
-
-    return {
-        'Course_Number': course_number,
-        'Course_Title': course_title,
-        'Credits': float(credits_value or 0.0),
-        'Instructor': instructor,
-        'Day_and_Period': _humanize_day_and_period(day_and_period),
-        'Area_of_Study': area_of_study,
-        'Prerequisite': prerequisite,
-        'dataset_id': sc.dataset_id,
-        'dataset_name': getattr(sc.dataset, 'name', None) if getattr(sc, 'dataset', None) else None,
-        'semester': getattr(sc.dataset, 'semester', None) if getattr(sc, 'dataset', None) else None,
-        'year': getattr(sc.dataset, 'year', None) if getattr(sc, 'dataset', None) else None,
-        'source': 'scraped',
-        'updated_ts': getattr(sc.dataset, 'updated_at', None) if getattr(sc, 'dataset', None) else None,
-    }
-
-
 def _load_scraped_catalog_for_term(year: Any, semester: Any) -> tuple[list[Dict[str, Any]], int | None]:
     year_text = str(year or '').strip()
     sem_text = normalize_dataset_semester(semester)
@@ -724,15 +634,7 @@ def _load_scraped_catalog_for_term(year: Any, semester: Any) -> tuple[list[Dict[
 
     candidates: list[Dict[str, Any]] = [_manual_or_csv_course_to_catalog_row(r) for r in local_rows]
 
-    ds = _dataset_for_term(year, semester)
-    dataset_id = ds.id if ds else None
-    if ds:
-        scraped_rows = (
-            ScrapedCourse.query.filter_by(dataset_id=ds.id)
-            .order_by(ScrapedCourse.id.asc())
-            .all()
-        )
-        candidates.extend(_scraped_course_to_catalog_row(r) for r in scraped_rows)
+    dataset_id = int(getattr(contextual_dataset, 'id', 0) or 0) or None
 
     filtered_candidates: list[Dict[str, Any]] = []
     skipped_missing_instructor = 0
@@ -793,18 +695,7 @@ def _load_scraped_catalog_for_term(year: Any, semester: Any) -> tuple[list[Dict[
 
 def _build_course_metadata_index() -> Dict[str, Dict[str, Any]]:
     index: Dict[str, Dict[str, Any]] = {}
-    local_candidates = [_manual_or_csv_course_to_catalog_row(r) for r in Course.query.all()]
-    scraped_candidates = []
-    rows = (
-        db.session.query(ScrapedCourse)
-        .join(ScrapedDataset, ScrapedCourse.dataset_id == ScrapedDataset.id)
-        .filter(ScrapedDataset.status == 'completed')
-        .order_by(ScrapedDataset.created_at.desc(), ScrapedCourse.id.asc())
-        .all()
-    )
-    scraped_candidates.extend(_scraped_course_to_catalog_row(sc) for sc in rows)
-
-    candidates = local_candidates + scraped_candidates
+    candidates = [_manual_or_csv_course_to_catalog_row(r) for r in Course.query.all()]
     candidates.sort(
         key=lambda row: (
             _source_priority(row.get('source')),

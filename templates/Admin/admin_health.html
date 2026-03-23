@@ -5,7 +5,7 @@
 <div class="ax-page-header d-flex align-items-center justify-content-between flex-wrap gap-2 mb-4">
     <div>
         <h1 class="ax-page-title">System Health</h1>
-        <p class="ax-page-subtitle mb-0">Real-time application, scraper, and environment telemetry.</p>
+        <p class="ax-page-subtitle mb-0">Real-time application and ingestion telemetry.</p>
     </div>
     <span id="healthStamp" class="badge bg-secondary">Waiting…</span>
 </div>
@@ -13,30 +13,10 @@
 <div id="healthAlert"></div>
 
 <div class="row g-3 mb-4">
-    <div class="col-md-3">
-        <div class="card shadow-sm h-100"><div class="card-body">
-            <div class="text-muted small">App Version</div>
-            <div id="appVersion" class="fs-5 fw-bold">{{ app_version }}</div>
-        </div></div>
-    </div>
-    <div class="col-md-3">
-        <div class="card shadow-sm h-100"><div class="card-body">
-            <div class="text-muted small">Database</div>
-            <div id="dbStatus" class="fs-5 fw-bold">Unknown</div>
-        </div></div>
-    </div>
-    <div class="col-md-3">
-        <div class="card shadow-sm h-100"><div class="card-body">
-            <div class="text-muted small">Scraper State</div>
-            <div id="scraperState" class="fs-5 fw-bold">Idle</div>
-        </div></div>
-    </div>
-    <div class="col-md-3">
-        <div class="card shadow-sm h-100"><div class="card-body">
-            <div class="text-muted small">Active Sessions</div>
-            <div id="activeSessions" class="fs-5 fw-bold">0</div>
-        </div></div>
-    </div>
+    <div class="col-md-3"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted small">App Version</div><div id="appVersion" class="fs-5 fw-bold">{{ app_version }}</div></div></div></div>
+    <div class="col-md-3"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted small">Database</div><div id="dbStatus" class="fs-5 fw-bold">Unknown</div></div></div></div>
+    <div class="col-md-3"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted small">Datasets</div><div id="datasetCount" class="fs-5 fw-bold">0</div></div></div></div>
+    <div class="col-md-3"><div class="card shadow-sm h-100"><div class="card-body"><div class="text-muted small">CSV Course Rows</div><div id="csvRows" class="fs-5 fw-bold">0</div></div></div></div>
 </div>
 
 <div class="row g-3">
@@ -50,12 +30,8 @@
                 <div id="integritySummary" class="mb-2 text-muted">No integrity checks loaded yet.</div>
                 <div class="table-responsive" style="max-height: 280px; overflow:auto;">
                     <table class="table table-sm align-middle mb-0">
-                        <thead>
-                            <tr><th>Status</th><th>Check</th><th>Details</th><th class="text-end">Actions</th></tr>
-                        </thead>
-                        <tbody id="integrityRows">
-                            <tr><td colspan="4" class="text-center text-muted">Waiting for first poll...</td></tr>
-                        </tbody>
+                        <thead><tr><th>Status</th><th>Check</th><th>Details</th><th class="text-end">Actions</th></tr></thead>
+                        <tbody id="integrityRows"><tr><td colspan="4" class="text-center text-muted">Waiting for first poll...</td></tr></tbody>
                     </table>
                 </div>
             </div>
@@ -67,17 +43,16 @@
                 <div class="mb-2"><strong>Uptime:</strong> <span id="uptimeValue">—</span></div>
                 <div class="mb-2"><strong>CPU:</strong> <span id="cpuValue">—</span></div>
                 <div class="mb-2"><strong>Memory RSS:</strong> <span id="rssValue">—</span></div>
-                <div class="mb-0"><strong>Threads:</strong> <span id="threadCount">—</span></div>
+                <div class="mb-0"><strong>Sessions:</strong> <span id="activeSessions">0</span></div>
             </div>
         </div>
 
         <div class="card shadow-sm">
-            <div class="card-header" style="background: var(--ax-surface);"><h5 class="mb-0">Scraper & Background Tools</h5></div>
+            <div class="card-header" style="background: var(--ax-surface);"><h5 class="mb-0">Ingestion Mode</h5></div>
             <div class="card-body small">
-                <div class="mb-2"><strong>Remote Browser:</strong> <span id="browserConn">—</span></div>
-                <div class="mb-2"><strong>Ngrok / DevTools HTTP:</strong> <span id="devtoolsConn">—</span></div>
-                <div class="mb-2"><strong>Debugger Address:</strong> <span id="debuggerAddr">—</span></div>
-                <div class="mb-0"><strong>Progress:</strong> <span id="scraperProgress">0 / 0</span></div>
+                <div class="mb-2"><strong>Mode:</strong> <span id="ingestionMode">csv_mapping</span></div>
+                <div class="mb-2"><strong>Root CSV Files:</strong> <span id="rootCsvCount">0</span></div>
+                <div class="mb-0"><strong>Available Files:</strong> <span id="rootCsvList">—</span></div>
             </div>
         </div>
     </div>
@@ -92,9 +67,7 @@
                 <div class="small text-muted mb-2">Rollback is deployment-environment specific. In-app restore is a placeholder API only.</div>
                 <div class="table-responsive" style="max-height: 320px; overflow:auto;">
                     <table class="table table-sm align-middle mb-0">
-                        <thead>
-                            <tr><th>Version</th><th>Date</th><th>Message</th><th class="text-end">Restore</th></tr>
-                        </thead>
+                        <thead><tr><th>Version</th><th>Date</th><th>Message</th><th class="text-end">Restore</th></tr></thead>
                         <tbody id="versionRows">
                             {% for row in recent_versions %}
                             <tr>
@@ -253,7 +226,8 @@
                 setText('healthStamp', new Date().toLocaleTimeString());
                 setText('appVersion', d.version || 'unknown');
                 setText('dbStatus', d.core?.database_ok ? 'Connected' : 'Error');
-                setText('scraperState', d.scraper?.state || 'idle');
+                setText('datasetCount', String(d.ingestion?.registered_datasets ?? 0));
+                setText('csvRows', String(d.ingestion?.csv_course_rows ?? 0));
                 setText('activeSessions', String(d.core?.active_sessions ?? 0));
 
                 setText('uptimeValue', fmtDuration(d.core?.uptime_seconds));
@@ -261,15 +235,11 @@
                 setText('cpuValue', cpu == null ? 'Unavailable' : `${cpu}%`);
                 const rss = d.core?.process?.memory_rss_mb;
                 setText('rssValue', rss == null ? 'Unavailable' : `${rss} MB`);
-                setText('threadCount', String(d.background?.thread_count ?? 0));
 
-                setText('browserConn', d.scraper?.remote_browser_connected ? 'Connected' : 'Disconnected');
-                setText('devtoolsConn', d.scraper?.devtools_http_ok ? 'Healthy' : `Issue (${d.scraper?.devtools_http_message || 'unknown'})`);
-                setText('debuggerAddr', d.scraper?.debugger_address || '—');
-
-                const cur = d.scraper?.progress?.current_index ?? 0;
-                const tot = d.scraper?.progress?.total_courses ?? 0;
-                setText('scraperProgress', `${cur} / ${tot}`);
+                const files = Array.isArray(d.ingestion?.root_csv_files) ? d.ingestion.root_csv_files : [];
+                setText('ingestionMode', d.ingestion?.mode || 'csv_mapping');
+                setText('rootCsvCount', String(files.length));
+                setText('rootCsvList', files.length ? files.join(', ') : '—');
 
                 renderVersionRows(d.version_control?.recent_versions || []);
                 renderIntegrity(d.integrity || {});

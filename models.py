@@ -326,7 +326,7 @@ class Notification(db.Model):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-#  Scraper models
+#  Legacy dataset capture models
 # ──────────────────────────────────────────────────────────────────────────────
 
 class ScrapedDataset(db.Model):

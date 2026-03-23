@@ -5,7 +5,6 @@ import os
 import csv
 from io import TextIOWrapper
 import re
-import threading
 import subprocess
 from datetime import datetime, timezone
 from functools import wraps
@@ -25,6 +24,10 @@ from utils import (
     extract_faculty_names,
     normalize_faculty_name,
     sync_course_faculty,
+    get_data_mapping,
+    get_data_mapping_normalized,
+    mapped_course_payload_from_row,
+    detected_mapping_fields,
 )
 from flask import Response
 import json
@@ -57,7 +60,11 @@ ENDPOINT_PERMISSION_MAP = {
     'admin.delete_dataset': 'manage_datasets',
     'admin.api_datasets': 'manage_datasets',
     'admin.api_delete_dataset': 'manage_datasets',
+    'admin.api_force_delete_dataset': 'manage_datasets',
     'admin.api_refresh_dataset': 'manage_datasets',
+    'admin.api_clean_invalid_datasets': 'manage_datasets',
+    'admin.api_dataset_columns': 'manage_datasets',
+    'admin.api_mapping': 'manage_datasets',
     'admin.api_orphan_tables': 'manage_datasets',
     'admin.api_clean_orphan_tables': 'manage_datasets',
     'admin.manage_users': 'manage_users',
@@ -77,7 +84,6 @@ ENDPOINT_PERMISSION_MAP = {
     'admin.api_course_duplicate': 'edit_courses',
     'admin.api_faculty': 'edit_courses',
     'admin.api_faculty_item': 'edit_courses',
-    'admin.api_update_course': 'edit_courses',
     'admin.manage_subjects': 'edit_courses',
     'admin.api_update_subject_area': 'edit_courses',
     'admin.manage_instructors': 'edit_courses',
@@ -99,19 +105,6 @@ ENDPOINT_PERMISSION_MAP = {
     'admin.toggle_announcement': 'edit_landing_page',
     'admin.delete_announcement': 'edit_landing_page',
     'admin.update_app_settings_route': 'manage_users',
-    'admin.university_connection': 'manage_datasets',
-    'admin.start_browser_session': 'manage_datasets',
-    'admin.check_login_status': 'manage_datasets',
-    'admin.probe_fields': 'manage_datasets',
-    'admin.probe_status': 'manage_datasets',
-    'admin.start_scraping': 'manage_datasets',
-    'admin.pause_scraping': 'manage_datasets',
-    'admin.resume_scraping': 'manage_datasets',
-    'admin.stop_scraping': 'manage_datasets',
-    'admin.scraper_config_api': 'manage_datasets',
-    'admin.scraper_status': 'manage_datasets',
-    'admin.scraper_diagnostics': 'manage_datasets',
-    'admin.scraper_diagnostics_api': 'manage_datasets',
     'admin.admin_health': 'manage_users',
     'admin.health_metrics_api': 'manage_users',
     'admin.health_fix_api': 'manage_users',
@@ -722,7 +715,7 @@ def _build_integrity_payload() -> dict:
                 'id': 'catalog_data',
                 'status': 'critical',
                 'title': 'No catalog rows available',
-                'message': 'No local or scraped courses were found. Upload CSV or run scraper.',
+                'message': 'No course data was found. Upload a CSV dataset to continue.',
                 'fixes': [],
             }
         )
@@ -887,6 +880,71 @@ def _setting_truthy(value: str) -> bool:
     return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
+def _project_root() -> str:
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+
+def _available_root_csv_files() -> list[str]:
+    try:
+        root = _project_root()
+        names: list[str] = []
+        for entry in os.listdir(root):
+            full_path = os.path.join(root, entry)
+            if not os.path.isfile(full_path):
+                continue
+            if str(entry or '').strip().lower().endswith('.csv'):
+                names.append(entry)
+        return sorted(names, key=lambda value: value.lower())
+    except Exception:
+        return []
+
+
+def _read_csv_headers_from_path(csv_path: str) -> list[str]:
+    try:
+        with open(csv_path, 'r', encoding='utf-8-sig', newline='') as fp:
+            reader = csv.reader(fp)
+            headers = next(reader, [])
+            return [str(v or '').strip() for v in headers if str(v or '').strip()]
+    except Exception:
+        return []
+
+
+def _dataset_column_preview(dataset_name: str, source: str) -> list[str]:
+    name_text = str(dataset_name or '').strip()
+    source_text = str(source or '').strip().lower()
+    if not name_text:
+        return []
+
+    if source_text == 'csv':
+        csv_path = os.path.join(_project_root(), name_text)
+        if os.path.isfile(csv_path):
+            return _read_csv_headers_from_path(csv_path)
+
+    row = (
+        Course.query.filter(
+            sa.func.lower(sa.func.coalesce(Course.dataset_name, '')) == name_text.lower(),
+            sa.func.lower(sa.func.coalesce(Course.source, '')) == source_text,
+        )
+        .order_by(Course.last_updated.desc(), Course.id.desc())
+        .first()
+    )
+    if not row:
+        return []
+
+    headers = [
+        'course_number',
+        'title',
+        'credits',
+        'day_period',
+        'semester',
+        'year',
+        'prerequisite',
+        'subject_area',
+        'instructor',
+    ]
+    return headers
+
+
 def _admin_user_count() -> int:
     admin_role = Role.query.filter_by(name='admin').first()
     admin_role_id = admin_role.id if admin_role else -1
@@ -1020,7 +1078,7 @@ def logout():
 def index():
     user_count = User.query.count()
     schedule_count = Schedule.query.count()
-    course_tables = [d.name for d in ScrapedDataset.query.filter_by(status='completed').all()]
+    course_tables = [d.name for d in DatasetRegistry.query.order_by(DatasetRegistry.created_at.desc()).limit(50).all()]
     notification_count = Notification.query.count()
     announcement_count = Announcement.query.count()
     
@@ -1042,9 +1100,6 @@ def index():
                            current_year_setting=get_app_setting('current_year', '2025'), 
                            current_semester_setting=get_app_setting('current_semester', 'Spring'),
                            graduation_credits_setting=get_app_setting('graduation_credits', '124'),
-                           scraper_popup_open_timeout_setting=get_app_setting('scraper_popup_open_timeout', '10'),
-                           scraper_popup_close_delay_setting=get_app_setting('scraper_popup_close_delay', '0.35'),
-                           scraper_row_transition_delay_setting=get_app_setting('scraper_row_transition_delay', '0.0'),
                            ai_enabled_setting=get_app_setting('ai_enabled', 'false'),
                            ai_data_collection_enabled_setting=get_app_setting('ai_data_collection_enabled', 'false'))
 
@@ -1239,31 +1294,29 @@ def delete_announcement(announcement_id):
 @login_required
 @admin_required
 def manage_datasets():
-    from services.scraper_service import scraper_progress as _progress, is_scraper_running
-
     _ensure_dataset_registry_synced()
 
-    recent_datasets = (
-        ScrapedDataset.query.order_by(ScrapedDataset.created_at.desc()).limit(25).all()
-    )
-    active_dataset = ScrapedDataset.query.filter_by(status='running').order_by(ScrapedDataset.created_at.desc()).first()
-    completed_count = ScrapedDataset.query.filter_by(status='completed').count()
-    failed_count = ScrapedDataset.query.filter_by(status='failed').count()
+    recent_datasets = Course.query.order_by(Course.last_updated.desc(), Course.id.desc()).limit(25).all()
+    completed_count = DatasetRegistry.query.count()
+    failed_count = 0
     csv_count = Course.query.filter(sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv').count()
     latest_csv_upload = Course.query.filter(sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv').order_by(Course.last_updated.desc(), Course.id.desc()).first()
     registry_rows = _registry_rows()
+    data_mapping = get_data_mapping()
+    mapping_detected = detected_mapping_fields([], get_data_mapping_normalized())
+    root_csv_files = _available_root_csv_files()
 
     return render_template(
         'Admin/manage_datasets.html',
         recent_datasets=recent_datasets,
         registry_rows=registry_rows,
-        active_dataset=active_dataset,
         completed_count=completed_count,
         failed_count=failed_count,
         csv_count=csv_count,
         latest_csv_upload=latest_csv_upload,
-        scraper_progress=dict(_progress),
-        scraper_running=is_scraper_running(),
+        data_mapping=data_mapping,
+        mapping_detected=mapping_detected,
+        root_csv_files=root_csv_files,
         orphan_tables=_orphan_tables(),
     )
 
@@ -1272,14 +1325,32 @@ def manage_datasets():
 @login_required
 @admin_required
 def upload_dataset():
-    file = request.files.get('file') or request.files.get('dataset_file')
-    if not file or not str(file.filename or '').strip():
-        flash('Please choose a CSV file to upload.', 'error')
-        return redirect(url_for('admin.manage_datasets'))
+    mapping_normalized = get_data_mapping_normalized()
 
-    filename = str(file.filename or '').strip()
-    if not filename.lower().endswith('.csv'):
-        flash('Only CSV uploads are supported.', 'error')
+    file = request.files.get('file') or request.files.get('dataset_file')
+    selected_root_csv = str(request.form.get('detected_csv_file') or '').strip()
+    root_stream = None
+
+    filename = ''
+    reader = None
+
+    if file and str(file.filename or '').strip():
+        filename = str(file.filename or '').strip()
+        if not filename.lower().endswith('.csv'):
+            flash('Only CSV uploads are supported.', 'error')
+            return redirect(url_for('admin.manage_datasets'))
+        reader = csv.DictReader(TextIOWrapper(file.stream, encoding='utf-8-sig', newline=''))
+    elif selected_root_csv:
+        allowed = set(_available_root_csv_files())
+        if selected_root_csv not in allowed:
+            flash('Selected root CSV is invalid or no longer available.', 'error')
+            return redirect(url_for('admin.manage_datasets'))
+        filename = selected_root_csv
+        root_path = os.path.join(_project_root(), selected_root_csv)
+        root_stream = open(root_path, 'r', encoding='utf-8-sig', newline='')
+        reader = csv.DictReader(root_stream)
+    else:
+        flash('Please choose a CSV file to upload.', 'error')
         return redirect(url_for('admin.manage_datasets'))
 
     year_hint = str(request.form.get('year') or '').strip()
@@ -1303,27 +1374,9 @@ def upload_dataset():
         fallback_sem = inferred_semester or normalize_dataset_semester(get_app_setting('current_semester', ''))
         dataset_name = f"{fallback_year}_{fallback_sem}_CSV".strip('_')
 
-    def _norm_key(value: str) -> str:
-        return re.sub(r'[^a-z0-9]+', '', str(value or '').strip().lower())
-
-    alias = {
-        'course_number': {'coursenumber', 'course', 'coursecode', 'courseid', 'number'},
-        'title': {'coursetitle', 'title', 'subject', 'coursetitleen'},
-        'credits': {'credits', 'credit'},
-        'day_period': {'dayandperiod', 'dayperiod', 'dayandtime', 'period', 'day'},
-        'semester': {'semester', 'term'},
-        'year': {'year', 'academicyear', 'yearoffered', 'yearavailable'},
-        'prerequisite': {'prerequisite', 'prerequisites', 'prereq'},
-        'subject_area': {'subjectarea', 'areaofstudy', 'subject', 'area'},
-        'faculty': {'faculty', 'instructor', 'teacher', 'lecturer'},
-    }
-
     def _pick(row: dict, key: str) -> str:
-        normalized_map = {_norm_key(k): (v or '') for k, v in (row or {}).items()}
-        for name in alias.get(key, set()):
-            if name in normalized_map and str(normalized_map[name]).strip():
-                return str(normalized_map[name]).strip()
-        return ''
+        payload = mapped_course_payload_from_row(row or {}, mapping_normalized)
+        return str(payload.get(key) or '').strip()
 
     def _normalize_term_values(raw_semester: str, raw_year: str) -> tuple[str | None, str | None]:
         guessed_year, guessed_semester, _ = extract_dataset_context(raw_year, raw_semester)
@@ -1341,7 +1394,17 @@ def upload_dataset():
     skipped_missing_faculty = 0
 
     try:
-        reader = csv.DictReader(TextIOWrapper(file.stream, encoding='utf-8-sig', newline=''))
+        if reader is None:
+            flash('CSV reader could not be initialized.', 'error')
+            return redirect(url_for('admin.manage_datasets'))
+
+        detected = detected_mapping_fields(list(reader.fieldnames or []), mapping_normalized)
+        required = {'course_number', 'title', 'faculty', 'day_period'}
+        missing_required = sorted([field for field in required if field not in detected])
+        if missing_required:
+            flash(f'CSV mapping missing required fields: {", ".join(missing_required)}. Update mapping and retry.', 'error')
+            return redirect(url_for('admin.manage_datasets'))
+
         for raw_row in reader:
             course_number = _pick(raw_row, 'course_number')
             title = _pick(raw_row, 'title')
@@ -1388,7 +1451,7 @@ def upload_dataset():
                 'semester': semester,
                 'year': year,
                 'prerequisite': _pick(raw_row, 'prerequisite') or None,
-                'subject_area': _pick(raw_row, 'subject_area') or None,
+                'subject_area': None,
                 'faculty': parsed_faculty,
                 'dataset_name': dataset_name or None,
                 'source': 'csv',
@@ -1444,6 +1507,12 @@ def upload_dataset():
     except Exception as exc:
         db.session.rollback()
         flash(f'CSV upload failed: {exc}', 'error')
+    finally:
+        if root_stream:
+            try:
+                root_stream.close()
+            except Exception:
+                pass
 
     return redirect(url_for('admin.manage_datasets'))
 
@@ -1527,6 +1596,140 @@ def api_delete_dataset(dataset_id: int):
     return jsonify({'success': True, 'message': f'Dataset {result.get("dataset_name")} deleted.', 'result': result})
 
 
+@admin_bp.route('/api/datasets/<int:dataset_id>/force-delete', methods=['DELETE', 'POST'])
+@login_required
+@admin_required
+def api_force_delete_dataset(dataset_id: int):
+    row = DatasetRegistry.query.get(dataset_id)
+    if not row:
+        return jsonify({'success': False, 'message': 'Dataset not found.'}), 404
+
+    table_name = str(getattr(row, 'table_name', '') or '').strip()
+    if table_name and re.match(r'^[A-Za-z0-9_]+$', table_name):
+        try:
+            db.session.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
+        except Exception:
+            db.session.rollback()
+
+    dataset_name = str(getattr(row, 'name', '') or '').strip()
+    source = str(getattr(row, 'source', '') or '').strip().lower()
+    if source == 'csv' and dataset_name:
+        Course.query.filter(
+            sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv',
+            sa.func.lower(sa.func.coalesce(Course.dataset_name, '')) == dataset_name.lower(),
+        ).delete(synchronize_session=False)
+    if source == 'scraped' and dataset_name:
+        ScrapedDataset.query.filter(sa.func.lower(ScrapedDataset.name) == dataset_name.lower()).delete(synchronize_session=False)
+
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({'success': True, 'message': f'Dataset {dataset_name} force-deleted.'})
+
+
+@admin_bp.route('/api/datasets/clean-invalid', methods=['POST'])
+@login_required
+@admin_required
+def api_clean_invalid_datasets():
+    rows = DatasetRegistry.query.order_by(DatasetRegistry.created_at.asc(), DatasetRegistry.id.asc()).all()
+    removed: list[dict] = []
+    failed: list[dict] = []
+    protected = _protected_tables()
+    inspector = inspect(db.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    for row in rows:
+        dataset_name = str(getattr(row, 'name', '') or '').strip()
+        source = str(getattr(row, 'source', '') or '').strip().lower()
+        table_name = str(getattr(row, 'table_name', '') or '').strip()
+        is_invalid = False
+
+        if source == 'scraped':
+            is_invalid = True
+
+        if table_name and table_name not in protected and table_name not in existing_tables:
+            is_invalid = True
+
+        if source == 'csv' and dataset_name:
+            row_count = int(
+                Course.query.filter(
+                    sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv',
+                    sa.func.lower(sa.func.coalesce(Course.dataset_name, '')) == dataset_name.lower(),
+                ).count()
+                or 0
+            )
+            if row_count == 0:
+                is_invalid = True
+
+        if not is_invalid:
+            continue
+
+        try:
+            if table_name and re.match(r'^[A-Za-z0-9_]+$', table_name):
+                db.session.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
+            if source == 'csv' and dataset_name:
+                Course.query.filter(
+                    sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv',
+                    sa.func.lower(sa.func.coalesce(Course.dataset_name, '')) == dataset_name.lower(),
+                ).delete(synchronize_session=False)
+            if source == 'scraped' and dataset_name:
+                ScrapedDataset.query.filter(sa.func.lower(ScrapedDataset.name) == dataset_name.lower()).delete(synchronize_session=False)
+            db.session.delete(row)
+            db.session.flush()
+            removed.append({'id': row.id, 'name': dataset_name, 'source': source})
+        except Exception as exc:
+            db.session.rollback()
+            failed.append({'id': row.id, 'name': dataset_name, 'error': str(exc)})
+
+    db.session.commit()
+    return jsonify(
+        {
+            'success': True,
+            'message': f'Cleaned {len(removed)} invalid dataset(s).',
+            'removed': removed,
+            'failed': failed,
+        }
+    )
+
+
+@admin_bp.route('/api/datasets/<int:dataset_id>/columns', methods=['GET'])
+@login_required
+@admin_required
+def api_dataset_columns(dataset_id: int):
+    row = DatasetRegistry.query.get(dataset_id)
+    if not row:
+        return jsonify({'success': False, 'message': 'Dataset not found.'}), 404
+    headers = _dataset_column_preview(str(row.name or ''), str(row.source or ''))
+    mapped = detected_mapping_fields(headers, get_data_mapping_normalized())
+    return jsonify({'success': True, 'dataset_id': dataset_id, 'columns': headers, 'mapped_fields': mapped})
+
+
+@admin_bp.route('/api/datasets/mapping', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def api_mapping():
+    if request.method == 'GET':
+        return jsonify({'success': True, 'mapping': get_data_mapping()})
+
+    payload = request.get_json(silent=True) or {}
+    mapping = payload.get('mapping')
+    if not isinstance(mapping, dict):
+        return jsonify({'success': False, 'message': 'Mapping payload must be an object.'}), 400
+
+    normalized_mapping: dict[str, list[str]] = {}
+    for key, values in mapping.items():
+        field = str(key or '').strip()
+        if not field:
+            continue
+        if isinstance(values, list):
+            aliases = [str(v).strip() for v in values if str(v).strip()]
+        else:
+            aliases = [str(values).strip()] if str(values or '').strip() else []
+        normalized_mapping[field] = aliases
+
+    update_app_setting('data_mapping_json', safe_json_dumps(normalized_mapping))
+    return jsonify({'success': True, 'message': 'Data mapping updated.', 'mapping': get_data_mapping()})
+
+
 @admin_bp.route('/api/datasets/<int:dataset_id>/refresh', methods=['POST'])
 @login_required
 @admin_required
@@ -1580,27 +1783,6 @@ def update_app_settings_route():
     if grad_credits <= 0:
         grad_credits = 124.0
     update_app_setting('graduation_credits', str(grad_credits))
-
-    popup_open_timeout = _safe_float(request.form.get('scraper_popup_open_timeout_setting'), 10.0)
-    if popup_open_timeout < 2.0:
-        popup_open_timeout = 2.0
-    if popup_open_timeout > 40.0:
-        popup_open_timeout = 40.0
-    update_app_setting('scraper_popup_open_timeout', str(popup_open_timeout))
-
-    popup_close_delay = _safe_float(request.form.get('scraper_popup_close_delay_setting'), 0.35)
-    if popup_close_delay < 0.0:
-        popup_close_delay = 0.0
-    if popup_close_delay > 5.0:
-        popup_close_delay = 5.0
-    update_app_setting('scraper_popup_close_delay', str(popup_close_delay))
-
-    row_transition_delay = _safe_float(request.form.get('scraper_row_transition_delay_setting'), _safe_float(get_app_setting('scraper_row_transition_delay', '0.0'), 0.0))
-    if row_transition_delay < 0.0:
-        row_transition_delay = 0.0
-    if row_transition_delay > 15.0:
-        row_transition_delay = 15.0
-    update_app_setting('scraper_row_transition_delay', str(row_transition_delay))
 
     ai_enabled = 'ai_enabled_setting' in request.form
     ai_data_collection_enabled = 'ai_data_collection_enabled_setting' in request.form
@@ -2404,369 +2586,6 @@ def api_faculty_item(faculty_id: int):
     return jsonify({'success': True, 'faculty': _serialize_faculty(row)})
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  University Connection — Scraping Control System
-# ─────────────────────────────────────────────────────────────────────────────
-
-@admin_bp.route('/university_connection', methods=['GET'])
-@login_required
-@admin_required
-def university_connection():
-    from services.scraper_service import (
-        scraper_progress,
-        _is_chrome_running,
-        is_scraper_running,
-        is_scraper_paused,
-        scraper_state_label,
-    )
-    import json as _json
-
-    year = get_app_setting('current_year', '')
-    semester = get_app_setting('current_semester', '')
-    debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
-    row_transition_delay = _safe_float(get_app_setting('scraper_row_transition_delay', '0.0'), 0.0)
-    popup_open_timeout = _safe_float(get_app_setting('scraper_popup_open_timeout', '10'), 10.0)
-    popup_close_delay = _safe_float(get_app_setting('scraper_popup_close_delay', '0.35'), 0.35)
-    _ensure_dataset_registry_synced()
-
-    # Past datasets for history panel
-    past_datasets = ScrapedDataset.query.order_by(ScrapedDataset.created_at.desc()).limit(10).all()
-    latest_scrape_run = ScrapedDataset.query.order_by(ScrapedDataset.created_at.desc()).first()
-    latest_csv_upload = Course.query.filter(sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv').order_by(Course.last_updated.desc(), Course.id.desc()).first()
-
-    selectable_dataset_names = _all_selectable_dataset_names()
-
-    chrome_connected = _is_chrome_running(debugger_address)
-    return render_template(
-        'Admin/university_connection.html',
-        year=year,
-        semester=semester,
-        debugger_address=debugger_address,
-        chrome_connected=chrome_connected,
-        past_datasets=past_datasets,
-        progress=dict(scraper_progress),
-        probed_fields=session.get('scraper_probed_fields', []),
-        selected_fields=session.get('scraper_selected_fields', []),
-        scraper_is_running=is_scraper_running(),
-        scraper_is_paused=is_scraper_paused(),
-        scraper_state=scraper_state_label(),
-        row_transition_delay=row_transition_delay,
-        popup_open_timeout=popup_open_timeout,
-        popup_close_delay=popup_close_delay,
-        latest_scrape_run=latest_scrape_run,
-        latest_csv_upload=latest_csv_upload,
-        selectable_dataset_names=selectable_dataset_names,
-    )
-
-
-# ── POST /admin/start-session ─────────────────────────────────────────────
-@admin_bp.route('/start-session', methods=['POST'])
-@login_required
-@admin_required
-def start_browser_session():
-    from services.scraper_service import start_browser_session as _start, _set_last_backend_error
-    try:
-        data = request.get_json(force=True, silent=True) or {}
-        debugger_address = (data.get('debugger_address') or get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))).strip()
-        if debugger_address:
-            update_app_setting('scraper_debugger_address', debugger_address)
-        result = _start(debugger_address=debugger_address)
-        return jsonify(result)
-    except Exception as exc:
-        _set_last_backend_error('admin.start_browser_session', exc)
-        return jsonify({'success': False, 'message': f'Start session failed: {exc}'}), 500
-
-
-# ── GET /admin/check-login ────────────────────────────────────────────────
-@admin_bp.route('/check-login', methods=['GET'])
-@login_required
-@admin_required
-def check_login_status():
-    from services.scraper_service import get_driver, check_login_status as _check, _set_last_backend_error
-    try:
-        debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
-        driver = get_driver(debugger_address=debugger_address)
-    except Exception as exc:
-        _set_last_backend_error('admin.check_login_status.get_driver', exc)
-        return jsonify({'logged_in': False, 'message': str(exc)})
-    try:
-        result = _check(driver)
-        return jsonify(result)
-    except Exception as exc:
-        _set_last_backend_error('admin.check_login_status', exc)
-        return jsonify({'logged_in': False, 'message': f'Login check failed: {exc}'}), 500
-
-
-# ── POST /admin/probe-fields ──────────────────────────────────────────────
-@admin_bp.route('/probe-fields', methods=['POST'])
-@login_required
-@admin_required
-def probe_fields():
-    from services.scraper_service import start_probe_job as _start_probe, _set_last_backend_error
-    try:
-        data = request.get_json(force=True, silent=True) or {}
-        debugger_address = (data.get('debugger_address') or get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))).strip()
-        popup_open_timeout = _safe_float(get_app_setting('scraper_popup_open_timeout', '10'), 10.0)
-        popup_close_delay = _safe_float(get_app_setting('scraper_popup_close_delay', '0.35'), 0.35)
-
-        if debugger_address:
-            update_app_setting('scraper_debugger_address', debugger_address)
-    except Exception as exc:
-        _set_last_backend_error('admin.probe_fields.payload', exc)
-        return jsonify({'success': False, 'fields': [], 'message': str(exc)})
-
-    try:
-        result = _start_probe(
-            debugger_address=debugger_address,
-            popup_open_timeout=popup_open_timeout,
-            popup_close_delay=popup_close_delay,
-        )
-        return jsonify(result)
-    except Exception as exc:
-        _set_last_backend_error('admin.probe_fields', exc)
-        return jsonify({'success': False, 'fields': [], 'message': f'Probe failed: {exc}'}), 500
-
-
-@admin_bp.route('/probe-status', methods=['GET'])
-@login_required
-@admin_required
-def probe_status():
-    from services.scraper_service import get_probe_progress as _get_probe_progress, _set_last_backend_error
-    try:
-        payload = dict(_get_probe_progress())
-        status = str(payload.get('status') or 'idle')
-
-        if status == 'completed' and payload.get('fields'):
-            safe_fields = _sanitize_session_fields(payload.get('fields') or [])
-            session['scraper_probed_fields'] = safe_fields
-            payload['fields'] = safe_fields
-
-        return jsonify({'success': True, **payload})
-    except Exception as exc:
-        _set_last_backend_error('admin.probe_status', exc)
-        return jsonify({'success': False, 'status': 'failed', 'fields': [], 'message': f'Probe status failed: {exc}'}), 500
-
-
-# ── POST /admin/start-scraping ────────────────────────────────────────────
-@admin_bp.route('/start-scraping', methods=['POST'])
-@login_required
-@admin_required
-def start_scraping():
-    import json as _json
-    from flask import current_app
-    from services.scraper_service import run_controlled_scraper as _run, scraper_progress, is_scraper_running
-
-    # Reject if already running
-    if scraper_progress.get('status') == 'running' or is_scraper_running():
-        return jsonify({'success': False, 'message': 'A scraping job is already running.'})
-
-    try:
-        data = request.get_json(force=True, silent=True) or {}
-    except Exception as exc:
-        return jsonify({'success': False, 'message': f'Invalid request payload: {exc}'}), 400
-    selected_fields = data.get('selected_fields') or []
-    if isinstance(selected_fields, tuple):
-        selected_fields = list(selected_fields)
-    if not isinstance(selected_fields, list):
-        selected_fields = []
-    selected_fields = [str(f).strip() for f in selected_fields if str(f).strip()]
-    year = (data.get('year') or get_app_setting('current_year', '')).strip()
-    semester = (data.get('semester') or get_app_setting('current_semester', '')).strip()
-    debugger_address = (data.get('debugger_address') or get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))).strip()
-    popup_open_timeout = _safe_float(get_app_setting('scraper_popup_open_timeout', '10'), 10.0)
-    popup_close_delay = _safe_float(get_app_setting('scraper_popup_close_delay', '0.35'), 0.35)
-    row_transition_delay = _safe_float(data.get('row_transition_delay', get_app_setting('scraper_row_transition_delay', '0.0')), 0.0)
-    if row_transition_delay < 0.0:
-        row_transition_delay = 0.0
-    if row_transition_delay > 15.0:
-        row_transition_delay = 15.0
-
-    if not selected_fields:
-        return jsonify({'success': False, 'message': 'No fields selected.'})
-    if not year or not semester:
-        return jsonify({'success': False, 'message': 'Year and Semester must be configured in Settings.'})
-
-    try:
-        session['scraper_selected_fields'] = _sanitize_session_fields(selected_fields)
-        if debugger_address:
-            update_app_setting('scraper_debugger_address', debugger_address)
-        update_app_setting('scraper_row_transition_delay', str(row_transition_delay))
-        flask_app = current_app._get_current_object()
-        result = _run(
-            selected_fields,
-            year,
-            semester,
-            flask_app,
-            debugger_address=debugger_address,
-            popup_open_timeout=popup_open_timeout,
-            popup_close_delay=popup_close_delay,
-            inter_row_delay=row_transition_delay,
-        )
-        return jsonify(result)
-    except Exception as exc:
-        return jsonify({'success': False, 'message': f'Start scraping failed: {exc}'}), 500
-
-
-@admin_bp.route('/pause-scraping', methods=['POST'])
-@login_required
-@admin_required
-def pause_scraping():
-    from services.scraper_service import pause_scraper as _pause
-    try:
-        payload = _pause()
-        return jsonify(payload), (200 if payload.get('success') else 409)
-    except Exception as exc:
-        return jsonify({'success': False, 'message': f'Pause failed: {exc}', 'status': 'failed'}), 500
-
-
-@admin_bp.route('/resume-scraping', methods=['POST'])
-@login_required
-@admin_required
-def resume_scraping():
-    from services.scraper_service import resume_scraper as _resume
-    try:
-        payload = _resume()
-        return jsonify(payload), (200 if payload.get('success') else 409)
-    except Exception as exc:
-        return jsonify({'success': False, 'message': f'Resume failed: {exc}', 'status': 'failed'}), 500
-
-
-@admin_bp.route('/stop-scraping', methods=['POST'])
-@login_required
-@admin_required
-def stop_scraping():
-    from services.scraper_service import request_stop_scraper as _stop
-    try:
-        payload = _stop()
-        return jsonify(payload), (200 if payload.get('success') else 409)
-    except Exception as exc:
-        return jsonify({'success': False, 'message': f'Stop failed: {exc}', 'status': 'failed'}), 500
-
-
-@admin_bp.route('/api/scraper-config', methods=['GET', 'POST'])
-@login_required
-@admin_required
-def scraper_config_api():
-    from services.scraper_service import update_runtime_config as _update_runtime_config, get_runtime_config as _get_runtime_config
-
-    if request.method == 'GET':
-        cfg = {
-            'current_year': get_app_setting('current_year', ''),
-            'current_semester': get_app_setting('current_semester', ''),
-            'scraper_debugger_address': get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222')),
-            'scraper_popup_open_timeout': _safe_float(get_app_setting('scraper_popup_open_timeout', '10'), 10.0),
-            'scraper_popup_close_delay': _safe_float(get_app_setting('scraper_popup_close_delay', '0.35'), 0.35),
-            'scraper_row_transition_delay': _safe_float(get_app_setting('scraper_row_transition_delay', '0.0'), 0.0),
-            'runtime': _get_runtime_config(),
-        }
-        return jsonify({'success': True, 'config': cfg})
-
-    data = request.get_json(silent=True) or {}
-
-    year = str(data.get('year') or '').strip()
-    semester = str(data.get('semester') or '').strip()
-    debugger_address = str(data.get('debugger_address') or '').strip()
-    popup_open_timeout = _safe_float(data.get('popup_open_timeout', get_app_setting('scraper_popup_open_timeout', '10')), 10.0)
-    popup_close_delay = _safe_float(data.get('popup_close_delay', get_app_setting('scraper_popup_close_delay', '0.35')), 0.35)
-    row_transition_delay = _safe_float(data.get('row_transition_delay', get_app_setting('scraper_row_transition_delay', '0.0')), 0.0)
-
-    popup_open_timeout = max(2.0, min(popup_open_timeout, 40.0))
-    popup_close_delay = max(0.0, min(popup_close_delay, 5.0))
-    row_transition_delay = max(0.0, min(row_transition_delay, 15.0))
-
-    if year:
-        update_app_setting('current_year', year)
-    if semester:
-        update_app_setting('current_semester', semester)
-    if debugger_address:
-        update_app_setting('scraper_debugger_address', debugger_address)
-
-    update_app_setting('scraper_popup_open_timeout', str(popup_open_timeout))
-    update_app_setting('scraper_popup_close_delay', str(popup_close_delay))
-    update_app_setting('scraper_row_transition_delay', str(row_transition_delay))
-
-    runtime_cfg = _update_runtime_config(
-        popup_open_timeout=popup_open_timeout,
-        popup_close_delay=popup_close_delay,
-        inter_row_delay=row_transition_delay,
-    )
-
-    return jsonify(
-        {
-            'success': True,
-            'message': 'Scraper configuration updated.',
-            'config': {
-                'current_year': get_app_setting('current_year', ''),
-                'current_semester': get_app_setting('current_semester', ''),
-                'scraper_debugger_address': get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222')),
-                'scraper_popup_open_timeout': popup_open_timeout,
-                'scraper_popup_close_delay': popup_close_delay,
-                'scraper_row_transition_delay': row_transition_delay,
-                'runtime': runtime_cfg,
-            },
-        }
-    )
-
-
-# ── GET /admin/scraper-status ─────────────────────────────────────────────
-@admin_bp.route('/scraper-status', methods=['GET'])
-@login_required
-@admin_required
-def scraper_status():
-    try:
-        from services.scraper_service import (
-            scraper_progress as _p,
-            _is_chrome_running,
-            is_scraper_running,
-            is_scraper_paused,
-            scraper_state_label,
-            get_runtime_config,
-        )
-        import copy
-        debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
-        payload = copy.deepcopy(_p)
-        payload['chrome_connected'] = _is_chrome_running(debugger_address)
-        payload['debugger_address'] = debugger_address
-        payload['is_running_lock'] = is_scraper_running()
-        payload['is_paused'] = is_scraper_paused()
-        payload['state'] = scraper_state_label()
-        payload['runtime_config'] = get_runtime_config()
-
-        # Enrich with DB data when a dataset is active
-        ds_id = payload.get('dataset_id')
-        if ds_id:
-            ds = db.session.get(ScrapedDataset, ds_id)
-            if ds:
-                payload['db_status'] = ds.status
-                payload['db_current'] = ds.current_index
-                payload['db_total'] = ds.total_courses
-                payload['db_last_course'] = ds.last_course
-
-        return jsonify(payload)
-    except Exception as exc:
-        return jsonify({'success': False, 'message': f'Status failed: {exc}'}), 500
-
-
-@admin_bp.route('/scraper-diagnostics', methods=['GET'])
-@login_required
-@admin_required
-def scraper_diagnostics():
-    from services.scraper_service import get_scraper_diagnostics as _diag
-    debugger_address = (request.args.get('debugger_address') or get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))).strip()
-    try:
-        payload = _diag(debugger_address=debugger_address)
-        return jsonify({'success': True, 'diagnostics': payload})
-    except Exception as exc:
-        return jsonify({'success': False, 'message': f'Diagnostics failed: {exc}'}), 500
-
-
-@admin_bp.route('/api/scraper-diagnostics', methods=['GET'])
-@login_required
-@admin_required
-def scraper_diagnostics_api():
-    return scraper_diagnostics()
-
-
 @admin_bp.route('/health', methods=['GET'])
 @login_required
 @admin_required
@@ -2783,15 +2602,6 @@ def admin_health():
 @login_required
 @admin_required
 def health_metrics_api():
-    from services.scraper_service import (
-        _is_chrome_running,
-        _debugger_http_health,
-        scraper_progress,
-        is_scraper_running,
-        is_scraper_paused,
-        scraper_state_label,
-    )
-
     now_utc = datetime.now(timezone.utc)
 
     db_ok = True
@@ -2802,9 +2612,6 @@ def health_metrics_api():
         db_ok = False
         db_error = str(exc)
         db.session.rollback()
-
-    debugger_address = get_app_setting('scraper_debugger_address', os.environ.get('CHROME_DEBUGGER_ADDRESS', 'localhost:9222'))
-    dbg_http_ok, dbg_http_msg, dbg_http_addr = _debugger_http_health(debugger_address)
 
     app_started_at = current_app.config.get('APP_STARTED_AT')
     uptime_seconds = None
@@ -2827,27 +2634,15 @@ def health_metrics_api():
             'active_sessions': _active_session_count(),
             'process': _process_metrics(),
         },
-        'scraper': {
-            'state': scraper_state_label(),
-            'is_running': is_scraper_running(),
-            'is_paused': is_scraper_paused(),
-            'progress': {
-                'status': scraper_progress.get('status'),
-                'dataset_id': scraper_progress.get('dataset_id'),
-                'current_index': scraper_progress.get('current_index'),
-                'total_courses': scraper_progress.get('total_courses'),
-                'last_course': scraper_progress.get('last_course'),
-                'error': scraper_progress.get('error'),
-            },
-            'remote_browser_connected': _is_chrome_running(debugger_address),
-            'devtools_http_ok': dbg_http_ok,
-            'devtools_http_message': dbg_http_msg,
-            'devtools_working_address': dbg_http_addr,
-            'debugger_address': debugger_address,
+        'ingestion': {
+            'mode': 'csv_mapping',
+            'registered_datasets': int(DatasetRegistry.query.count() or 0),
+            'csv_course_rows': int(Course.query.filter(sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv').count() or 0),
+            'root_csv_files': _available_root_csv_files(),
         },
         'background': {
-            'thread_count': len(threading.enumerate()),
-            'thread_names': [t.name for t in threading.enumerate()][:80],
+            'thread_count': 0,
+            'thread_names': [],
         },
         'version_control': {
             'recent_versions': _recent_git_versions(limit=15),
@@ -2929,44 +2724,6 @@ def restore_version_placeholder():
             'target_sha': target_sha or None,
         }
     ), 501
-
-@admin_bp.route('/api/update_course', methods=['POST'])
-@login_required
-@admin_required
-def api_update_course():
-    data = request.get_json()
-    try:
-        course_id = data.get('_rowid')
-        try:
-            course_id = int(course_id)
-        except Exception:
-            return jsonify({'success': False, 'message': 'Invalid course identifier'})
-
-        row = db.session.get(ScrapedCourse, course_id)
-        if not row:
-            return jsonify({'success': False, 'message': 'Course not found'})
-
-        row.course_title = (data.get('Course_Title') or '').strip() or row.course_title
-        try:
-            row.credits = float(data.get('Credits'))
-        except Exception:
-            pass
-
-        payload = safe_json_loads(row.data_json, {})
-        if isinstance(payload, dict):
-            for key in list(payload.keys()):
-                key_norm = ' '.join(str(key or '').strip().lower().replace('_', ' ').replace('-', ' ').split())
-                if key_norm in {'course title', 'subject'}:
-                    payload[key] = row.course_title
-                if key_norm in {'credits', 'credit'} and row.credits is not None:
-                    payload[key] = str(row.credits)
-            row.data_json = safe_json_dumps(payload)
-
-        db.session.commit()
-        return jsonify({'success': True})
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({'success': False, 'message': 'Unable to update course.'}), 500
 
 @admin_bp.route('/api/update_period', methods=['POST'])
 @login_required

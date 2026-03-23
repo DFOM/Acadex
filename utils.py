@@ -4,6 +4,7 @@ import re
 import json
 from typing import Any
 from sqlalchemy import func
+from config.data_mapping import DATA_MAPPING
 
 
 def safe_json_loads(value, default):
@@ -25,6 +26,94 @@ def safe_json_dumps(value) -> str:
         return json.dumps(value, ensure_ascii=False)
     except Exception:
         return '{}'
+
+
+def normalize_column_name(value: Any) -> str:
+    return re.sub(r'[^a-z0-9]+', '', str(value or '').strip().lower())
+
+
+def get_data_mapping() -> dict[str, list[str]]:
+    base = {
+        key: [str(v).strip() for v in (values or []) if str(v).strip()]
+        for key, values in (DATA_MAPPING or {}).items()
+    }
+    try:
+        stored = Setting.query.get('data_mapping_json')
+        overrides = safe_json_loads(getattr(stored, 'value', None), {})
+        if not isinstance(overrides, dict):
+            return base
+
+        merged = dict(base)
+        for key, values in overrides.items():
+            field_key = str(key or '').strip()
+            if not field_key:
+                continue
+            if isinstance(values, list):
+                clean_values = [str(v).strip() for v in values if str(v).strip()]
+            else:
+                clean_values = [str(values).strip()] if str(values or '').strip() else []
+            if clean_values:
+                merged[field_key] = clean_values
+        return merged
+    except Exception:
+        return base
+
+
+def get_data_mapping_normalized() -> dict[str, list[str]]:
+    mapping = get_data_mapping()
+    normalized: dict[str, list[str]] = {}
+    for key, values in mapping.items():
+        normalized[key] = []
+        seen: set[str] = set()
+        for name in values:
+            norm = normalize_column_name(name)
+            if norm and norm not in seen:
+                seen.add(norm)
+                normalized[key].append(norm)
+    return normalized
+
+
+def mapped_value_from_row(row: dict[str, Any], field: str, mapping: dict[str, list[str]] | None = None) -> str:
+    normalized_mapping = mapping or get_data_mapping_normalized()
+    normalized_row = {
+        normalize_column_name(k): str(v or '').strip()
+        for k, v in (row or {}).items()
+    }
+
+    aliases = normalized_mapping.get(field, [])
+    for alias in aliases:
+        value = normalized_row.get(alias, '')
+        if value:
+            return value
+    return ''
+
+
+def mapped_course_payload_from_row(row: dict[str, Any], mapping: dict[str, list[str]] | None = None) -> dict[str, str]:
+    normalized_mapping = mapping or get_data_mapping_normalized()
+    prerequisites = mapped_value_from_row(row, 'prerequisites', normalized_mapping)
+    return {
+        'course_number': mapped_value_from_row(row, 'course_number', normalized_mapping),
+        'title': mapped_value_from_row(row, 'title', normalized_mapping),
+        'credits': mapped_value_from_row(row, 'credits', normalized_mapping),
+        'faculty': mapped_value_from_row(row, 'faculty', normalized_mapping),
+        'day_period': mapped_value_from_row(row, 'day_period', normalized_mapping),
+        'semester': mapped_value_from_row(row, 'semester', normalized_mapping),
+        'year': mapped_value_from_row(row, 'year', normalized_mapping),
+        'prerequisite': prerequisites,
+        'prerequisites': prerequisites,
+    }
+
+
+def detected_mapping_fields(headers: list[str], mapping: dict[str, list[str]] | None = None) -> dict[str, str]:
+    normalized_mapping = mapping or get_data_mapping_normalized()
+    normalized_headers = {normalize_column_name(h): str(h or '').strip() for h in (headers or [])}
+    result: dict[str, str] = {}
+    for field, aliases in normalized_mapping.items():
+        for alias in aliases:
+            if alias in normalized_headers:
+                result[field] = normalized_headers[alias]
+                break
+    return result
 
 
 def normalize_dataset_semester(value: Any) -> str:

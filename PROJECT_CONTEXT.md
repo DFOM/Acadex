@@ -7,7 +7,7 @@ Before making ANY code change in this repository:
 1. Read this full file (`PROJECT_CONTEXT.md`).
 2. Confirm current architecture rules and constraints.
 3. Continue from the latest Change Log entry.
-4. Apply updates that are consistent with dynamic dataset resolution and faculty-linking requirements.
+4. Apply updates that are consistent with CSV-driven ingestion and faculty-linking requirements.
 5. Update this file before considering the task complete.
 
 ## Mandatory completion protocol
@@ -30,7 +30,7 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Build/edit schedules (past + future)
   - Use contextual course catalogs by year/semester
   - Enforce prerequisites/conflict checks
-  - Support administrative catalog management, analytics, and scraping ingestion
+  - Support administrative catalog management and CSV ingestion
 
 ---
 
@@ -48,16 +48,17 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - ORM and DB access: SQLAlchemy models in `models.py`
 - Migrations: Alembic under `migrations/`
 - Shared helpers: `utils.py`
-- Domain services: `services/` (conflicts, prereqs, eligibility, scraper, AI)
+- Domain services: `services/` (conflicts, prereqs, eligibility, AI)
 
 ## Database structure (high-level)
 
 - Identity/RBAC: `User`, `Role`, `Permission`, `RegistrationField`, `LoginAttempt`
 - Planning: `Schedule`, `ScheduleCourse`, `SubjectArea`, `Period`
-- Catalog/courses: `Course`, `ScrapedDataset`, `ScrapedCourse`, `DatasetRegistry`, `CatalogStatus`
+- Catalog/courses: `Course`, `DatasetRegistry`, `CatalogStatus`
 - Faculty: `Faculty`, join table `course_faculty`
 - Notifications/events: `Notification`, `AIEvent`, `BehaviorEvent`
 - App settings/content: `Setting`, `Announcement`, `LandingPageSection`
+- Legacy storage retained for cleanup support: `ScrapedDataset`, `ScrapedCourse`
 
 ## Dataset system (dynamic, per year/semester)
 
@@ -67,6 +68,17 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - `utils.resolve_dataset(year, semester, source=None)`
   - Exact match (year+semester) -> same-year `full_year` -> latest available
 - There is NO global active dataset dependency in current architecture.
+
+## CSV mapping system (centralized)
+
+- Mapping source of truth:
+  - `config/data_mapping.py` (`DATA_MAPPING`)
+  - Optional runtime overrides in `Setting(key='data_mapping_json')`
+- Shared mapping helpers in `utils.py`:
+  - `get_data_mapping`, `get_data_mapping_normalized`
+  - `mapped_course_payload_from_row`, `detected_mapping_fields`
+- Rule:
+  - CSV ingestion must use centralized mapping helpers (no route-local hardcoded header aliases).
 
 ## Schedule system (past/future)
 
@@ -82,7 +94,7 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - `extract_faculty_names`
   - `normalize_faculty_name`
   - `sync_course_faculty`
-- No-course-without-faculty is a required ingestion rule for CSV/scraped import paths (rows without faculty are skipped and warned)
+- No-course-without-faculty is a required ingestion rule for CSV import paths (rows without faculty are skipped and warned)
 
 ## Period system (admin-controlled)
 
@@ -106,7 +118,8 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 - Endpoint: admin upload route (`Routes/admin_routes.py`)
 - Workflow:
-  - Parse CSV headers with alias matching (course/faculty/term fields)
+  - Parse CSV headers dynamically
+  - Resolve canonical fields through centralized mapping helpers
   - Infer dataset context from filename/form input/name (`extract_dataset_context`)
   - Normalize semester (`normalize_dataset_semester`) and infer dataset type
   - Upsert or insert `Course` rows (`source='csv'`, `dataset_name`)
@@ -115,15 +128,21 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Upsert corresponding `DatasetRegistry` row with metadata
   - Update `CatalogStatus` for inferred term
 
-## Scraper integration
+## Dataset cleanup and governance
 
-- Service: `services/scraper_service.py`
-- Workflow:
-  - Create `ScrapedDataset`
-  - Persist row-level details in `ScrapedCourse`
-  - On completion: upsert `DatasetRegistry` metadata for scraped dataset
-  - Mirror canonical scraped rows into unified `Course` (`source='scraped'`) for consistent querying
-  - Parse and link faculty via `sync_course_faculty`; log warnings when missing
+- API: `DELETE/POST /admin/api/datasets/<id>/force-delete`
+  - Drops table via `DROP TABLE IF EXISTS ... CASCADE`
+  - Removes matching registry and source rows
+- API: `POST /admin/api/datasets/clean-invalid`
+  - Bulk removes invalid datasets (broken table metadata, empty csv datasets, legacy scraped-source rows)
+- UI: dataset tab includes force delete and clean-invalid actions.
+
+## Mapping management
+
+- API: `GET/POST /admin/api/datasets/mapping`
+  - Read effective mapping / store alias overrides
+- API: `GET /admin/api/datasets/<id>/columns`
+  - Inspect detected columns and current mapped field matches
 
 ## Schedule creation logic
 
@@ -166,10 +185,11 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Dataset management:
   - CSV upload and metadata registration
   - Registry listing with source/year/semester/type/table metadata
-  - Refresh/delete registry entries
+  - Refresh/delete/force-delete registry entries
+  - Bulk clean invalid datasets
   - Orphan table scan/cleanup
-- University scraper control:
-  - start/check/probe/scrape/pause/resume/stop/status/diagnostics
+  - Dataset column inspection
+  - Mapping edit API/UI
 - Course/faculty CRUD and linkage workflows
 - Subject area/period/user/role/registration-field management
 - Analytics + system health dashboards
@@ -190,10 +210,10 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
    - `README.md` still shows earlier beta numbering (Beta 0.2) while active project label is Beta 0.9 in folder naming.
 2. Test invocation environment sensitivity:
    - `pytest` may require `PYTHONPATH=.` for module imports in current local setup.
-3. Legacy naming cleanup opportunity:
-   - Some variable names still use historical “active_dataset_name” wording in old response payload expectations; behavior is contextual, but naming consistency can be improved further where non-breaking.
+3. Legacy data model retention:
+   - `ScrapedDataset` and `ScrapedCourse` models remain for backward compatibility cleanup, but ingestion no longer uses them.
 4. CI workflow maintenance:
-  - Keep branch protection configured to require the `Project Context Guard` workflow so policy checks cannot be bypassed.
+   - Keep branch protection configured to require the `Project Context Guard` workflow so policy checks cannot be bypassed.
 
 ---
 
@@ -201,17 +221,12 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 ## 2026-03-18 — Beta 0.1
 
-- Added scraper-first dataset architecture with canonical scraped fields.
-- Added scraper controls and diagnostics foundation.
-- Added initial system-health administration surface.
-- Files: `services/scraper_service.py`, `Routes/admin_routes.py`, templates, supporting services.
+- Added initial dataset ingestion architecture and admin data management foundations.
 
 ## 2026-03-18 — Beta 0.2
 
-- Migrated remaining route flows from legacy CSV helper dependence to scraper-backed models.
+- Migrated route flows from legacy CSV helper dependence to normalized models.
 - Refactored student schedule editor and admin analytics metadata paths.
-- Removed deprecated legacy CSV table helpers.
-- Files: `Routes/student_routes.py`, `Routes/admin_routes.py`, `utils.py`, templates.
 
 ## 2026-03-23 — Beta 0.9 (Core architecture dataset/faculty refactor)
 
@@ -219,19 +234,8 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Enforced contextual dataset resolution across schedule/catalog flows.
 - Introduced centralized resolver and dataset context parsing helpers.
 - Refactored CSV ingestion to infer year/semester/type and enforce faculty linking.
-- Updated scraper completion to register rich dataset metadata and mirror linked `Course` rows.
 - Added dataset-aware faculty backfill script.
 - Updated admin/student UI labels and messages to contextual dataset language.
-- Files affected:
-  - `utils.py`
-  - `Routes/admin_routes.py`
-  - `Routes/student_routes.py`
-  - `services/scraper_service.py`
-  - `scripts/backfill_faculty_links.py`
-  - `templates/Admin/manage_datasets.html`
-  - `templates/Admin/university_connection.html`
-  - `templates/Admin/admin_health.html`
-  - `templates/Student/courses.html`
 
 ## 2026-03-23 — Beta 0.9 (Project memory & tracking system)
 
@@ -239,19 +243,32 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Added agent startup/completion protocol requiring context updates.
 - Added git pre-commit guard to block code commits without `PROJECT_CONTEXT.md` update.
 - Added githook installer utility for team-wide adoption.
-- Files affected:
-  - `PROJECT_CONTEXT.md`
-  - `.githooks/pre-commit`
-  - `scripts/install-githooks.sh`
 
 ## 2026-03-23 — Beta 0.9 (CI enforcement for project memory policy)
 
 - Added GitHub Actions workflow `Project Context Guard` to enforce `PROJECT_CONTEXT.md` updates on push/PR when code/config/docs change.
-- Implemented diff-range handling for `pull_request`, `push`, and manual workflow runs.
-- Matched policy scope to local pre-commit patterns for consistent local/remote behavior.
+
+## 2026-03-23 — Beta 0.9 (CSV ingestion reset and scraper purge)
+
+- Hard-removed old browser-driven scraping service and all related admin routes/templates.
+- Rebuilt dataset management UI around CSV ingestion and dataset governance actions.
+- Added centralized mapping config in `config/data_mapping.py` and runtime mapping overrides.
+- Refactored CSV upload ingestion path to use centralized mapping helpers only.
+- Added force-delete endpoint and bulk invalid dataset cleanup endpoint.
+- Added dataset column inspection and mapping-edit APIs.
+- Removed selenium dependency from `requirements.txt`.
 - Files affected:
-  - `.github/workflows/project-context-guard.yml`
-  - `PROJECT_CONTEXT.md`
+  - `Routes/admin_routes.py`
+  - `utils.py`
+  - `config/data_mapping.py`
+  - `config/__init__.py`
+  - `templates/Admin/manage_datasets.html`
+  - `templates/Admin/admin_health.html`
+  - `templates/Admin/admin_dashboard.html`
+  - `templates/Layouts/admin_base.html`
+  - `requirements.txt`
+  - removed: `services/scraper_service.py`
+  - removed: `templates/Admin/university_connection.html`
 
 ---
 
@@ -271,26 +288,26 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Keep dataset metadata complete in `DatasetRegistry`.
 - Avoid hardcoded table assumptions in application logic.
 
+## CSV mapping rules (mandatory)
+
+- All CSV field extraction must go through centralized mapping helpers.
+- Do not hardcode CSV header names in routes/services.
+- Mapping edits must flow through `/admin/api/datasets/mapping`.
+
 ## Faculty ingestion rules (mandatory)
 
-- Accept `Instructor` or `Faculty` source values.
+- Accept mapped faculty source values.
 - Split names by comma and conjunctions (`and`), normalize/dedupe.
 - Reuse existing `Faculty` records when possible.
 - Link through `course_faculty` relation via `sync_course_faculty`.
 - If faculty missing on ingestion paths, skip and log warning.
-
-## No-hardcoding rules
-
-- No hardcoded dataset selection.
-- No hardcoded term assumptions when contextual metadata is available.
-- Avoid embedding business rules in templates/JS when backend can enforce.
 
 ## Safe extension checklist
 
 Before extending features:
 
 1. Read `PROJECT_CONTEXT.md` and latest Change Log entries.
-2. Confirm whether change impacts dataset resolution, ingestion, or faculty links.
+2. Confirm whether change impacts dataset resolution, ingestion, mapping, or faculty links.
 3. Update/extend shared utils first if logic is reusable.
 4. Update route/service call sites.
 5. Verify errors/tests.
