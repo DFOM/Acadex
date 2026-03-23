@@ -36,14 +36,14 @@
         <h5 class="mb-0">Upload CSV Dataset</h5>
     </div>
     <div class="card-body">
-        <form method="post" action="{{ url_for('admin.upload_dataset') }}" enctype="multipart/form-data" class="row g-3">
+        <form id="datasetUploadForm" method="post" action="{{ url_for('admin.upload_dataset') }}" enctype="multipart/form-data" class="row g-3">
             <div class="col-md-4">
                 <label class="form-label">CSV File</label>
-                <input type="file" name="dataset_file" accept=".csv" class="form-control">
+                <input id="datasetFileInput" type="file" name="dataset_file" accept=".csv" class="form-control">
             </div>
             <div class="col-md-3">
                 <label class="form-label">Detected Root CSV</label>
-                <select name="detected_csv_file" class="form-select">
+                <select id="detectedRootCsvSelect" name="detected_csv_file" class="form-select">
                     <option value="">None</option>
                     {% for f in root_csv_files %}
                     <option value="{{ f }}">{{ f }}</option>
@@ -58,8 +58,11 @@
                 <label class="form-label">Year</label>
                 <input type="text" name="year" class="form-control" placeholder="2026">
             </div>
-            <div class="col-md-1 d-flex align-items-end">
-                <button type="submit" class="btn btn-success w-100">Ingest</button>
+            <div class="col-md-3 d-flex align-items-end">
+                <div class="btn-group w-100">
+                    <button type="button" id="previewCsvBtn" class="btn btn-outline-primary">Preview CSV</button>
+                    <button type="submit" class="btn btn-success">Ingest</button>
+                </div>
             </div>
             <div class="col-md-6">
                 <label class="form-label">Dataset Name (optional)</label>
@@ -68,6 +71,13 @@
         </form>
         <div class="small text-muted mt-2">
             Mapping-driven ingestion: headers are resolved through configurable DATA_MAPPING aliases.
+        </div>
+        <div id="csvPreviewPanel" class="border rounded p-3 mt-3" style="display:none;">
+            <div class="fw-semibold mb-2">CSV Preview</div>
+            <div id="csvPreviewSummary" class="small mb-2"></div>
+            <div id="csvPreviewColumns" class="small mb-2"></div>
+            <div id="csvPreviewMapped" class="small mb-2"></div>
+            <div id="csvPreviewSample" class="small"></div>
         </div>
     </div>
 </div>
@@ -192,6 +202,12 @@
     const orphanBody = document.getElementById('orphanTableBody');
     const orphanStatus = document.getElementById('orphanStatus');
     const mappingForm = document.getElementById('mappingForm');
+    const datasetUploadForm = document.getElementById('datasetUploadForm');
+    const previewPanel = document.getElementById('csvPreviewPanel');
+    const previewSummary = document.getElementById('csvPreviewSummary');
+    const previewColumns = document.getElementById('csvPreviewColumns');
+    const previewMapped = document.getElementById('csvPreviewMapped');
+    const previewSample = document.getElementById('csvPreviewSample');
 
     function esc(v) {
         return String(v || '')
@@ -300,9 +316,78 @@
         return data;
     }
 
+    function renderCsvPreview(data) {
+        if (!previewPanel || !previewSummary || !previewColumns || !previewMapped || !previewSample) return;
+
+        const columns = Array.isArray(data.columns) ? data.columns : [];
+        const mappedFields = Array.isArray(data.mapped_fields) ? data.mapped_fields : [];
+        const missing = Array.isArray(data.missing_required) ? data.missing_required : [];
+        const samples = Array.isArray(data.sample_rows) ? data.sample_rows : [];
+
+        previewSummary.innerHTML = `
+            <div><strong>Source:</strong> ${esc(data.source_name || 'Unknown')}</div>
+            <div><strong>Missing Required Fields:</strong> ${missing.length ? esc(missing.join(', ')) : 'None'}</div>
+        `;
+        previewColumns.innerHTML = `<strong>Detected Columns:</strong> ${columns.length ? esc(columns.join(', ')) : 'None'}`;
+        previewMapped.innerHTML = `<strong>Mapped Fields:</strong> ${mappedFields.length ? esc(mappedFields.join(', ')) : 'None'}`;
+
+        if (!samples.length) {
+            previewSample.innerHTML = '<strong>Sample Rows:</strong> No rows found.';
+        } else {
+            const rowsHtml = samples.map((row) => {
+                const failed = Array.isArray(row.failed_fields) && row.failed_fields.length
+                    ? row.failed_fields.join(', ')
+                    : 'None';
+                return `
+                    <div class="border rounded p-2 mb-2">
+                        <div><strong>Row ${esc(row.row_index)} Failed Fields:</strong> ${esc(failed)}</div>
+                        <div><strong>Extracted:</strong></div>
+                        <pre class="mb-0">${esc(JSON.stringify(row.extracted || {}, null, 2))}</pre>
+                    </div>
+                `;
+            }).join('');
+            previewSample.innerHTML = `<strong>Sample Rows:</strong><div class="mt-2">${rowsHtml}</div>`;
+        }
+
+        previewPanel.style.display = 'block';
+    }
+
+    async function previewCsv() {
+        if (!(datasetUploadForm instanceof HTMLFormElement)) {
+            throw new Error('Upload form not available.');
+        }
+
+        const formData = new FormData(datasetUploadForm);
+        const fileInput = document.getElementById('datasetFileInput');
+        const rootSelect = document.getElementById('detectedRootCsvSelect');
+        const hasFile = fileInput instanceof HTMLInputElement && fileInput.files && fileInput.files.length > 0;
+        const hasRootCsv = rootSelect instanceof HTMLSelectElement && String(rootSelect.value || '').trim().length > 0;
+
+        if (!hasFile && !hasRootCsv) {
+            throw new Error('Choose a CSV file or detected root CSV before previewing.');
+        }
+
+        const res = await fetch('/admin/api/datasets/preview', {
+            method: 'POST',
+            headers: { 'Accept': 'application/json' },
+            body: formData,
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || 'Preview failed.');
+        renderCsvPreview(data);
+    }
+
     document.getElementById('saveMappingBtn')?.addEventListener('click', async () => {
         try {
             await saveMapping();
+        } catch (err) {
+            alert(String(err));
+        }
+    });
+
+    document.getElementById('previewCsvBtn')?.addEventListener('click', async () => {
+        try {
+            await previewCsv();
         } catch (err) {
             alert(String(err));
         }

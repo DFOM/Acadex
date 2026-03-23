@@ -4,6 +4,7 @@ import re
 import json
 from typing import Any
 from sqlalchemy import func
+from difflib import get_close_matches
 from config.data_mapping import DATA_MAPPING
 
 
@@ -29,7 +30,10 @@ def safe_json_dumps(value) -> str:
 
 
 def normalize_column_name(value: Any) -> str:
-    return re.sub(r'[^a-z0-9]+', '', str(value or '').strip().lower())
+    text = str(value or '').strip().lower()
+    text = text.replace('_', ' ')
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 
 def get_data_mapping() -> dict[str, list[str]]:
@@ -83,6 +87,17 @@ def mapped_value_from_row(row: dict[str, Any], field: str, mapping: dict[str, li
     aliases = normalized_mapping.get(field, [])
     for alias in aliases:
         value = normalized_row.get(alias, '')
+        if value:
+            return value
+
+    available_headers = [h for h in normalized_row.keys() if h]
+    for alias in aliases:
+        if not alias:
+            continue
+        matches = get_close_matches(alias, available_headers, n=1, cutoff=0.88)
+        if not matches:
+            continue
+        value = normalized_row.get(matches[0], '')
         if value:
             return value
     return ''

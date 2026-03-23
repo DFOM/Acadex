@@ -214,6 +214,9 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
    - `ScrapedDataset` and `ScrapedCourse` models remain for backward compatibility cleanup, but ingestion no longer uses them.
 4. CI workflow maintenance:
    - Keep branch protection configured to require the `Project Context Guard` workflow so policy checks cannot be bypassed.
+5. Python 3.14 local runtime compatibility:
+  - SQLAlchemy/Flask stack may require newer SQLAlchemy than historical pin when running full app imports under Python 3.14.
+  - Local validation used an isolated SQLite DB harness to execute admin ingestion handlers directly.
 
 ---
 
@@ -269,6 +272,24 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - `requirements.txt`
   - removed: `services/scraper_service.py`
   - removed: `templates/Admin/university_connection.html`
+
+## 2026-03-23 — Beta 0.9 (CSV parser hardening + diagnostics + preview)
+
+- Hardened CSV header matching with normalized spacing/underscore handling and fuzzy alias fallback in `utils.py`.
+- Expanded central mapping aliases in `config/data_mapping.py` to match observed production-style headers (`Course Number`, `Course Title`, `Course Instructor`, `Day and Period`, `Year Available`, `Subject Area`, `Prerequisites`).
+- Added strict ingestion diagnostics in `Routes/admin_routes.py`:
+  - detected-column logging,
+  - first-5 row raw/extracted field logs,
+  - explicit `FAILED TO EXTRACT` row warnings,
+  - instructor/parsed-faculty sample logs,
+  - ingestion totals log,
+  - fail-fast error when zero valid rows are extracted.
+- Added admin CSV preview endpoint (`/admin/api/datasets/preview`) and dataset-tab preview UI in `templates/Admin/manage_datasets.html`.
+- Real CSV validation run (using `2026_Spring.csv` in isolated SQLite harness) confirmed:
+  - required mappings detected,
+  - no missing required mapping fields,
+  - row-level extraction logs emitted,
+  - ingestion totals emitted (`total_rows_read=118`, `total_courses_updated=107`, warnings for missing `day_period` rows).
 
 ---
 

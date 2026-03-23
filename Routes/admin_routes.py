@@ -64,6 +64,7 @@ ENDPOINT_PERMISSION_MAP = {
     'admin.api_refresh_dataset': 'manage_datasets',
     'admin.api_clean_invalid_datasets': 'manage_datasets',
     'admin.api_dataset_columns': 'manage_datasets',
+    'admin.api_dataset_preview': 'manage_datasets',
     'admin.api_mapping': 'manage_datasets',
     'admin.api_orphan_tables': 'manage_datasets',
     'admin.api_clean_orphan_tables': 'manage_datasets',
@@ -1392,25 +1393,65 @@ def upload_dataset():
     skipped_manual = 0
     skipped_invalid = 0
     skipped_missing_faculty = 0
+    total_rows_read = 0
+    instructor_samples: list[str] = []
+    parsed_faculty_samples: list[list[str]] = []
 
     try:
         if reader is None:
             flash('CSV reader could not be initialized.', 'error')
             return redirect(url_for('admin.manage_datasets'))
 
+        detected_columns = list(reader.fieldnames or [])
+        current_app.logger.info('Detected CSV Columns: %s', [repr(c) for c in detected_columns])
+
         detected = detected_mapping_fields(list(reader.fieldnames or []), mapping_normalized)
         required = {'course_number', 'title', 'faculty', 'day_period'}
         missing_required = sorted([field for field in required if field not in detected])
         if missing_required:
+            current_app.logger.error(
+                'CSV ingestion aborted: missing required mapped fields=%s detected=%s columns=%s',
+                missing_required,
+                detected,
+                [repr(c) for c in detected_columns],
+            )
             flash(f'CSV mapping missing required fields: {", ".join(missing_required)}. Update mapping and retry.', 'error')
             return redirect(url_for('admin.manage_datasets'))
 
-        for raw_row in reader:
+        initial_faculty_count = int(Faculty.query.count() or 0)
+
+        for row_index, raw_row in enumerate(reader, start=1):
+            total_rows_read += 1
+
+            if row_index <= 5:
+                current_app.logger.info('CSV Row %s raw: %s', row_index, raw_row)
+
             course_number = _pick(raw_row, 'course_number')
             title = _pick(raw_row, 'title')
             day_period = _pick(raw_row, 'day_period')
+
+            if row_index <= 5:
+                current_app.logger.info(
+                    'CSV Row %s extracted => course_number=%r title=%r credits=%r faculty=%r day_period=%r semester=%r year=%r prerequisite=%r',
+                    row_index,
+                    course_number,
+                    title,
+                    _pick(raw_row, 'credits'),
+                    _pick(raw_row, 'faculty'),
+                    day_period,
+                    _pick(raw_row, 'semester'),
+                    _pick(raw_row, 'year'),
+                    _pick(raw_row, 'prerequisite'),
+                )
+
             if not course_number or not title or not day_period:
                 skipped_invalid += 1
+                if not course_number:
+                    current_app.logger.warning('FAILED TO EXTRACT: course_number from row %s', row_index)
+                if not title:
+                    current_app.logger.warning('FAILED TO EXTRACT: title from row %s', row_index)
+                if not day_period:
+                    current_app.logger.warning('FAILED TO EXTRACT: day_period from row %s', row_index)
                 continue
 
             credits_raw = _pick(raw_row, 'credits')
@@ -1433,11 +1474,17 @@ def upload_dataset():
             )
 
             faculty_text = _pick(raw_row, 'faculty')
+            if row_index <= 5 and faculty_text:
+                instructor_samples.append(faculty_text)
             parsed_faculty = extract_faculty_names(faculty_text)
+            if row_index <= 5:
+                parsed_faculty_samples.append(parsed_faculty)
+                current_app.logger.info('Parsed Faculty: row=%s parsed=%s', row_index, parsed_faculty)
             if not parsed_faculty:
                 skipped_missing_faculty += 1
                 current_app.logger.warning(
-                    'CSV ingestion skipped row without faculty (dataset=%s, course=%s).',
+                    'FAILED TO EXTRACT: faculty from row %s (dataset=%s, course=%s).',
+                    row_index,
                     dataset_name,
                     course_number,
                 )
@@ -1451,7 +1498,7 @@ def upload_dataset():
                 'semester': semester,
                 'year': year,
                 'prerequisite': _pick(raw_row, 'prerequisite') or None,
-                'subject_area': None,
+                'subject_area': _pick(raw_row, 'subject_area') or None,
                 'faculty': parsed_faculty,
                 'dataset_name': dataset_name or None,
                 'source': 'csv',
@@ -1475,7 +1522,24 @@ def upload_dataset():
                 db.session.add(new_row)
                 inserted += 1
 
+        current_app.logger.info('Instructor column sample: %s', instructor_samples[:5])
+        current_app.logger.info('Parsed Faculty sample: %s', parsed_faculty_samples[:5])
+
+        if (inserted + updated) == 0:
+            raise ValueError('CSV ingestion failed — no valid data extracted')
+
         db.session.commit()
+
+        final_faculty_count = int(Faculty.query.count() or 0)
+        faculty_created = max(0, final_faculty_count - initial_faculty_count)
+
+        current_app.logger.info(
+            'CSV ingestion totals: total_rows_read=%s total_courses_created=%s total_courses_updated=%s total_faculty_created=%s',
+            total_rows_read,
+            inserted,
+            updated,
+            faculty_created,
+        )
 
         _upsert_dataset_registry_entry(
             dataset_name,
@@ -1504,8 +1568,14 @@ def upload_dataset():
             f'Skipped missing faculty: {skipped_missing_faculty}.',
             'success',
         )
+        if skipped_manual or skipped_invalid or skipped_missing_faculty:
+            flash(
+                f'Warnings: skipped_manual={skipped_manual}, skipped_invalid={skipped_invalid}, skipped_missing_faculty={skipped_missing_faculty}. Check server logs for row-level details.',
+                'warning',
+            )
     except Exception as exc:
         db.session.rollback()
+        current_app.logger.error('CSV ingestion failed: %s', exc, exc_info=True)
         flash(f'CSV upload failed: {exc}', 'error')
     finally:
         if root_stream:
@@ -1701,6 +1771,99 @@ def api_dataset_columns(dataset_id: int):
     headers = _dataset_column_preview(str(row.name or ''), str(row.source or ''))
     mapped = detected_mapping_fields(headers, get_data_mapping_normalized())
     return jsonify({'success': True, 'dataset_id': dataset_id, 'columns': headers, 'mapped_fields': mapped})
+
+
+@admin_bp.route('/api/datasets/preview', methods=['POST'])
+@login_required
+@admin_required
+def api_dataset_preview():
+    mapping_normalized = get_data_mapping_normalized()
+    file = request.files.get('file') or request.files.get('dataset_file')
+    selected_root_csv = str(request.form.get('detected_csv_file') or '').strip()
+    root_stream = None
+
+    reader = None
+    source_name = ''
+
+    try:
+        if file and str(file.filename or '').strip():
+            source_name = str(file.filename or '').strip()
+            if not source_name.lower().endswith('.csv'):
+                return jsonify({'success': False, 'message': 'Only CSV uploads are supported.'}), 400
+            reader = csv.DictReader(TextIOWrapper(file.stream, encoding='utf-8-sig', newline=''))
+        elif selected_root_csv:
+            allowed = set(_available_root_csv_files())
+            if selected_root_csv not in allowed:
+                return jsonify({'success': False, 'message': 'Selected root CSV is invalid or no longer available.'}), 400
+            source_name = selected_root_csv
+            root_path = os.path.join(_project_root(), selected_root_csv)
+            root_stream = open(root_path, 'r', encoding='utf-8-sig', newline='')
+            reader = csv.DictReader(root_stream)
+        else:
+            return jsonify({'success': False, 'message': 'Choose a CSV file or a detected root CSV first.'}), 400
+
+        if reader is None:
+            return jsonify({'success': False, 'message': 'CSV reader could not be initialized.'}), 400
+
+        columns = list(reader.fieldnames or [])
+        mapped_fields = detected_mapping_fields(columns, mapping_normalized)
+        required = {'course_number', 'title', 'faculty', 'day_period'}
+        missing_required = sorted([field for field in required if field not in mapped_fields])
+
+        sample_rows: list[dict] = []
+        preview_fields = [
+            'course_number',
+            'title',
+            'credits',
+            'faculty',
+            'day_period',
+            'semester',
+            'year',
+            'prerequisite',
+            'subject_area',
+        ]
+
+        for row_index, raw_row in enumerate(reader, start=1):
+            if row_index > 5:
+                break
+
+            payload = mapped_course_payload_from_row(raw_row or {}, mapping_normalized)
+            extracted = {field: str(payload.get(field) or '').strip() for field in preview_fields}
+            parsed_faculty = extract_faculty_names(extracted.get('faculty'))
+
+            failed_fields = [field for field in ['course_number', 'title', 'day_period'] if not extracted.get(field)]
+            if not parsed_faculty:
+                failed_fields.append('faculty')
+
+            sample_rows.append(
+                {
+                    'row_index': row_index,
+                    'raw': {str(k): str(v or '') for k, v in (raw_row or {}).items()},
+                    'extracted': extracted,
+                    'parsed_faculty': parsed_faculty,
+                    'failed_fields': failed_fields,
+                }
+            )
+
+        return jsonify(
+            {
+                'success': True,
+                'source_name': source_name,
+                'columns': columns,
+                'mapped_fields': mapped_fields,
+                'missing_required': missing_required,
+                'sample_rows': sample_rows,
+            }
+        )
+    except Exception as exc:
+        current_app.logger.error('CSV preview failed: %s', exc, exc_info=True)
+        return jsonify({'success': False, 'message': f'Preview failed: {exc}'}), 500
+    finally:
+        if root_stream:
+            try:
+                root_stream.close()
+            except Exception:
+                pass
 
 
 @admin_bp.route('/api/datasets/mapping', methods=['GET', 'POST'])
