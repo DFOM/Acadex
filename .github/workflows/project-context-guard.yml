@@ -1,0 +1,81 @@
+name: Project Context Guard
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+jobs:
+  enforce-project-context:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate PROJECT_CONTEXT.md update policy
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          event_name="${{ github.event_name }}"
+          base_sha=""
+          head_sha=""
+
+          if [[ "$event_name" == "pull_request" ]]; then
+            base_sha="${{ github.event.pull_request.base.sha }}"
+            head_sha="${{ github.event.pull_request.head.sha }}"
+          elif [[ "$event_name" == "push" ]]; then
+            base_sha="${{ github.event.before }}"
+            head_sha="${{ github.sha }}"
+          else
+            echo "Workflow dispatch: comparing HEAD^..HEAD"
+            base_sha="$(git rev-parse HEAD^)"
+            head_sha="$(git rev-parse HEAD)"
+          fi
+
+          if [[ -z "$head_sha" ]]; then
+            head_sha="$(git rev-parse HEAD)"
+          fi
+
+          if [[ -z "$base_sha" || "$base_sha" == "0000000000000000000000000000000000000000" ]]; then
+            changed_files="$(git diff-tree --no-commit-id --name-only -r "$head_sha")"
+          else
+            changed_files="$(git diff --name-only "$base_sha" "$head_sha")"
+          fi
+
+          if [[ -z "${changed_files}" ]]; then
+            echo "No changed files detected."
+            exit 0
+          fi
+
+          echo "Changed files:"
+          echo "${changed_files}"
+
+          requires_context=false
+          has_project_context=false
+
+          while IFS= read -r path; do
+            [[ -z "${path}" ]] && continue
+
+            if [[ "${path}" == "PROJECT_CONTEXT.md" ]]; then
+              has_project_context=true
+              continue
+            fi
+
+            case "${path}" in
+              *.py|*.js|*.ts|*.tsx|*.jsx|*.html|*.css|*.scss|*.sql|*.sh|*.yml|*.yaml|*.toml|*.ini|*.env|Dockerfile|Procfile|requirements.txt|README.md|SECURITY_AUDIT.md|migrations/*|Routes/*|services/*|templates/*|static/*|scripts/*)
+                requires_context=true
+                ;;
+              *)
+                ;;
+            esac
+          done <<< "${changed_files}"
+
+          if [[ "${requires_context}" == "true" && "${has_project_context}" != "true" ]]; then
+            echo "❌ CI blocked: code/config/docs changes require PROJECT_CONTEXT.md update in the same PR/push."
+            exit 1
+          fi
+
+          echo "✅ PROJECT_CONTEXT policy check passed."

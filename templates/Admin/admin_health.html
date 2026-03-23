@@ -194,10 +194,10 @@
 
         const checks = Array.isArray(data?.checks) ? data.checks : [];
         const status = String(data?.summary?.status || 'ok').toLowerCase();
-        const activeDataset = data?.summary?.active_dataset_name || 'not set';
+        const datasetCount = Array.isArray(data?.summary?.selectable_dataset_names) ? data.summary.selectable_dataset_names.length : 0;
         const localCount = Number(data?.summary?.local_course_count || 0);
         const scrapedCount = Number(data?.summary?.scraped_course_count || 0);
-        summary.innerHTML = `${statusBadge(status)} Active dataset: <strong>${escapeHtml(activeDataset)}</strong> · Local: ${localCount} · Scraped: ${scrapedCount}`;
+        summary.innerHTML = `${statusBadge(status)} Registered datasets: <strong>${datasetCount}</strong> · Local: ${localCount} · Scraped: ${scrapedCount}`;
 
         if (!checks.length) {
             body.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No checks returned.</td></tr>';

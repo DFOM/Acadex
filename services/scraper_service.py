@@ -1410,7 +1410,8 @@ def _worker(
 
         # ── Completion ──
         with flask_app.app_context():
-            from models import db, ScrapedDataset, CatalogStatus, Notification, Setting, DatasetRegistry
+            from models import db, ScrapedDataset, ScrapedCourse, Course, CatalogStatus, Notification, DatasetRegistry
+            from utils import extract_dataset_context, normalize_dataset_semester, infer_dataset_type, sync_course_faculty
 
             ds = db.session.get(ScrapedDataset, dataset_id)
             if ds:
@@ -1419,25 +1420,78 @@ def _worker(
                 db.session.commit()
 
                 try:
+                    inferred_year, inferred_semester, inferred_type = extract_dataset_context(ds.name, ds.year, ds.semester)
+                    ds_year = str(ds.year or '').strip() or inferred_year or None
+                    ds_semester = normalize_dataset_semester(ds.semester or inferred_semester or '') or None
+
                     reg = DatasetRegistry.query.filter_by(name=str(ds.name or '').strip(), source='scraped').order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
                     table_name = f"scraped_dataset_{ds.id}"
                     if not reg:
-                        reg = DatasetRegistry(name=ds.name, source='scraped', table_name=table_name)
+                        reg = DatasetRegistry(
+                            name=ds.name,
+                            source='scraped',
+                            year=ds_year,
+                            semester=ds_semester,
+                            dataset_type=inferred_type or infer_dataset_type(ds_semester),
+                            table_name=table_name,
+                        )
                         db.session.add(reg)
                     else:
+                        reg.year = ds_year
+                        reg.semester = ds_semester
+                        reg.dataset_type = inferred_type or infer_dataset_type(ds_semester)
                         reg.table_name = table_name
 
-                    active_exists = DatasetRegistry.query.filter(DatasetRegistry.is_active.is_(True)).first()
-                    if not active_exists:
-                        DatasetRegistry.query.update({'is_active': False})
-                        reg.is_active = True
+                    scraped_rows = ScrapedCourse.query.filter_by(dataset_id=ds.id).all()
+                    for sc in scraped_rows:
+                        course_number = str(sc.course_number or '').strip()
+                        title = str(sc.course_title or '').strip()
+                        day_period = str(sc.day_and_period or '').strip()
+                        if not course_number or not title or not day_period:
+                            continue
 
-                    setting = Setting.query.get('active_dataset_name')
-                    if not setting:
-                        setting = Setting(key='active_dataset_name', value=str(ds.name or '').strip())
-                        db.session.add(setting)
-                    elif not str(setting.value or '').strip():
-                        setting.value = str(ds.name or '').strip()
+                        existing = (
+                            Course.query.filter(
+                                Course.source == 'scraped',
+                                db.func.lower(db.func.coalesce(Course.dataset_name, '')) == str(ds.name or '').strip().lower(),
+                                db.func.lower(db.func.coalesce(Course.course_number, '')) == course_number.lower(),
+                                db.func.lower(db.func.coalesce(Course.day_period, '')) == day_period.lower(),
+                            )
+                            .order_by(Course.last_updated.desc(), Course.id.desc())
+                            .first()
+                        )
+
+                        if existing is None:
+                            existing = Course(
+                                source='scraped',
+                                dataset_name=str(ds.name or '').strip() or None,
+                                course_number=course_number,
+                                title=title,
+                                credits=sc.credits,
+                                day_period=day_period,
+                                semester=ds_semester,
+                                year=ds_year,
+                                prerequisite=str(sc.prerequisite or '').strip() or None,
+                                subject_area=str(sc.area_of_study or '').strip() or None,
+                            )
+                            db.session.add(existing)
+                        else:
+                            existing.title = title
+                            existing.credits = sc.credits
+                            existing.semester = ds_semester
+                            existing.year = ds_year
+                            existing.prerequisite = str(sc.prerequisite or '').strip() or None
+                            existing.subject_area = str(sc.area_of_study or '').strip() or None
+
+                        names = sync_course_faculty(existing, sc.instructor)
+                        if not names:
+                            flask_app.logger.warning(
+                                'Scraped ingestion missing faculty for dataset=%s course=%s',
+                                ds.name,
+                                course_number,
+                            )
+                        else:
+                            existing.instructor = '; '.join(names)
 
                     db.session.commit()
                 except Exception:

@@ -15,6 +15,9 @@ from utils import (
     get_available_dataset_years,
     calculate_gpa,
     format_display_course_number,
+    resolve_dataset,
+    resolve_dataset_name,
+    normalize_dataset_semester,
 )
 from services.eligibility import normalize_course_code_for_prereqs
 from services.conflicts import parse_day_period_blocks, has_conflict
@@ -63,7 +66,7 @@ def get_float_setting(key: str, default: float = 0.0) -> float:
 
 def _dataset_registry_supported() -> bool:
     try:
-        DatasetRegistry.query.limit(1).all()
+        resolve_dataset('', '')
         return True
     except Exception:
         db.session.rollback()
@@ -75,56 +78,20 @@ def _normalize_year_text(value: Any) -> str:
 
 
 def _normalize_semester_text(value: Any) -> str:
-    return str(value or '').strip().lower()
+    return normalize_dataset_semester(value)
 
 
 def _is_full_year_semester(value: Any) -> bool:
     sem = _normalize_semester_text(value)
-    return sem in {'full', 'fullyear', 'full_year', 'year', 'annual', 'all'}
+    return sem == 'full_year'
 
 
 def _resolve_registry_entry_for_context(year: Any, semester: Any, *, source: str | None = None) -> DatasetRegistry | None:
-    if not _dataset_registry_supported():
-        return None
-
-    year_text = _normalize_year_text(year)
-    sem_text = _normalize_semester_text(semester)
-    source_text = str(source or '').strip().lower()
-
-    query = DatasetRegistry.query
-    if source_text:
-        query = query.filter(func.lower(func.coalesce(DatasetRegistry.source, '')) == source_text)
-
-    if year_text and sem_text:
-        exact = (
-            query.filter(
-                func.lower(func.coalesce(DatasetRegistry.year, '')) == year_text,
-                func.lower(func.coalesce(DatasetRegistry.semester, '')) == sem_text,
-            )
-            .order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc())
-            .first()
-        )
-        if exact:
-            return exact
-
-    if year_text:
-        full_year = (
-            query.filter(
-                func.lower(func.coalesce(DatasetRegistry.year, '')) == year_text,
-                func.lower(func.coalesce(DatasetRegistry.dataset_type, 'term')) == 'full_year',
-            )
-            .order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc())
-            .first()
-        )
-        if full_year:
-            return full_year
-
-    return query.order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
+    return resolve_dataset(year, semester, source=source)
 
 
 def _resolve_contextual_dataset_name(year: Any, semester: Any, *, source: str | None = None) -> str:
-    row = _resolve_registry_entry_for_context(year, semester, source=source)
-    return str(getattr(row, 'name', '') or '').strip()
+    return resolve_dataset_name(year, semester, source=source)
 
 
 def _humanize_day_and_period(value: Any) -> str:
@@ -154,37 +121,6 @@ def _normalize_instructor(value: Any) -> str:
     if not instructor or instructor.lower() in {'tba', 'n/a', 'na', 'none'}:
         return ''
     return instructor
-
-
-def _resolve_active_dataset_name() -> str:
-    setting_name = str(get_str_setting('active_dataset_name', '') or '').strip()
-
-    if _dataset_registry_supported():
-        row = DatasetRegistry.query.filter(DatasetRegistry.is_active.is_(True)).order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
-        if row and row.name:
-            if not setting_name:
-                try:
-                    setting = Setting.query.get('active_dataset_name')
-                    if not setting:
-                        setting = Setting(key='active_dataset_name', value=row.name)
-                        db.session.add(setting)
-                    else:
-                        setting.value = row.name
-                    db.session.commit()
-                except Exception:
-                    db.session.rollback()
-            return str(row.name).strip()
-
-        if setting_name:
-            match = DatasetRegistry.query.filter(func.lower(DatasetRegistry.name) == setting_name.lower()).order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
-            if match:
-                return str(match.name or '').strip()
-
-        latest = DatasetRegistry.query.order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
-        if latest and latest.name:
-            return str(latest.name).strip()
-
-    return setting_name
 
 
 def should_collect_ai_events() -> bool:
@@ -677,9 +613,9 @@ def _build_learning_signals(
 
 def _dataset_for_term(year: Any, semester: Any) -> ScrapedDataset | None:
     year_text = str(year or '').strip()
-    sem_text = str(semester or '').strip().lower()
+    sem_text = normalize_dataset_semester(semester)
 
-    registry_row = _resolve_registry_entry_for_context(year_text, sem_text, source='scraped')
+    registry_row = resolve_dataset(year_text, sem_text, source='scraped')
     if registry_row and registry_row.name:
         by_registry = (
             ScrapedDataset.query.filter(
@@ -711,7 +647,7 @@ def _dataset_for_term(year: Any, semester: Any) -> ScrapedDataset | None:
                 ScrapedDataset.status == 'completed',
                 func.lower(func.coalesce(ScrapedDataset.year, '')) == year_text.lower(),
             )
-            .filter(func.lower(func.coalesce(ScrapedDataset.semester, '')).in_(['full', 'fullyear', 'full_year', 'year', 'annual', 'all']))
+            .filter(func.lower(func.coalesce(ScrapedDataset.semester, '')).in_(['full', 'fullyear', 'full_year', 'full-year', 'full year', 'year', 'annual', 'all']))
             .order_by(ScrapedDataset.created_at.desc(), ScrapedDataset.id.desc())
             .first()
         )
@@ -767,8 +703,9 @@ def _scraped_course_to_catalog_row(sc: ScrapedCourse) -> Dict[str, Any]:
 
 def _load_scraped_catalog_for_term(year: Any, semester: Any) -> tuple[list[Dict[str, Any]], int | None]:
     year_text = str(year or '').strip()
-    sem_text = str(semester or '').strip().lower()
-    contextual_dataset_name = _resolve_contextual_dataset_name(year_text, sem_text)
+    sem_text = normalize_dataset_semester(semester)
+    contextual_dataset = resolve_dataset(year_text, sem_text)
+    contextual_dataset_name = str(getattr(contextual_dataset, 'name', '') or '').strip()
 
     local_query = Course.query
     if contextual_dataset_name:
@@ -1445,13 +1382,13 @@ def api_course_detail():
 
     if sched:
         catalog_rows, dataset_id = _load_scraped_catalog_for_term(sched.year, sched.semester)
-        active_dataset_name = _resolve_contextual_dataset_name(sched.year, sched.semester)
+        resolved_dataset_name = _resolve_contextual_dataset_name(sched.year, sched.semester)
     else:
         catalog_rows, dataset_id = _load_scraped_catalog_for_term('', '')
-        active_dataset_name = _resolve_contextual_dataset_name('', '')
+        resolved_dataset_name = _resolve_contextual_dataset_name('', '')
 
     if not catalog_rows:
-        return jsonify({'success': False, 'message': 'Course catalog unavailable for this schedule context.'}), 404
+        return jsonify({'success': False, 'message': 'No course data available for selected year/semester'}), 404
 
     normalized_target_code = _normalize_course_number(course_number_raw)
     matches = [
@@ -1493,7 +1430,7 @@ def api_course_detail():
         {
             'success': True,
             'dataset_id': dataset_id,
-            'active_dataset_name': active_dataset_name or None,
+            'resolved_dataset_name': resolved_dataset_name or None,
             'course': {
                 'course_number': target_row.get('Course_Number'),
                 'display_course_number': target_row.get('display_course_number'),
@@ -1515,7 +1452,7 @@ def api_course_detail():
 @student_bp.route('/courses')
 @login_required
 def courses_view():
-    active_dataset_name = _resolve_contextual_dataset_name('', '')
+    resolved_dataset_name = _resolve_contextual_dataset_name('', '')
     catalog_rows, _dataset_id = _load_scraped_catalog_for_term('', '')
     rows = [_add_display_fields(dict(r)) for r in catalog_rows]
 
@@ -1564,7 +1501,7 @@ def courses_view():
 
     return render_template(
         'Student/courses.html',
-        active_dataset_name=active_dataset_name,
+        resolved_dataset_name=resolved_dataset_name,
         courses=filtered_rows,
         year_options=year_options,
         semester_options=semester_options,
@@ -2019,8 +1956,9 @@ def create_schedule():
                 else url_for('student.create_schedule', schedule_type='future')
             )
 
-        if year_int not in dataset_years:
-            flash("Selected year is not available in uploaded course datasets.", "error")
+        resolved_dataset = resolve_dataset(year_int, semester)
+        if resolved_dataset is None:
+            flash("No course data available for selected year/semester", "error")
             return redirect(
                 url_for('student.user_dashboard')
                 if current_user.is_authenticated
@@ -2267,7 +2205,7 @@ def api_recommendations_preview():
             'ai_preview_blocked',
             metadata={'year': year, 'semester': semester, 'reason': 'catalog_unavailable'},
         )
-        return jsonify({'success': False, 'message': 'Catalog unavailable for selected term.'}), 400
+        return jsonify({'success': False, 'message': 'No course data available for selected year/semester'}), 400
 
     progress = _degree_progress_context(current_user.id)
     area_names = _resolve_user_area_names()
@@ -2461,7 +2399,7 @@ def add_course():
                 {
                     'success': False,
                     'error': 'Unable to validate prerequisites',
-                    'message': 'Course catalog unavailable; cannot validate prerequisites.'
+                    'message': 'No course data available for selected year/semester'
                 }
             ),
             400,
@@ -2769,7 +2707,7 @@ def api_recommendations():
     catalog, table_name = _load_catalog_for_term(sched.year, sched.semester)
     if not table_name:
         log_ai_event_safe('ai_recommendations_blocked', schedule_id=sched.id, metadata={'reason': 'catalog_unavailable'})
-        return jsonify({'success': False, 'error': 'Catalog unavailable', 'message': 'Catalog unavailable'}), 400
+        return jsonify({'success': False, 'error': 'Catalog unavailable', 'message': 'No course data available for selected year/semester'}), 400
 
     progress = _degree_progress_context(current_user.id)
     area_names = _resolve_user_area_names()
@@ -2898,7 +2836,7 @@ def api_generate_schedule():
 
     catalog, dataset_name = _load_catalog_for_term(sched.year, sched.semester)
     if not dataset_name or not catalog:
-        return jsonify({'success': False, 'error': 'Catalog unavailable', 'message': 'Catalog unavailable'}), 400
+        return jsonify({'success': False, 'error': 'Catalog unavailable', 'message': 'No course data available for selected year/semester'}), 400
 
     completed_passing = []
     if current_user.is_authenticated:

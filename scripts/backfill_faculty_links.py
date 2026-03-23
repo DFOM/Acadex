@@ -1,87 +1,64 @@
-import re
-
 from app import app
-from models import db, Course, Faculty
-
-
-def _normalize_faculty_name(name: str) -> str:
-    cleaned = re.sub(r'\s+', ' ', str(name or '').strip())
-    cleaned = re.sub(r'^(dr|prof|professor|mr|ms|mrs)\.?\s+', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'\s+,', ',', cleaned)
-    cleaned = cleaned.strip(' -;|/')
-    return cleaned
-
-
-def _extract_faculty_names(raw_value: str | None) -> list[str]:
-    text = str(raw_value or '').strip()
-    if not text:
-        return []
-
-    placeholder = {'tba', 'tbd', 'staff', 'n/a', 'na', 'none', 'unknown'}
-    if text.lower() in placeholder:
-        return []
-
-    parts = re.split(r'\s*(?:;|\||/|&|\band\b)\s*', text, flags=re.IGNORECASE)
-    names: list[str] = []
-    seen: set[str] = set()
-    for part in parts:
-        name = _normalize_faculty_name(part)
-        if not name:
-            continue
-        key = name.lower()
-        if key in placeholder or key in seen:
-            continue
-        seen.add(key)
-        names.append(name)
-    return names
-
-
-def _get_or_create_faculty(name: str, cache: dict[str, Faculty]) -> Faculty:
-    key = name.lower()
-    existing = cache.get(key)
-    if existing:
-        return existing
-
-    row = Faculty.query.filter(db.func.lower(Faculty.name) == key).first()
-    if not row:
-        row = Faculty()
-        row.name = name
-        db.session.add(row)
-        db.session.flush()
-    cache[key] = row
-    return row
+from models import db, Course, DatasetRegistry
+from utils import sync_course_faculty
 
 
 def main() -> None:
     with app.app_context():
-        cache: dict[str, Faculty] = {}
         updated_courses = 0
-        created_faculty = 0
+        missing_faculty = 0
+        dataset_count = 0
 
+        dataset_rows = DatasetRegistry.query.order_by(DatasetRegistry.created_at.asc(), DatasetRegistry.id.asc()).all()
+        for dataset in dataset_rows:
+            dataset_count += 1
+            dataset_name = str(getattr(dataset, 'name', '') or '').strip()
+            source = str(getattr(dataset, 'source', '') or '').strip().lower()
+            if not dataset_name:
+                continue
+
+            query = Course.query.filter(db.func.lower(db.func.coalesce(Course.dataset_name, '')) == dataset_name.lower())
+            if source:
+                query = query.filter(db.func.lower(db.func.coalesce(Course.source, '')) == source)
+
+            for course in query.order_by(Course.id.asc()).all():
+                before = len(course.faculty or [])
+                names = sync_course_faculty(course, course.instructor)
+                after = len(course.faculty or [])
+                if after != before:
+                    updated_courses += 1
+                if not names:
+                    missing_faculty += 1
+                    print(f"WARN: Missing faculty for dataset={dataset_name} course_id={course.id} course={course.course_number}")
+                else:
+                    course.instructor = '; '.join(names)
+
+        # Fallback pass for rows not tied to registry entries.
+        known_ids = {
+            c.id
+            for c in Course.query.filter(Course.dataset_name.isnot(None)).all()
+        }
         for course in Course.query.order_by(Course.id.asc()).all():
-            if course.faculty:
-                for person in course.faculty:
-                    cache[(person.name or '').strip().lower()] = person
+            if course.id in known_ids:
                 continue
-
-            parsed_names = _extract_faculty_names(course.instructor)
-            if not parsed_names:
-                continue
-
-            linked_rows: list[Faculty] = []
-            for name in parsed_names:
-                before_count = len(cache)
-                row = _get_or_create_faculty(name, cache)
-                linked_rows.append(row)
-                if len(cache) > before_count:
-                    created_faculty += 1
-
-            course.faculty = linked_rows
-            course.instructor = '; '.join(parsed_names)
-            updated_courses += 1
+            before = len(course.faculty or [])
+            names = sync_course_faculty(course, course.instructor)
+            after = len(course.faculty or [])
+            if after != before:
+                updated_courses += 1
+            if not names:
+                missing_faculty += 1
+                print(f"WARN: Missing faculty for unregistered course_id={course.id} course={course.course_number}")
+            else:
+                course.instructor = '; '.join(names)
 
         db.session.commit()
-        print(f"Backfill complete. Courses updated: {updated_courses}, faculty created: {created_faculty}")
+        print(
+            "Backfill complete. "
+            f"Datasets processed: {dataset_count}, "
+            f"courses updated: {updated_courses}, "
+            f"courses missing faculty: {missing_faculty}"
+        )
 
 
 if __name__ == '__main__':

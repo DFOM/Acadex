@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Enforce project memory updates for code-changing commits.
+
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  exit 0
+fi
+
+staged_files="$(git diff --cached --name-only --diff-filter=ACMRT)"
+
+if [[ -z "${staged_files}" ]]; then
+  exit 0
+fi
+
+# Exclude files that don't represent code/config/docs changes requiring context update.
+requires_context=false
+while IFS= read -r path; do
+  [[ -z "${path}" ]] && continue
+
+  case "${path}" in
+    PROJECT_CONTEXT.md)
+      ;;
+    *.py|*.js|*.ts|*.tsx|*.jsx|*.html|*.css|*.scss|*.sql|*.sh|*.yml|*.yaml|*.toml|*.ini|*.env|Dockerfile|Procfile|requirements.txt|README.md|SECURITY_AUDIT.md|migrations/*|Routes/*|services/*|templates/*|static/*|scripts/*)
+      requires_context=true
+      ;;
+    *)
+      ;;
+  esac
+
+done <<< "${staged_files}"
+
+if [[ "${requires_context}" != true ]]; then
+  exit 0
+fi
+
+if ! grep -qx 'PROJECT_CONTEXT.md' <<< "${staged_files}"; then
+  echo "❌ Commit blocked: staged code/config/docs changes require PROJECT_CONTEXT.md update."
+  echo "   Add your memory/update notes, then stage PROJECT_CONTEXT.md and retry."
+  exit 1
+fi
+
+exit 0

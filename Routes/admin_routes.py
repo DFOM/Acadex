@@ -17,6 +17,14 @@ from utils import (
     ensure_default_landing_sections,
     safe_json_loads,
     safe_json_dumps,
+    resolve_dataset,
+    resolve_dataset_name,
+    extract_dataset_context,
+    infer_dataset_type,
+    normalize_dataset_semester,
+    extract_faculty_names,
+    normalize_faculty_name,
+    sync_course_faculty,
 )
 from flask import Response
 import json
@@ -46,10 +54,8 @@ admin_bp = Blueprint('admin', __name__)
 ENDPOINT_PERMISSION_MAP = {
     'admin.manage_datasets': 'manage_datasets',
     'admin.upload_dataset': 'manage_datasets',
-    'admin.set_active_dataset': 'manage_datasets',
     'admin.delete_dataset': 'manage_datasets',
     'admin.api_datasets': 'manage_datasets',
-    'admin.api_activate_dataset': 'manage_datasets',
     'admin.api_delete_dataset': 'manage_datasets',
     'admin.api_refresh_dataset': 'manage_datasets',
     'admin.api_orphan_tables': 'manage_datasets',
@@ -291,35 +297,11 @@ def _faculty_name_key(name: str) -> str:
 
 
 def _normalize_faculty_name(name: str) -> str:
-    cleaned = re.sub(r'\s+', ' ', str(name or '').strip())
-    cleaned = re.sub(r'^(dr|prof|professor|mr|ms|mrs)\.?\s+', '', cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r'\s+,', ',', cleaned)
-    cleaned = cleaned.strip(' -;|/')
-    return cleaned
+    return normalize_faculty_name(name)
 
 
 def _extract_faculty_names(raw_faculty: str | None) -> list[str]:
-    text = str(raw_faculty or '').strip()
-    if not text:
-        return []
-
-    placeholder = {'tba', 'tbd', 'staff', 'n/a', 'na', 'none', 'unknown'}
-    if _faculty_name_key(text) in placeholder:
-        return []
-
-    parts = re.split(r'\s*(?:;|\||/|&|\band\b)\s*', text, flags=re.IGNORECASE)
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for part in parts:
-        name = _normalize_faculty_name(part)
-        if not name:
-            continue
-        key = _faculty_name_key(name)
-        if not key or key in placeholder or key in seen:
-            continue
-        seen.add(key)
-        normalized.append(name)
-    return normalized
+    return extract_faculty_names(raw_faculty)
 
 
 def _extract_faculty_names_from_payload(payload: dict | None = None, *, fallback_text: str | None = None) -> list[str]:
@@ -355,30 +337,12 @@ def _extract_faculty_names_from_payload(payload: dict | None = None, *, fallback
 
 
 def _sync_course_faculty_from_names(course: Course, faculty_names: list[str] | None) -> None:
-    names = [n for n in (faculty_names or []) if str(n or '').strip()]
-    if names:
-        existing_rows = Faculty.query.filter(sa.func.lower(Faculty.name).in_([n.lower() for n in names])).all()
-        existing_map = {_faculty_name_key(r.name): r for r in existing_rows}
-        synced_rows: list[Faculty] = []
-        for name in names:
-            key = _faculty_name_key(name)
-            row = existing_map.get(key)
-            if not row:
-                row = Faculty(name=name)
-                db.session.add(row)
-                existing_map[key] = row
-            synced_rows.append(row)
-        course.faculty = synced_rows
-        course.instructor = '; '.join(names)
-        return
-
-    course.faculty = []
+    sync_course_faculty(course, faculty_names)
 
 
 def _sync_course_faculty_from_payload(course: Course, payload: dict | None = None, *, fallback_text: str | None = None) -> list[str]:
     names = _extract_faculty_names_from_payload(payload, fallback_text=fallback_text)
-    _sync_course_faculty_from_names(course, names)
-    return names
+    return sync_course_faculty(course, names, fallback_text=fallback_text)
 
 
 def _parse_course_ref(course_ref: str) -> tuple[str, int] | None:
@@ -456,8 +420,6 @@ def _serialize_scraped_course(row: ScrapedCourse) -> dict:
 
 
 def _merged_courses_for_admin() -> list[dict]:
-    active_dataset_name = str(get_app_setting('active_dataset_name', '') or '').strip().lower()
-
     local_rows = Course.query.order_by(Course.last_updated.desc(), Course.id.desc()).all()
     candidates: list[dict] = [_serialize_local_course(r) for r in local_rows]
 
@@ -489,14 +451,6 @@ def _merged_courses_for_admin() -> list[dict]:
             winner_by_key[key] = row
             continue
         if left_rank < right_rank:
-            continue
-
-        left_active = 1 if active_dataset_name and str(row.get('dataset_name') or '').strip().lower() == active_dataset_name else 0
-        right_active = 1 if active_dataset_name and str(existing.get('dataset_name') or '').strip().lower() == active_dataset_name else 0
-        if left_active > right_active:
-            winner_by_key[key] = row
-            continue
-        if left_active < right_active:
             continue
 
         left_ts = _course_sort_ts(
@@ -582,45 +536,22 @@ def _dataset_table_name_from_name(name: str, source: str) -> str:
 
 
 def _infer_dataset_type(semester: str | None) -> str:
-    sem = str(semester or '').strip().lower()
-    if sem in {'full', 'fullyear', 'full_year', 'year', 'annual', 'all'}:
-        return 'full_year'
-    return 'term'
+    return infer_dataset_type(semester)
 
 
 def _set_active_registry_dataset(dataset_name: str | None) -> None:
-    if not _dataset_registry_supported():
-        update_app_setting('active_dataset_name', str(dataset_name or '').strip())
-        return
-
-    name = str(dataset_name or '').strip()
-    DatasetRegistry.query.update({'is_active': False})
-    if name:
-        row = DatasetRegistry.query.filter(sa.func.lower(DatasetRegistry.name) == name.lower()).order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
-        if row:
-            row.is_active = True
-            name = row.name
-        else:
-            name = ''
-    update_app_setting('active_dataset_name', name)
-    db.session.commit()
+    return None
 
 
 def _active_registry_row() -> DatasetRegistry | None:
     if not _dataset_registry_supported():
         return None
-    row = DatasetRegistry.query.filter(DatasetRegistry.is_active.is_(True)).order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
-    if row:
-        return row
     return DatasetRegistry.query.order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
 
 
-def _resolve_effective_active_dataset_name() -> str:
-    setting_name = str(get_app_setting('active_dataset_name', '') or '').strip()
-    if setting_name:
-        return setting_name
-    active_row = _active_registry_row()
-    return str(active_row.name).strip() if active_row and active_row.name else ''
+def _resolve_latest_dataset_name() -> str:
+    row = _active_registry_row()
+    return str(row.name).strip() if row and row.name else ''
 
 
 def _upsert_dataset_registry_entry(
@@ -642,11 +573,12 @@ def _upsert_dataset_registry_entry(
         return None
 
     table_value = str(table_name or '').strip() or _dataset_table_name_from_name(ds_name, ds_source)
-    ds_year = str(year or '').strip() or None
-    ds_semester = str(semester or '').strip() or None
-    ds_type = str(dataset_type or '').strip().lower() or _infer_dataset_type(ds_semester)
-    if ds_type not in {'term', 'full_year'}:
-        ds_type = 'term'
+    parsed_year, parsed_semester, parsed_type = extract_dataset_context(ds_name, table_value, year, semester)
+    ds_year = str(year or '').strip() or parsed_year or None
+    ds_semester = normalize_dataset_semester(str(semester or '').strip() or parsed_semester or '') or None
+    ds_type = str(dataset_type or '').strip().lower() or parsed_type or _infer_dataset_type(ds_semester)
+    if ds_type not in {'spring', 'fall', 'term', 'full_year'}:
+        ds_type = _infer_dataset_type(ds_semester)
 
     row = DatasetRegistry.query.filter(sa.func.lower(DatasetRegistry.name) == ds_name.lower(), sa.func.lower(DatasetRegistry.source) == ds_source).order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
     if not row:
@@ -665,10 +597,6 @@ def _upsert_dataset_registry_entry(
         row.dataset_type = ds_type
         row.table_name = table_value
 
-    if make_active:
-        DatasetRegistry.query.update({'is_active': False})
-        row.is_active = True
-        update_app_setting('active_dataset_name', ds_name)
     return row
 
 
@@ -714,13 +642,6 @@ def _ensure_dataset_registry_synced() -> None:
             semester=ds_sem or None,
             dataset_type=_infer_dataset_type(ds_sem),
         )
-
-    active_setting = str(get_app_setting('active_dataset_name', '') or '').strip()
-    active_row = DatasetRegistry.query.filter(DatasetRegistry.is_active.is_(True)).first()
-    if not active_row and active_setting:
-        match = DatasetRegistry.query.filter(sa.func.lower(DatasetRegistry.name) == active_setting.lower()).order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
-        if match:
-            match.is_active = True
 
     db.session.commit()
 
@@ -784,7 +705,6 @@ def _orphan_tables() -> list[str]:
 def _build_integrity_payload() -> dict:
     checks: list[dict] = []
 
-    active_dataset_name = _resolve_effective_active_dataset_name()
     selectable_dataset_names = _all_selectable_dataset_names()
     local_course_count = int(Course.query.count() or 0)
     scraped_course_count = int(
@@ -817,33 +737,23 @@ def _build_integrity_payload() -> dict:
             }
         )
 
-    active_in_options = bool(active_dataset_name) and active_dataset_name in selectable_dataset_names
-    if selectable_dataset_names and not active_in_options:
+    if not selectable_dataset_names:
         checks.append(
             {
-                'id': 'active_dataset',
+                'id': 'dataset_resolution',
                 'status': 'warning',
-                'title': 'Active dataset is missing or stale',
-                'message': (
-                    'Active dataset is not set.'
-                    if not active_dataset_name
-                    else f'Active dataset "{active_dataset_name}" is not in selectable datasets.'
-                ),
-                'fixes': [
-                    {
-                        'action': 'set_active_dataset_auto',
-                        'label': 'Set active dataset to latest',
-                    }
-                ],
+                'title': 'No dataset registry rows',
+                'message': 'No datasets are currently registered for contextual resolution.',
+                'fixes': [],
             }
         )
     else:
         checks.append(
             {
-                'id': 'active_dataset',
+                'id': 'dataset_resolution',
                 'status': 'ok',
-                'title': 'Active dataset selection',
-                'message': active_dataset_name or 'Auto-resolution enabled (no explicit active dataset).',
+                'title': 'Contextual dataset resolution',
+                'message': f'{len(selectable_dataset_names)} dataset(s) available for dynamic year/semester resolution.',
                 'fixes': [],
             }
         )
@@ -941,7 +851,6 @@ def _build_integrity_payload() -> dict:
     return {
         'summary': {
             'status': highest,
-            'active_dataset_name': active_dataset_name or None,
             'selectable_dataset_names': selectable_dataset_names,
             'local_course_count': local_course_count,
             'scraped_course_count': scraped_course_count,
@@ -1342,7 +1251,6 @@ def manage_datasets():
     failed_count = ScrapedDataset.query.filter_by(status='failed').count()
     csv_count = Course.query.filter(sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv').count()
     latest_csv_upload = Course.query.filter(sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv').order_by(Course.last_updated.desc(), Course.id.desc()).first()
-    active_dataset_name = _resolve_effective_active_dataset_name() or None
     registry_rows = _registry_rows()
 
     return render_template(
@@ -1354,7 +1262,6 @@ def manage_datasets():
         failed_count=failed_count,
         csv_count=csv_count,
         latest_csv_upload=latest_csv_upload,
-        active_dataset_name=active_dataset_name,
         scraper_progress=dict(_progress),
         scraper_running=is_scraper_running(),
         orphan_tables=_orphan_tables(),
@@ -1370,18 +1277,31 @@ def upload_dataset():
         flash('Please choose a CSV file to upload.', 'error')
         return redirect(url_for('admin.manage_datasets'))
 
-    filename = str(file.filename or '').strip().lower()
-    if not filename.endswith('.csv'):
+    filename = str(file.filename or '').strip()
+    if not filename.lower().endswith('.csv'):
         flash('Only CSV uploads are supported.', 'error')
         return redirect(url_for('admin.manage_datasets'))
 
     year_hint = str(request.form.get('year') or '').strip()
     semester_hint = str(request.form.get('semester') or '').strip()
     dataset_name = str(request.form.get('dataset_name') or '').strip()
+
+    inferred_year, inferred_semester, inferred_type = extract_dataset_context(
+        year_hint,
+        semester_hint,
+        dataset_name,
+        filename,
+    )
+    if year_hint:
+        inferred_year = year_hint
+    if semester_hint:
+        inferred_semester = normalize_dataset_semester(semester_hint)
+        inferred_type = infer_dataset_type(inferred_semester)
+
     if not dataset_name:
-        inferred_year = year_hint or get_app_setting('current_year', '')
-        inferred_sem = semester_hint or get_app_setting('current_semester', '')
-        dataset_name = f"{inferred_year}_{inferred_sem}_CSV".strip('_')
+        fallback_year = inferred_year or str(get_app_setting('current_year', '') or '').strip()
+        fallback_sem = inferred_semester or normalize_dataset_semester(get_app_setting('current_semester', ''))
+        dataset_name = f"{fallback_year}_{fallback_sem}_CSV".strip('_')
 
     def _norm_key(value: str) -> str:
         return re.sub(r'[^a-z0-9]+', '', str(value or '').strip().lower())
@@ -1406,35 +1326,19 @@ def upload_dataset():
         return ''
 
     def _normalize_term_values(raw_semester: str, raw_year: str) -> tuple[str | None, str | None]:
-        sem = str(raw_semester or '').strip()
-        yr = str(raw_year or '').strip()
-
-        if not sem and not yr:
-            return None, None
-
-        if sem:
-            sem_match = re.search(r'(spring|summer|fall|winter)', sem, flags=re.IGNORECASE)
-            if sem_match:
-                sem = sem_match.group(1).capitalize()
-
-            if not yr:
-                year_match = re.search(r'\b(20\d{2})\b', str(raw_semester or ''), flags=re.IGNORECASE)
-                if year_match:
-                    yr = year_match.group(1)
-
+        guessed_year, guessed_semester, _ = extract_dataset_context(raw_year, raw_semester)
+        sem = normalize_dataset_semester(raw_semester or guessed_semester or inferred_semester or '') or None
+        yr = str(raw_year or guessed_year or inferred_year or '').strip() or None
         if yr:
-            year_match = re.search(r'\b(20\d{2})\b', yr, flags=re.IGNORECASE)
-            if year_match:
-                yr = year_match.group(1)
-            elif not yr.isdigit():
-                yr = ''
-
-        return (sem or None), (yr or None)
+            year_match = re.search(r'\b(20\d{2})\b', yr)
+            yr = year_match.group(1) if year_match else yr
+        return sem, yr
 
     inserted = 0
     updated = 0
     skipped_manual = 0
     skipped_invalid = 0
+    skipped_missing_faculty = 0
 
     try:
         reader = csv.DictReader(TextIOWrapper(file.stream, encoding='utf-8-sig', newline=''))
@@ -1466,6 +1370,16 @@ def upload_dataset():
             )
 
             faculty_text = _pick(raw_row, 'faculty')
+            parsed_faculty = extract_faculty_names(faculty_text)
+            if not parsed_faculty:
+                skipped_missing_faculty += 1
+                current_app.logger.warning(
+                    'CSV ingestion skipped row without faculty (dataset=%s, course=%s).',
+                    dataset_name,
+                    course_number,
+                )
+                continue
+
             payload = {
                 'course_number': course_number,
                 'title': title,
@@ -1475,7 +1389,7 @@ def upload_dataset():
                 'year': year,
                 'prerequisite': _pick(raw_row, 'prerequisite') or None,
                 'subject_area': _pick(raw_row, 'subject_area') or None,
-                'faculty': faculty_text or None,
+                'faculty': parsed_faculty,
                 'dataset_name': dataset_name or None,
                 'source': 'csv',
             }
@@ -1500,14 +1414,18 @@ def upload_dataset():
 
         db.session.commit()
 
-        _upsert_dataset_registry_entry(dataset_name, 'csv', _dataset_table_name_from_name(dataset_name, 'csv'))
-        if not _active_registry_row():
-            _set_active_registry_dataset(dataset_name)
-        else:
-            db.session.commit()
+        _upsert_dataset_registry_entry(
+            dataset_name,
+            'csv',
+            _dataset_table_name_from_name(dataset_name, 'csv'),
+            year=(inferred_year or None),
+            semester=(inferred_semester or None),
+            dataset_type=inferred_type,
+        )
+        db.session.commit()
 
-        if semester and year:
-            term_key = f"{semester} {year}".strip()
+        if inferred_semester and inferred_year:
+            term_key = f"{inferred_semester} {inferred_year}".strip()
             row = CatalogStatus.query.filter_by(term=term_key).first()
             if not row:
                 row = CatalogStatus(term=term_key, status='available', dataset=dataset_name)
@@ -1519,7 +1437,8 @@ def upload_dataset():
 
         flash(
             f'CSV uploaded. Inserted: {inserted}, Updated: {updated}, '
-            f'Skipped manual: {skipped_manual}, Skipped invalid: {skipped_invalid}.',
+            f'Skipped manual: {skipped_manual}, Skipped invalid: {skipped_invalid}, '
+            f'Skipped missing faculty: {skipped_missing_faculty}.',
             'success',
         )
     except Exception as exc:
@@ -1528,26 +1447,6 @@ def upload_dataset():
 
     return redirect(url_for('admin.manage_datasets'))
 
-
-@admin_bp.route('/active-dataset', methods=['POST'])
-@login_required
-@admin_required
-def set_active_dataset():
-    payload = request.get_json(silent=True) if request.is_json else {}
-    payload = payload or {}
-    dataset_name = str(payload.get('dataset_name') or request.form.get('dataset_name') or '').strip()
-    if dataset_name:
-        _set_active_registry_dataset(dataset_name)
-        message = f'Active dataset set to {dataset_name}.'
-    else:
-        _set_active_registry_dataset(None)
-        message = 'Active dataset cleared. System will auto-resolve latest dataset.'
-
-    if request.is_json:
-        return jsonify({'success': True, 'message': message, 'active_dataset_name': dataset_name or None})
-
-    flash(message, 'success')
-    return redirect(url_for('admin.university_connection'))
 
 @admin_bp.route('/datasets/delete/<table_name>', methods=['POST'])
 @login_required
@@ -1580,13 +1479,8 @@ def _delete_registry_dataset_row(row: DatasetRegistry) -> dict:
         for ds in ds_rows:
             db.session.delete(ds)
 
-    was_active = bool(getattr(row, 'is_active', False))
     db.session.delete(row)
     db.session.commit()
-
-    if was_active:
-        next_row = _active_registry_row()
-        _set_active_registry_dataset(next_row.name if next_row else None)
 
     return {
         'dataset_name': dataset_name,
@@ -1608,27 +1502,16 @@ def api_datasets():
             'id': r.id,
             'name': r.name,
             'source': r.source,
+            'year': r.year,
+            'semester': r.semester,
+            'type': r.dataset_type,
             'table_name': r.table_name,
             'created_at': r.created_at.isoformat() if r.created_at else None,
-            'is_active': bool(r.is_active),
-            'status': 'Active' if r.is_active else 'Inactive',
+            'status': 'Available',
         }
         for r in rows
     ]
-    return jsonify({'success': True, 'datasets': payload, 'active_dataset_name': _resolve_effective_active_dataset_name() or None})
-
-
-@admin_bp.route('/api/datasets/<int:dataset_id>/activate', methods=['POST'])
-@login_required
-@admin_required
-def api_activate_dataset(dataset_id: int):
-    if not _dataset_registry_supported():
-        return jsonify({'success': False, 'message': 'Dataset registry is unavailable (run migrations).'}), 500
-    row = DatasetRegistry.query.get(dataset_id)
-    if not row:
-        return jsonify({'success': False, 'message': 'Dataset not found.'}), 404
-    _set_active_registry_dataset(row.name)
-    return jsonify({'success': True, 'message': f'Active dataset set to {row.name}.', 'active_dataset_name': row.name})
+    return jsonify({'success': True, 'datasets': payload})
 
 
 @admin_bp.route('/api/datasets/<int:dataset_id>/delete', methods=['POST'])
@@ -1641,7 +1524,7 @@ def api_delete_dataset(dataset_id: int):
     if not row:
         return jsonify({'success': False, 'message': 'Dataset not found.'}), 404
     result = _delete_registry_dataset_row(row)
-    return jsonify({'success': True, 'message': f'Dataset {result.get("dataset_name")} deleted.', 'result': result, 'active_dataset_name': _resolve_effective_active_dataset_name() or None})
+    return jsonify({'success': True, 'message': f'Dataset {result.get("dataset_name")} deleted.', 'result': result})
 
 
 @admin_bp.route('/api/datasets/<int:dataset_id>/refresh', methods=['POST'])
@@ -2545,7 +2428,6 @@ def university_connection():
     popup_open_timeout = _safe_float(get_app_setting('scraper_popup_open_timeout', '10'), 10.0)
     popup_close_delay = _safe_float(get_app_setting('scraper_popup_close_delay', '0.35'), 0.35)
     _ensure_dataset_registry_synced()
-    active_dataset_name = _resolve_effective_active_dataset_name()
 
     # Past datasets for history panel
     past_datasets = ScrapedDataset.query.order_by(ScrapedDataset.created_at.desc()).limit(10).all()
@@ -2573,7 +2455,6 @@ def university_connection():
         popup_close_delay=popup_close_delay,
         latest_scrape_run=latest_scrape_run,
         latest_csv_upload=latest_csv_upload,
-        active_dataset_name=active_dataset_name,
         selectable_dataset_names=selectable_dataset_names,
     )
 
@@ -2988,14 +2869,6 @@ def health_fix_api():
         return jsonify({'success': False, 'message': 'Action is required.'}), 400
 
     try:
-        if action == 'set_active_dataset_auto':
-            names = _all_selectable_dataset_names()
-            if not names:
-                return jsonify({'success': False, 'message': 'No datasets available to set active.'}), 400
-            chosen = names[0]
-            _set_active_registry_dataset(chosen)
-            return jsonify({'success': True, 'message': f'Active dataset set to {chosen}.', 'action': action, 'active_dataset_name': chosen})
-
         if action in {'reprocess_faculty_links', 'link_faculty_from_instructors'}:
             updated_courses = 0
             rows = Course.query.all()
@@ -3019,7 +2892,7 @@ def health_fix_api():
             return jsonify({'success': True, 'message': f'Removed {removed} orphan faculty records.', 'action': action, 'removed': removed})
 
         if action == 'backfill_catalog_status_dataset':
-            active_name = _resolve_effective_active_dataset_name()
+            active_name = _resolve_latest_dataset_name()
             fallback_names = _all_selectable_dataset_names()
             default_name = active_name or (fallback_names[0] if fallback_names else '')
             if not default_name:

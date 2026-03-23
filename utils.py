@@ -1,7 +1,9 @@
 # utils.py
-from models import db, Setting, ScrapedDataset, Course, CatalogStatus, DatasetRegistry
+from models import db, Setting, ScrapedDataset, Course, CatalogStatus, DatasetRegistry, Faculty
 import re
 import json
+from typing import Any
+from sqlalchemy import func
 
 
 def safe_json_loads(value, default):
@@ -23,6 +25,153 @@ def safe_json_dumps(value) -> str:
         return json.dumps(value, ensure_ascii=False)
     except Exception:
         return '{}'
+
+
+def normalize_dataset_semester(value: Any) -> str:
+    text = str(value or '').strip().lower()
+    if text in {'spring', 'spr', 'sp'}:
+        return 'spring'
+    if text in {'fall', 'autumn', 'fa'}:
+        return 'fall'
+    if text in {'full', 'fullyear', 'full_year', 'full-year', 'full year', 'year', 'annual', 'all'}:
+        return 'full_year'
+    return text
+
+
+def infer_dataset_type(semester: Any) -> str:
+    sem = normalize_dataset_semester(semester)
+    if sem == 'full_year':
+        return 'full_year'
+    if sem in {'spring', 'fall'}:
+        return sem
+    return 'term'
+
+
+def resolve_dataset(year: Any, semester: Any, *, source: str | None = None) -> DatasetRegistry | None:
+    year_text = str(year or '').strip().lower()
+    sem_text = normalize_dataset_semester(semester)
+    source_text = str(source or '').strip().lower()
+
+    try:
+        query = DatasetRegistry.query
+        if source_text:
+            query = query.filter(func.lower(func.coalesce(DatasetRegistry.source, '')) == source_text)
+
+        if year_text and sem_text:
+            exact = (
+                query.filter(
+                    func.lower(func.coalesce(DatasetRegistry.year, '')) == year_text,
+                    func.lower(func.coalesce(DatasetRegistry.semester, '')) == sem_text,
+                )
+                .order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc())
+                .first()
+            )
+            if exact:
+                return exact
+
+        if year_text:
+            full_year = (
+                query.filter(
+                    func.lower(func.coalesce(DatasetRegistry.year, '')) == year_text,
+                    func.lower(func.coalesce(DatasetRegistry.dataset_type, 'term')) == 'full_year',
+                )
+                .order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc())
+                .first()
+            )
+            if full_year:
+                return full_year
+
+        return query.order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
+    except Exception:
+        db.session.rollback()
+        return None
+
+
+def resolve_dataset_name(year: Any, semester: Any, *, source: str | None = None) -> str:
+    row = resolve_dataset(year, semester, source=source)
+    return str(getattr(row, 'name', '') or '').strip()
+
+
+def extract_dataset_context(*values: Any) -> tuple[str | None, str | None, str]:
+    merged = ' '.join(str(v or '') for v in values if str(v or '').strip())
+    merged_lower = merged.lower()
+
+    year_value = None
+    year_match = re.search(r'\b(20\d{2})\b', merged)
+    if year_match:
+        year_value = year_match.group(1)
+
+    semester_value = ''
+    if re.search(r'\b(spring|spr|sp)\b', merged_lower):
+        semester_value = 'spring'
+    elif re.search(r'\b(fall|autumn|fa)\b', merged_lower):
+        semester_value = 'fall'
+    elif re.search(r'\b(full\s*year|fullyear|full[_\- ]year|annual|all\s*courses|all)\b', merged_lower):
+        semester_value = 'full_year'
+
+    dataset_type = infer_dataset_type(semester_value)
+    return year_value, (semester_value or None), dataset_type
+
+
+def normalize_faculty_name(name: str) -> str:
+    cleaned = re.sub(r'\s+', ' ', str(name or '').strip())
+    cleaned = re.sub(r'^(dr|prof|professor|mr|ms|mrs)\.?\s+', '', cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s+,', ',', cleaned)
+    cleaned = cleaned.strip(' -;|/')
+    return cleaned
+
+
+def extract_faculty_names(raw_value: Any) -> list[str]:
+    text = str(raw_value or '').strip()
+    if not text:
+        return []
+
+    placeholder = {'tba', 'tbd', 'staff', 'n/a', 'na', 'none', 'unknown'}
+    if text.lower() in placeholder:
+        return []
+
+    parts = re.split(r'\s*(?:,|;|\||/|&|\band\b)\s*', text, flags=re.IGNORECASE)
+    names: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        name = normalize_faculty_name(part)
+        if not name:
+            continue
+        key = name.lower()
+        if key in placeholder or key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    return names
+
+
+def sync_course_faculty(course: Course, faculty_value: Any, *, fallback_text: Any = None) -> list[str]:
+    names = extract_faculty_names(faculty_value)
+    if not names:
+        names = extract_faculty_names(fallback_text)
+
+    if not names:
+        course.faculty = []
+        course.instructor = None
+        return []
+
+    lowered = [n.lower() for n in names]
+    existing_rows = Faculty.query.filter(func.lower(Faculty.name).in_(lowered)).all()
+    existing_map = {(r.name or '').strip().lower(): r for r in existing_rows}
+
+    linked_rows: list[Faculty] = []
+    for name in names:
+        key = name.lower()
+        row = existing_map.get(key)
+        if not row:
+            row = Faculty(name=name)
+            db.session.add(row)
+            existing_map[key] = row
+        linked_rows.append(row)
+
+    course.faculty = linked_rows
+    course.instructor = '; '.join(names)
+    return names
 
 
 def ensure_default_landing_sections():
