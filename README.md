@@ -11,9 +11,21 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.3**
+- Current version: **Beta 1.4**
 
 ## Changelog
+
+### Beta 1.4 — 2026-03-24
+
+- Implemented ScheduleCourse course-instance identity model fields (`day_period`, `semester`, `year`, `dataset_name`, optional `source`) and supporting migration scaffolding.
+- Updated student schedule read/write flows to persist and resolve section-level identity instead of course-number-only matching.
+- Added legacy-safe identity fallback behavior so older rows remain loadable with deterministic defaults.
+- Fixed duplicate-section detection in schedule editor UI to compare full instance identity instead of only course number.
+- Hardened student courses view rendering with fail-safe fallback handling to avoid internal server errors on edge data states.
+- Improved dataset deletion reliability by syncing registry state before delete and returning explicit partial-cleanup success when registry removal succeeds.
+- Updated CSV ingestion + preview paths to support missing day/period values by normalizing them to `TBA`.
+- Improved PNG export readability by forcing high-contrast full-opacity text styling in export clone context.
+- Added regression contract tests for schema identity, write-path identity, dataset-delete/TBA behavior, and student view/export safeguards.
 
 ### Beta 1.3 — 2026-03-24
 

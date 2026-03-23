@@ -71,6 +71,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return course?.display_title || course?.displayTitle || course?.Course_Title || course?.course_title || '';
     };
 
+    const instanceIdentityKey = (course) => {
+        const courseNumber = String(course?.Course_Number || course?.course_number || '').trim().toUpperCase();
+        const dayPeriod = String(course?.identity_day_period || course?.Day_and_Period || course?.day_period || '').trim().toLowerCase();
+        const semester = String(course?.identity_semester || course?.semester || '').trim().toLowerCase();
+        const year = String(course?.identity_year || course?.year || '').trim().toLowerCase();
+        const datasetName = String(course?.identity_dataset_name || course?.dataset_name || '').trim().toLowerCase();
+        return [courseNumber, dayPeriod, semester, year, datasetName].join('|');
+    };
+
     const splitPrereqTerms = (prereqString) => {
         const raw = String(prereqString || '').trim();
         if (!raw) return [];
@@ -709,7 +718,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     isClash = true;
                     clashMessage = `Clash: ${overlapTitle}`;
                 }
-                if (currentCourses.some(c => c.Course_Number === sample.Course_Number)) {
+                if (currentCourses.some((c) => instanceIdentityKey(c) === instanceIdentityKey(sample))) {
                     isClash = true; clashMessage = "Added";
                 }
 
@@ -717,8 +726,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     sectionBadge = `<span class="badge bg-danger bg-opacity-10 text-danger border border-danger-subtle rounded-pill">Conflict</span>`;
                     actionButton = `<button class="btn btn-sm btn-secondary rounded-pill px-2 py-1 shadow-sm fw-bold" style="font-size: 0.7rem;" disabled>${clashMessage}</button>`;
                 } else {
+                    const encodedSampleCourseNumber = encodeURIComponent(sample.Course_Number || '');
+                    const encodedSampleDayPeriod = encodeURIComponent(sample.Day_and_Period || '');
+                    const encodedSampleSemester = encodeURIComponent(sample.semester || sample.Semester || '');
+                    const encodedSampleYear = encodeURIComponent(sample.year || sample.Year || '');
+                    const encodedSampleDatasetName = encodeURIComponent(sample.dataset_name || sample.Dataset_Name || '');
+                    const encodedSampleSource = encodeURIComponent(sample.source || sample.Source || '');
                     sectionBadge = `<span class="badge bg-secondary bg-opacity-10 text-secondary border rounded-pill">${heroIcon('clock')}${sample.Day_and_Period || 'TBA'}</span>`;
-                    actionButton = `<button class="btn btn-sm btn-success add-specific-section-btn rounded-pill px-3 py-1 shadow-sm fw-bold" style="font-size: 0.75rem;" data-course-number="${sample.Course_Number}" data-schedule-id="${scheduleIdInput.value}">+ Add</button>`;
+                    actionButton = `<button class="btn btn-sm btn-success add-specific-section-btn rounded-pill px-3 py-1 shadow-sm fw-bold" style="font-size: 0.75rem;" data-course-number="${encodedSampleCourseNumber}" data-day-period="${encodedSampleDayPeriod}" data-semester="${encodedSampleSemester}" data-year="${encodedSampleYear}" data-dataset-name="${encodedSampleDatasetName}" data-source="${encodedSampleSource}" data-schedule-id="${scheduleIdInput.value}">+ Add</button>`;
                 }
             }
 
@@ -780,6 +795,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     useCORS: true,
                     onclone: (doc) => {
                         doc.querySelectorAll('.remove-course-btn, .grade-chip, .badge').forEach((el) => el.remove());
+                        const cloneRoot = doc.querySelector('#grid-view .ax-grid-wrap');
+                        if (cloneRoot) {
+                            cloneRoot.querySelectorAll('.ax-course strong').forEach((el) => {
+                                el.style.opacity = '1';
+                                el.style.fontWeight = '800';
+                                el.style.color = '#ffffff';
+                            });
+                            cloneRoot.querySelectorAll('.ax-course span').forEach((el) => {
+                                el.style.opacity = '1';
+                                el.style.fontWeight = '700';
+                                el.style.color = '#ffffff';
+                            });
+                        }
                     },
                 });
                 const link = document.createElement('a');
@@ -884,7 +912,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
-                if (currentCourses.some(c => c.Course_Number === sec.Course_Number)) {
+                if (currentCourses.some((c) => instanceIdentityKey(c) === instanceIdentityKey(sec))) {
                     isClash = true;
                     clashMessage = "Already Added";
                 }
@@ -923,7 +951,12 @@ document.addEventListener('DOMContentLoaded', () => {
                                 Details
                             </button>
                             <button class="btn ${btnClass} btn-sm add-specific-section-btn fw-bold px-4 py-2 rounded-pill shadow-sm"
-                                    data-course-number="${sec.Course_Number}"
+                                    data-course-number="${encodedCourseNumber}"
+                                    data-day-period="${encodedDayPeriod}"
+                                    data-semester="${encodeURIComponent(sec.semester || sec.Semester || '')}"
+                                    data-year="${encodeURIComponent(sec.year || sec.Year || '')}"
+                                    data-dataset-name="${encodeURIComponent(sec.dataset_name || sec.Dataset_Name || '')}"
+                                    data-source="${encodeURIComponent(sec.source || sec.Source || '')}"
                                     data-schedule-id="${scheduleId}"
                                     ${disableAttr}>
                                 ${btnText}
@@ -953,7 +986,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         schedule_id: btn.getAttribute('data-schedule-id'),
-                        course_number: btn.getAttribute('data-course-number')
+                        course_number: decodeDataAttr(btn.getAttribute('data-course-number')),
+                        day_period: decodeDataAttr(btn.getAttribute('data-day-period')),
+                        semester: decodeDataAttr(btn.getAttribute('data-semester')),
+                        year: decodeDataAttr(btn.getAttribute('data-year')),
+                        dataset_name: decodeDataAttr(btn.getAttribute('data-dataset-name')),
+                        source: decodeDataAttr(btn.getAttribute('data-source')),
                     })
                 });
                 const result = await response.json();

@@ -179,6 +179,7 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Add/remove schedule courses with:
   - real time-overlap conflict detection using Period start/end windows
   - prerequisite status checks
+- Schedule course persistence now supports section-level identity dimensions (`course_number`, `day_period`, `semester`, `year`, `dataset_name`, optional `source`) for stable duplicate handling.
 - Course detail API now returns a cleaner student payload (title/area/credits/faculty/prerequisites/unlocks) and unlock analysis uses latest active dataset when available.
 - Schedule editor is grid-only and includes inline grade selection chips (A/B/C/D/F) with tooltip guidance, plus PNG export.
 - Dashboard with GPA/progress, notifications, and mini schedule overview cards.
@@ -209,6 +210,38 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Alembic migrations and startup bootstrap protections
 - Policy enforcement for `PROJECT_CONTEXT.md` in both local pre-commit and GitHub Actions CI
 
+## 🚨 Current Critical Issues (Beta Stabilization)
+
+1. Duplicated course period bug:
+  - Status: ✅ Implemented (Beta 1.4)
+  - Issue: When course is duplicated in admin panel and period is changed, user still sees OLD period.
+  - Resolution summary: Student schedule read/write and UI duplicate checks now use section-level course instance identity and preserve identity metadata in payloads.
+  - Affected files (implemented): `models.py`, `migrations/versions/c2d4e6f8a9b0_add_course_instance_identity_to_schedule_courses.py`, `Routes/student_routes.py`, `static/js/student.js`.
+
+2. Course view crash:
+  - Status: ✅ Implemented (Beta 1.4)
+  - Issue: Clicking course in user tab → Internal Server Error.
+  - Resolution summary: `courses_view` now uses fail-safe guarded rendering with rollback + safe fallback payloads instead of propagating unhandled exceptions.
+  - Affected files (implemented): `Routes/student_routes.py`.
+
+3. Dataset deletion failure:
+  - Status: ✅ Implemented (Beta 1.4)
+  - Issue: Deleting dataset does nothing; system cannot be cleaned.
+  - Resolution summary: Delete flow now pre-syncs registry state and returns explicit partial-cleanup success when registry deletion succeeds even if physical cleanup partially fails.
+  - Affected files (implemented): `Routes/admin_routes.py`.
+
+4. Missing courses:
+  - Status: ✅ Implemented (Beta 1.4)
+  - Issue: Courses without day/period (e.g., Fuji Culture) not appearing.
+  - Resolution summary: CSV ingestion and preview now allow missing day/period mapping and normalize empty values to `TBA`.
+  - Affected files (implemented): `Routes/admin_routes.py`.
+
+5. PNG export issue:
+  - Status: ✅ Implemented (Beta 1.4)
+  - Issue: Course title & faculty opacity too low (unreadable).
+  - Resolution summary: Export clone path now forces full-opacity, higher-weight, high-contrast text for course title/faculty before image capture.
+  - Affected files (implemented): `static/js/student.js`.
+
 ---
 
 # 5. Known Issues / Pending Fixes
@@ -222,10 +255,29 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 4. Python 3.14 local runtime compatibility:
   - SQLAlchemy/Flask stack may require newer SQLAlchemy than historical pin when running full app imports under Python 3.14.
   - Local validation used an isolated SQLite DB harness to execute admin ingestion handlers directly.
+5. Migration rollout order requirement:
+  - Identity write paths expect `schedule_courses` identity columns to exist. Deployments must run Alembic upgrade before serving write traffic.
 
 ---
 
 # 6. Change Log (Chronological)
+
+## 2026-03-24 — Beta 1.4 (stabilization implementation batch)
+
+- Added ScheduleCourse instance-identity fields in model (`day_period`, `semester`, `year`, `dataset_name`, optional `source`) with supporting indexes (`course_term` and full identity index).
+- Added migration scaffold `c2d4e6f8a9b0_add_course_instance_identity_to_schedule_courses.py` for identity columns/indexes rollout.
+- Updated student schedule read paths to hydrate by identity-first matching with legacy-safe fallback.
+- Updated add-course write path to persist identity dimensions and use identity-aware duplicate checks when section context is present.
+- Updated schedule editor UI payloads and duplicate checks to use full instance identity semantics.
+- Hardened `courses_view` with guarded rendering and safe fallback behavior.
+- Improved dataset delete idempotency/reliability by syncing registry before lookup and returning partial-cleanup success when registry row removal succeeds.
+- Updated CSV ingestion/preview to accept missing day/period and normalize to `TBA`.
+- Improved PNG export readability by enforcing high-contrast clone styles during html2canvas capture.
+- Added regression tests:
+  - `tests/test_schedule_course_identity_schema.py`
+  - `tests/test_identity_write_path_contracts.py`
+  - `tests/test_admin_dataset_and_tba_contracts.py`
+  - `tests/test_student_view_and_export_contracts.py`
 
 ## 2026-03-18 — Beta 0.1
 

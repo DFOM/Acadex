@@ -1434,7 +1434,7 @@ def upload_dataset():
 
         detected = detected_mapping_fields(list(reader.fieldnames or []), mapping_normalized)
         current_app.logger.info('Mapped Fields Detected: %s', detected)
-        required = {'course_number', 'title', 'faculty', 'day_period'}
+        required = {'course_number', 'title', 'faculty'}
         missing_required = sorted([field for field in required if field not in detected])
         if missing_required:
             current_app.logger.error(
@@ -1542,15 +1542,15 @@ def upload_dataset():
             current_app.logger.info('Extracted Subject Area: %s', subject_area_text or '')
             current_app.logger.info('Extracted Day Period: %s', day_period or '')
 
-            if not course_number or not title or not day_period:
+            if not course_number or not title:
                 skipped_invalid += 1
                 if not course_number:
                     current_app.logger.warning('FAILED TO EXTRACT: course_number from row %s', row_index)
                 if not title:
                     current_app.logger.warning('FAILED TO EXTRACT: title from row %s', row_index)
-                if not day_period:
-                    current_app.logger.warning('FAILED TO EXTRACT: day_period from row %s', row_index)
                 continue
+
+            day_period = str(day_period or '').strip() or 'TBA'
 
             credits_raw = _pick_from_payload(row_payload, 'credits')
             try:
@@ -1808,6 +1808,8 @@ def api_datasets():
 def api_delete_dataset(dataset_id: int):
     if not _dataset_registry_supported():
         return jsonify({'success': False, 'message': 'Dataset registry is unavailable (run migrations).'}), 500
+
+    _ensure_dataset_registry_synced()
     row = DatasetRegistry.query.get(dataset_id)
     if not row:
         return jsonify({'success': False, 'message': 'Dataset not found.'}), 404
@@ -1819,12 +1821,24 @@ def api_delete_dataset(dataset_id: int):
         db.session.rollback()
         current_app.logger.error('Dataset delete failed for id=%s: %s', dataset_id, exc, exc_info=True)
         fallback_row = DatasetRegistry.query.get(dataset_id)
+        fallback_deleted = False
         if fallback_row:
             try:
                 db.session.delete(fallback_row)
                 db.session.commit()
+                fallback_deleted = True
             except Exception:
                 db.session.rollback()
+
+        if fallback_deleted:
+            return jsonify(
+                {
+                    'success': True,
+                    'message': 'Dataset registry row was removed, but some physical cleanup steps failed.',
+                    'result': {'dataset_id': dataset_id, 'partial_cleanup': True},
+                }
+            )
+
         return jsonify({'success': False, 'message': 'Dataset delete failed. Please retry or use force-delete.'}), 500
 
     current_app.logger.info(
@@ -1979,7 +1993,7 @@ def api_dataset_preview():
 
         columns = list(reader.fieldnames or [])
         mapped_fields = detected_mapping_fields(columns, mapping_normalized)
-        required = {'course_number', 'title', 'faculty', 'day_period'}
+        required = {'course_number', 'title', 'faculty'}
         missing_required = sorted([field for field in required if field not in mapped_fields])
 
         sample_rows: list[dict] = []
@@ -2004,9 +2018,12 @@ def api_dataset_preview():
             extracted = {field: str(payload.get(field) or '').strip() for field in preview_fields}
             parsed_faculty = extract_faculty_names(extracted.get('faculty'))
 
-            failed_fields = [field for field in ['course_number', 'title', 'day_period'] if not extracted.get(field)]
+            failed_fields = [field for field in ['course_number', 'title'] if not extracted.get(field)]
             if not parsed_faculty:
                 failed_fields.append('faculty')
+
+            if not extracted.get('day_period'):
+                extracted['day_period'] = 'TBA'
 
             sample_rows.append(
                 {

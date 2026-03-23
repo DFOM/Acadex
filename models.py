@@ -156,9 +156,51 @@ class Schedule(db.Model):
 
 class ScheduleCourse(db.Model):
     __tablename__ = 'schedule_courses'
+
+    __table_args__ = (
+        db.Index(
+            'ix_schedule_courses_course_term',
+            'course_number',
+            'semester',
+            'year',
+        ),
+        db.Index(
+            'ix_schedule_courses_identity',
+            'course_number',
+            'day_period',
+            'semester',
+            'year',
+            'dataset_name',
+        ),
+    )
+
     id = db.Column(db.Integer, primary_key=True)
     schedule_id = db.Column(db.Integer, db.ForeignKey('schedules.id'), nullable=False)
+
+    # Base catalog code used as the primary human-readable course reference.
+    # This anchors identity matching before section/term disambiguation is applied.
     course_number = db.Column(db.String(100), nullable=False)
+
+    # Captures section timing identity (for example, "Mon 3 Wed 3" or "TBA").
+    # This prevents different offerings of the same course number from collapsing into one entry.
+    day_period = db.Column(db.String(255), nullable=False)
+
+    # Term dimension used to distinguish offerings across academic cycles.
+    # Required so identity remains stable even when course numbers repeat every year.
+    semester = db.Column(db.String(50), nullable=False)
+
+    # Year dimension paired with semester for complete term-level identity.
+    # Stored as text to match existing catalog conventions and preserve source fidelity.
+    year = db.Column(db.String(20), nullable=False)
+
+    # Dataset context for resolving course instances when multiple datasets contain the same course/term tuple.
+    # Nullable to support transitional/legacy rows and manual catalog entries with no dataset label.
+    dataset_name = db.Column(db.String(150), nullable=True)
+
+    # Optional provenance marker (for example: csv, scraped, manual).
+    # Helps tie an instance back to its source pipeline when identity conflicts are investigated.
+    source = db.Column(db.String(20), nullable=True)
+
     grade = db.Column(db.String(5))
 
 class SubjectArea(db.Model):

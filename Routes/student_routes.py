@@ -651,6 +651,119 @@ def _safe_json_load_dict(value: Any) -> Dict[str, Any]:
     try:
         parsed = json.loads(str(value))
         return parsed if isinstance(parsed, dict) else {}
+
+    def _catalog_identity_key(course_number: Any, day_period: Any, semester: Any, year: Any, dataset_name: Any) -> tuple[str, str, str, str, str]:
+        return (
+            _normalize_course_number(course_number),
+            str(day_period or '').strip().lower(),
+            normalize_dataset_semester(semester),
+            _normalize_year_text(year),
+            str(dataset_name or '').strip().lower(),
+        )
+
+    def _schedule_course_rows_for_schedule(schedule_id: int) -> list[Dict[str, Any]]:
+        try:
+            cols = {c['name'] for c in inspect(db.engine).get_columns('schedule_courses')}
+        except Exception:
+            db.session.rollback()
+            cols = set()
+
+        select_parts = [
+            'sc.id as entry_id',
+            'sc.grade as grade',
+            'sc.course_number as course_number',
+        ]
+
+        for name in ['day_period', 'semester', 'year', 'dataset_name', 'source']:
+            if name in cols:
+                select_parts.append(f'sc.{name} as {name}')
+            else:
+                select_parts.append(f'NULL as {name}')
+
+        query = text(
+            f'''
+            SELECT {', '.join(select_parts)}
+            FROM schedule_courses sc
+            WHERE sc.schedule_id = :sid
+            '''
+        )
+
+        try:
+            rows = db.session.execute(query, {'sid': schedule_id}).fetchall()
+            return [dict(r._mapping) for r in rows]
+        except Exception:
+            db.session.rollback()
+            return []
+
+
+    def _hydrate_schedule_courses(schedule: Schedule, schedule_rows: list[Dict[str, Any]], catalog_rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+        catalog_by_identity: Dict[tuple[str, str, str, str, str], Dict[str, Any]] = {}
+        catalog_by_number: Dict[str, Dict[str, Any]] = {}
+
+        for row in catalog_rows:
+            mapped = dict(row)
+            identity_key = _catalog_identity_key(
+                mapped.get('Course_Number'),
+                mapped.get('Day_and_Period'),
+                mapped.get('semester') or schedule.semester,
+                mapped.get('year') or schedule.year,
+                mapped.get('dataset_name'),
+            )
+            catalog_by_identity.setdefault(identity_key, mapped)
+
+            number_key = _normalize_course_number(mapped.get('Course_Number'))
+            if number_key and number_key not in catalog_by_number:
+                catalog_by_number[number_key] = mapped
+
+        meta_index = _build_course_metadata_index()
+        courses: list[Dict[str, Any]] = []
+
+        for row in schedule_rows:
+            course_number = row.get('course_number')
+            day_period = row.get('day_period')
+            semester = row.get('semester') or schedule.semester
+            year = row.get('year') or schedule.year
+            dataset_name = row.get('dataset_name')
+
+            identity_key = _catalog_identity_key(course_number, day_period, semester, year, dataset_name)
+            payload = dict(catalog_by_identity.get(identity_key) or {})
+
+            if not payload and day_period:
+                term_key = _catalog_identity_key(course_number, day_period, schedule.semester, schedule.year, dataset_name)
+                payload = dict(catalog_by_identity.get(term_key) or {})
+
+            code = _normalize_course_number(course_number)
+            if not payload:
+                payload = dict(catalog_by_number.get(code) or {})
+
+            if not payload:
+                meta = meta_index.get(code, {})
+                payload = {
+                    'Course_Number': course_number,
+                    'Course_Title': meta.get('title') or course_number,
+                    'Credits': float(meta.get('credits') or 0.0),
+                    'Instructor': meta.get('instructor') or '',
+                    'Day_and_Period': day_period or meta.get('day_and_period') or '',
+                    'Area_of_Study': meta.get('area') or '',
+                    'Prerequisite': '',
+                }
+
+            resolved_day_period = str(day_period or payload.get('Day_and_Period') or 'TBA').strip() or 'TBA'
+            resolved_semester = normalize_dataset_semester(semester or payload.get('semester') or schedule.semester)
+            resolved_year = str(year or payload.get('year') or schedule.year).strip()
+            resolved_dataset_name = str(dataset_name or payload.get('dataset_name') or '').strip()
+
+            payload['entry_id'] = row.get('entry_id')
+            payload['grade'] = row.get('grade')
+            payload['identity_day_period'] = resolved_day_period
+            payload['identity_semester'] = resolved_semester
+            payload['identity_year'] = resolved_year
+            payload['identity_dataset_name'] = resolved_dataset_name
+            payload['identity_source'] = row.get('source')
+            payload['Day_and_Period'] = payload.get('Day_and_Period') or resolved_day_period
+            courses.append(_add_display_fields(payload))
+
+        return courses
     except Exception:
         return {}
 
@@ -974,31 +1087,30 @@ def _build_prereq_title_lookup() -> Dict[str, str]:
 
 def _load_schedule_courses_fallback(schedule_id: int) -> list[Dict[str, Any]]:
     """Fallback schedule course loader when source catalog tables are unavailable."""
-    try:
-        rows = db.session.execute(
-            text('SELECT id as entry_id, grade, course_number FROM schedule_courses WHERE schedule_id = :sid'),
-            {'sid': schedule_id},
-        ).fetchall()
-    except Exception:
-        db.session.rollback()
+    rows = _schedule_course_rows_for_schedule(schedule_id)
+    if not rows:
         return []
 
     metadata = _build_course_metadata_index()
     payload: list[Dict[str, Any]] = []
     for row in rows:
-        mapped = dict(row._mapping)
-        cnum = _normalize_course_number(mapped.get('course_number'))
+        cnum = _normalize_course_number(row.get('course_number'))
         meta = metadata.get(cnum, {})
         item = {
-            'entry_id': mapped.get('entry_id'),
-            'grade': mapped.get('grade'),
+            'entry_id': row.get('entry_id'),
+            'grade': row.get('grade'),
             'Course_Number': cnum,
             'Course_Title': (meta.get('title') or 'Required course title unavailable').strip(),
             'Credits': meta.get('credits', 0.0),
             'Instructor': (meta.get('instructor') or 'TBA').strip() or 'TBA',
-            'Day_and_Period': 'TBA',
+            'Day_and_Period': str(row.get('day_period') or 'TBA').strip() or 'TBA',
             'Area_of_Study': (meta.get('area') or '').strip(),
             'Prerequisite': '',
+            'identity_day_period': row.get('day_period'),
+            'identity_semester': row.get('semester'),
+            'identity_year': row.get('year'),
+            'identity_dataset_name': row.get('dataset_name'),
+            'identity_source': row.get('source'),
         }
         payload.append(_add_display_fields(item))
     return payload
@@ -1609,53 +1721,70 @@ def api_course_detail():
 @student_bp.route('/courses')
 @login_required
 def courses_view():
-    resolved_dataset_name = _resolve_contextual_dataset_name('', '')
-    catalog_rows, _dataset_id = _load_scraped_catalog_for_term('', '')
-    rows = [_add_display_fields(dict(r)) for r in catalog_rows]
-
     selected_year = str(request.args.get('year') or '').strip()
     selected_semester = str(request.args.get('semester') or '').strip()
     selected_subject = str(request.args.get('subject_area') or '').strip()
     selected_course_number = str(request.args.get('course_number') or '').strip()
     selected_day_period = str(request.args.get('day_and_period') or '').strip()
 
-    year_options = sorted({str(r.get('year') or '').strip() for r in rows if str(r.get('year') or '').strip()}, reverse=True)
-    semester_options = sorted({str(r.get('semester') or '').strip() for r in rows if str(r.get('semester') or '').strip()})
-    subject_options = sorted({str(r.get('Area_of_Study') or '').strip() for r in rows if str(r.get('Area_of_Study') or '').strip()})
-
-    filtered_rows = rows
-    if selected_year:
-        filtered_rows = [r for r in filtered_rows if str(r.get('year') or '').strip() == selected_year]
-    if selected_semester:
-        filtered_rows = [r for r in filtered_rows if str(r.get('semester') or '').strip().lower() == selected_semester.lower()]
-    if selected_subject:
-        filtered_rows = [r for r in filtered_rows if str(r.get('Area_of_Study') or '').strip().lower() == selected_subject.lower()]
-
+    resolved_dataset_name = ''
+    filtered_rows: list[dict] = []
+    year_options: list[str] = []
+    semester_options: list[str] = []
+    subject_options: list[str] = []
     selected_detail = None
     selected_prereq_status = None
     selected_unlocks: list[dict] = []
-    latest_catalog_rows, _latest_dataset_id = _load_scraped_catalog_for_term('', '')
 
-    if selected_course_number:
-        matches = [
-            r for r in rows
-            if _normalize_course_number(r.get('Course_Number')) == _normalize_course_number(selected_course_number)
-        ]
-        if selected_day_period:
-            matches = [m for m in matches if str(m.get('Day_and_Period') or '').strip().lower() == selected_day_period.lower()]
+    try:
+        resolved_dataset_name = _resolve_contextual_dataset_name('', '')
+        catalog_rows, _dataset_id = _load_scraped_catalog_for_term('', '')
+        rows = [_add_display_fields(dict(r)) for r in catalog_rows]
 
-        if matches:
-            selected_detail = _add_display_fields(dict(matches[0]))
-            completed_identifiers: Iterable[str] = _completed_passing_prereq_identifiers(current_user.id)
-            area_names = _resolve_user_area_names()
-            selected_prereq_status = _build_prerequisite_status(
-                selected_detail.get('Prerequisite'),
-                completed_identifiers,
-                major_name=area_names.get('major'),
-                minor_name=area_names.get('minor'),
-                prereq_title_lookup=_build_prereq_title_lookup(),
-            )
-            selected_unlocks = _build_unlocks_for_course(latest_catalog_rows if latest_catalog_rows else rows, selected_detail)
+        year_options = sorted({str(r.get('year') or '').strip() for r in rows if str(r.get('year') or '').strip()}, reverse=True)
+        semester_options = sorted({str(r.get('semester') or '').strip() for r in rows if str(r.get('semester') or '').strip()})
+        subject_options = sorted({str(r.get('Area_of_Study') or '').strip() for r in rows if str(r.get('Area_of_Study') or '').strip()})
+
+        filtered_rows = rows
+        if selected_year:
+            filtered_rows = [r for r in filtered_rows if str(r.get('year') or '').strip() == selected_year]
+        if selected_semester:
+            filtered_rows = [r for r in filtered_rows if str(r.get('semester') or '').strip().lower() == selected_semester.lower()]
+        if selected_subject:
+            filtered_rows = [r for r in filtered_rows if str(r.get('Area_of_Study') or '').strip().lower() == selected_subject.lower()]
+
+        latest_catalog_rows, _latest_dataset_id = _load_scraped_catalog_for_term('', '')
+
+        if selected_course_number:
+            matches = [
+                r for r in rows
+                if _normalize_course_number(r.get('Course_Number')) == _normalize_course_number(selected_course_number)
+            ]
+            if selected_day_period:
+                matches = [m for m in matches if str(m.get('Day_and_Period') or '').strip().lower() == selected_day_period.lower()]
+
+            if matches:
+                selected_detail = _add_display_fields(dict(matches[0]))
+                completed_identifiers: Iterable[str] = _completed_passing_prereq_identifiers(current_user.id)
+                area_names = _resolve_user_area_names()
+                selected_prereq_status = _build_prerequisite_status(
+                    selected_detail.get('Prerequisite'),
+                    completed_identifiers,
+                    major_name=area_names.get('major'),
+                    minor_name=area_names.get('minor'),
+                    prereq_title_lookup=_build_prereq_title_lookup(),
+                )
+                selected_unlocks = _build_unlocks_for_course(latest_catalog_rows if latest_catalog_rows else rows, selected_detail)
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.error('courses_view failed: %s', exc, exc_info=True)
+        filtered_rows = []
+        year_options = []
+        semester_options = []
+        subject_options = []
+        selected_detail = None
+        selected_prereq_status = None
+        selected_unlocks = []
 
     return render_template(
         'Student/courses.html',
@@ -2306,41 +2435,9 @@ def edit_schedule(schedule_id):
         
     current_courses = []
     try:
-        rows = db.session.execute(
-            text(
-                '''
-                SELECT sc.id as entry_id, sc.grade, sc.course_number
-                FROM schedule_courses sc
-                WHERE sc.schedule_id = :sched_id
-                '''
-            ),
-            {'sched_id': schedule.id},
-        ).fetchall()
+        rows = _schedule_course_rows_for_schedule(schedule.id)
         catalog_rows, _dataset_id = _load_scraped_catalog_for_term(schedule.year, schedule.semester)
-        catalog_by_number = {
-            _normalize_course_number(r.get('Course_Number')): r
-            for r in catalog_rows
-            if _normalize_course_number(r.get('Course_Number'))
-        }
-        meta_index = _build_course_metadata_index()
-
-        for row in rows:
-            code = _normalize_course_number(row.course_number)
-            payload = dict(catalog_by_number.get(code) or {})
-            if not payload:
-                meta = meta_index.get(code, {})
-                payload = {
-                    'Course_Number': row.course_number,
-                    'Course_Title': meta.get('title') or row.course_number,
-                    'Credits': float(meta.get('credits') or 0.0),
-                    'Instructor': meta.get('instructor') or '',
-                    'Day_and_Period': meta.get('day_and_period') or '',
-                    'Area_of_Study': meta.get('area') or '',
-                    'Prerequisite': '',
-                }
-            payload['entry_id'] = row.entry_id
-            payload['grade'] = row.grade
-            current_courses.append(_add_display_fields(payload))
+        current_courses = _hydrate_schedule_courses(schedule, rows, catalog_rows)
     except Exception as e:
         db.session.rollback()
         print(f"Error fetching current courses: {e}")
@@ -2563,43 +2660,10 @@ def api_schedule_courses(schedule_id: int):
     log_behavior_event_safe('schedule_courses_loaded', schedule_id=schedule.id)
 
     try:
-        rows = db.session.execute(
-            text(
-                '''
-                SELECT sc.id as entry_id, sc.grade, sc.course_number
-                FROM schedule_courses sc
-                WHERE sc.schedule_id = :sched_id
-                '''
-            ),
-            {'sched_id': schedule.id},
-        ).fetchall()
+        rows = _schedule_course_rows_for_schedule(schedule.id)
 
         catalog_rows, _dataset_id = _load_scraped_catalog_for_term(schedule.year, schedule.semester)
-        catalog_by_number = {
-            _normalize_course_number(r.get('Course_Number')): r
-            for r in catalog_rows
-            if _normalize_course_number(r.get('Course_Number'))
-        }
-        meta_index = _build_course_metadata_index()
-
-        courses = []
-        for row in rows:
-            code = _normalize_course_number(row.course_number)
-            payload = dict(catalog_by_number.get(code) or {})
-            if not payload:
-                meta = meta_index.get(code, {})
-                payload = {
-                    'Course_Number': row.course_number,
-                    'Course_Title': meta.get('title') or row.course_number,
-                    'Credits': float(meta.get('credits') or 0.0),
-                    'Instructor': meta.get('instructor') or '',
-                    'Day_and_Period': meta.get('day_and_period') or '',
-                    'Area_of_Study': meta.get('area') or '',
-                    'Prerequisite': '',
-                }
-            payload['entry_id'] = row.entry_id
-            payload['grade'] = row.grade
-            courses.append(_add_display_fields(payload))
+        courses = _hydrate_schedule_courses(schedule, rows, catalog_rows)
 
         if not courses:
             courses = _load_schedule_courses_fallback(schedule.id)
@@ -2614,6 +2678,11 @@ def add_course():
     data = request.get_json(silent=True) or {}
     sched_id = data.get('schedule_id')
     course_num = (data.get('course_number') or '').strip()
+    day_period_raw = str(data.get('day_period') or data.get('day_and_period') or '').strip()
+    semester_raw = normalize_dataset_semester(data.get('semester') or '')
+    year_raw = str(data.get('year') or '').strip()
+    dataset_name_raw = str(data.get('dataset_name') or '').strip()
+    source_raw = str(data.get('source') or '').strip().lower()
 
     try:
         sched_id = int(sched_id)
@@ -2631,8 +2700,16 @@ def add_course():
     if not sched:
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
 
-    # Prevent duplicates
-    existing = ScheduleCourse.query.filter_by(schedule_id=sched.id, course_number=course_num).first()
+    # Prevent duplicates (identity-aware when section context is provided).
+    existing_query = ScheduleCourse.query.filter_by(schedule_id=sched.id, course_number=course_num)
+    if day_period_raw:
+        existing_query = existing_query.filter(
+            func.lower(func.coalesce(ScheduleCourse.day_period, '')) == day_period_raw.lower(),
+            func.lower(func.coalesce(ScheduleCourse.semester, '')) == (semester_raw or normalize_dataset_semester(sched.semester)),
+            func.lower(func.coalesce(ScheduleCourse.year, '')) == (year_raw or str(sched.year)).lower(),
+            func.lower(func.coalesce(ScheduleCourse.dataset_name, '')) == dataset_name_raw.lower(),
+        )
+    existing = existing_query.first()
     if existing:
         return (
             jsonify(
@@ -2665,7 +2742,19 @@ def add_course():
         for r in catalog_rows
         if _normalize_course_number(r.get('Course_Number'))
     }
-    candidate = course_map.get(_normalize_course_number(course_num))
+    normalized_course = _normalize_course_number(course_num)
+    candidate = None
+    if day_period_raw:
+        for row in catalog_rows:
+            if _normalize_course_number(row.get('Course_Number')) != normalized_course:
+                continue
+            if str(row.get('Day_and_Period') or '').strip().lower() == day_period_raw.lower():
+                candidate = row
+                break
+
+    if candidate is None:
+        candidate = course_map.get(normalized_course)
+
     if not candidate:
         return (
             jsonify(
@@ -2680,6 +2769,11 @@ def add_course():
 
     prereq_str = candidate.get('Prerequisite')
     candidate_day_period = candidate.get('Day_and_Period')
+    persisted_day_period = str(candidate_day_period or day_period_raw or 'TBA').strip() or 'TBA'
+    persisted_semester = normalize_dataset_semester(candidate.get('semester') or semester_raw or sched.semester)
+    persisted_year = str(candidate.get('year') or year_raw or sched.year).strip()
+    persisted_dataset_name = str(candidate.get('dataset_name') or dataset_name_raw).strip()
+    persisted_source = str(candidate.get('source') or source_raw).strip().lower()
 
     completed_passing = []
     if current_user.is_authenticated:
@@ -2711,17 +2805,16 @@ def add_course():
 
     # --- Conflict enforcement ---
     try:
-        existing_rows = db.session.execute(
-            text('SELECT course_number FROM schedule_courses WHERE schedule_id = :sid'),
-            {'sid': sched.id},
-        ).fetchall()
+        existing_rows = _schedule_course_rows_for_schedule(sched.id)
         period_map = _period_time_map()
         occupied_windows: list[tuple[str, int, int]] = []
         meta_index = _build_course_metadata_index()
         for r in existing_rows:
-            code = _normalize_course_number(r[0])
+            code = _normalize_course_number(r.get('course_number'))
             existing = course_map.get(code)
-            existing_dp = (existing or {}).get('Day_and_Period') if existing else None
+            existing_dp = str(r.get('day_period') or '').strip()
+            if not existing_dp:
+                existing_dp = (existing or {}).get('Day_and_Period') if existing else None
             if not existing_dp:
                 existing_dp = meta_index.get(code, {}).get('day_and_period')
             occupied_windows.extend(_time_windows_from_day_period(existing_dp, period_map))
@@ -2752,7 +2845,15 @@ def add_course():
             400,
         )
 
-    new_course = ScheduleCourse(schedule_id=sched_id, course_number=course_num)
+    new_course = ScheduleCourse(
+        schedule_id=sched_id,
+        course_number=course_num,
+        day_period=persisted_day_period,
+        semester=persisted_semester,
+        year=persisted_year,
+        dataset_name=persisted_dataset_name or None,
+        source=persisted_source or None,
+    )
     db.session.add(new_course)
     db.session.commit()
 
