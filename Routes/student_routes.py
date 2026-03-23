@@ -651,121 +651,121 @@ def _safe_json_load_dict(value: Any) -> Dict[str, Any]:
     try:
         parsed = json.loads(str(value))
         return parsed if isinstance(parsed, dict) else {}
-
-    def _catalog_identity_key(course_number: Any, day_period: Any, semester: Any, year: Any, dataset_name: Any) -> tuple[str, str, str, str, str]:
-        return (
-            _normalize_course_number(course_number),
-            str(day_period or '').strip().lower(),
-            normalize_dataset_semester(semester),
-            _normalize_year_text(year),
-            str(dataset_name or '').strip().lower(),
-        )
-
-    def _schedule_course_rows_for_schedule(schedule_id: int) -> list[Dict[str, Any]]:
-        try:
-            cols = {c['name'] for c in inspect(db.engine).get_columns('schedule_courses')}
-        except Exception:
-            db.session.rollback()
-            cols = set()
-
-        select_parts = [
-            'sc.id as entry_id',
-            'sc.grade as grade',
-            'sc.course_number as course_number',
-        ]
-
-        for name in ['day_period', 'semester', 'year', 'dataset_name', 'source']:
-            if name in cols:
-                select_parts.append(f'sc.{name} as {name}')
-            else:
-                select_parts.append(f'NULL as {name}')
-
-        query = text(
-            f'''
-            SELECT {', '.join(select_parts)}
-            FROM schedule_courses sc
-            WHERE sc.schedule_id = :sid
-            '''
-        )
-
-        try:
-            rows = db.session.execute(query, {'sid': schedule_id}).fetchall()
-            return [dict(r._mapping) for r in rows]
-        except Exception:
-            db.session.rollback()
-            return []
-
-
-    def _hydrate_schedule_courses(schedule: Schedule, schedule_rows: list[Dict[str, Any]], catalog_rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
-        catalog_by_identity: Dict[tuple[str, str, str, str, str], Dict[str, Any]] = {}
-        catalog_by_number: Dict[str, Dict[str, Any]] = {}
-
-        for row in catalog_rows:
-            mapped = dict(row)
-            identity_key = _catalog_identity_key(
-                mapped.get('Course_Number'),
-                mapped.get('Day_and_Period'),
-                mapped.get('semester') or schedule.semester,
-                mapped.get('year') or schedule.year,
-                mapped.get('dataset_name'),
-            )
-            catalog_by_identity.setdefault(identity_key, mapped)
-
-            number_key = _normalize_course_number(mapped.get('Course_Number'))
-            if number_key and number_key not in catalog_by_number:
-                catalog_by_number[number_key] = mapped
-
-        meta_index = _build_course_metadata_index()
-        courses: list[Dict[str, Any]] = []
-
-        for row in schedule_rows:
-            course_number = row.get('course_number')
-            day_period = row.get('day_period')
-            semester = row.get('semester') or schedule.semester
-            year = row.get('year') or schedule.year
-            dataset_name = row.get('dataset_name')
-
-            identity_key = _catalog_identity_key(course_number, day_period, semester, year, dataset_name)
-            payload = dict(catalog_by_identity.get(identity_key) or {})
-
-            if not payload and day_period:
-                term_key = _catalog_identity_key(course_number, day_period, schedule.semester, schedule.year, dataset_name)
-                payload = dict(catalog_by_identity.get(term_key) or {})
-
-            code = _normalize_course_number(course_number)
-            if not payload:
-                payload = dict(catalog_by_number.get(code) or {})
-
-            if not payload:
-                meta = meta_index.get(code, {})
-                payload = {
-                    'Course_Number': course_number,
-                    'Course_Title': meta.get('title') or course_number,
-                    'Credits': float(meta.get('credits') or 0.0),
-                    'Instructor': meta.get('instructor') or '',
-                    'Day_and_Period': day_period or meta.get('day_and_period') or '',
-                    'Area_of_Study': meta.get('area') or '',
-                    'Prerequisite': '',
-                }
-
-            resolved_day_period = str(day_period or payload.get('Day_and_Period') or 'TBA').strip() or 'TBA'
-            resolved_semester = normalize_dataset_semester(semester or payload.get('semester') or schedule.semester)
-            resolved_year = str(year or payload.get('year') or schedule.year).strip()
-            resolved_dataset_name = str(dataset_name or payload.get('dataset_name') or '').strip()
-
-            payload['entry_id'] = row.get('entry_id')
-            payload['grade'] = row.get('grade')
-            payload['identity_day_period'] = resolved_day_period
-            payload['identity_semester'] = resolved_semester
-            payload['identity_year'] = resolved_year
-            payload['identity_dataset_name'] = resolved_dataset_name
-            payload['identity_source'] = row.get('source')
-            payload['Day_and_Period'] = payload.get('Day_and_Period') or resolved_day_period
-            courses.append(_add_display_fields(payload))
-
-        return courses
     except Exception:
         return {}
+
+def _catalog_identity_key(course_number: Any, day_period: Any, semester: Any, year: Any, dataset_name: Any) -> tuple[str, str, str, str, str]:
+    return (
+        _normalize_course_number(course_number),
+        str(day_period or '').strip().lower(),
+        normalize_dataset_semester(semester),
+        _normalize_year_text(year),
+        str(dataset_name or '').strip().lower(),
+    )
+
+def _schedule_course_rows_for_schedule(schedule_id: int) -> list[Dict[str, Any]]:
+    try:
+        cols = {c['name'] for c in inspect(db.engine).get_columns('schedule_courses')}
+    except Exception:
+        db.session.rollback()
+        cols = set()
+
+    select_parts = [
+        'sc.id as entry_id',
+        'sc.grade as grade',
+        'sc.course_number as course_number',
+    ]
+
+    for name in ['day_period', 'semester', 'year', 'dataset_name', 'source']:
+        if name in cols:
+            select_parts.append(f'sc.{name} as {name}')
+        else:
+            select_parts.append(f'NULL as {name}')
+
+    query = text(
+        f'''
+        SELECT {', '.join(select_parts)}
+        FROM schedule_courses sc
+        WHERE sc.schedule_id = :sid
+        '''
+    )
+
+    try:
+        rows = db.session.execute(query, {'sid': schedule_id}).fetchall()
+        return [dict(r._mapping) for r in rows]
+    except Exception:
+        db.session.rollback()
+        return []
+
+
+def _hydrate_schedule_courses(schedule: Schedule, schedule_rows: list[Dict[str, Any]], catalog_rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    catalog_by_identity: Dict[tuple[str, str, str, str, str], Dict[str, Any]] = {}
+    catalog_by_number: Dict[str, Dict[str, Any]] = {}
+
+    for row in catalog_rows:
+        mapped = dict(row)
+        identity_key = _catalog_identity_key(
+            mapped.get('Course_Number'),
+            mapped.get('Day_and_Period'),
+            mapped.get('semester') or schedule.semester,
+            mapped.get('year') or schedule.year,
+            mapped.get('dataset_name'),
+        )
+        catalog_by_identity.setdefault(identity_key, mapped)
+
+        number_key = _normalize_course_number(mapped.get('Course_Number'))
+        if number_key and number_key not in catalog_by_number:
+            catalog_by_number[number_key] = mapped
+
+    meta_index = _build_course_metadata_index()
+    courses: list[Dict[str, Any]] = []
+
+    for row in schedule_rows:
+        course_number = row.get('course_number')
+        day_period = row.get('day_period')
+        semester = row.get('semester') or schedule.semester
+        year = row.get('year') or schedule.year
+        dataset_name = row.get('dataset_name')
+
+        identity_key = _catalog_identity_key(course_number, day_period, semester, year, dataset_name)
+        payload = dict(catalog_by_identity.get(identity_key) or {})
+
+        if not payload and day_period:
+            term_key = _catalog_identity_key(course_number, day_period, schedule.semester, schedule.year, dataset_name)
+            payload = dict(catalog_by_identity.get(term_key) or {})
+
+        code = _normalize_course_number(course_number)
+        if not payload:
+            payload = dict(catalog_by_number.get(code) or {})
+
+        if not payload:
+            meta = meta_index.get(code, {})
+            payload = {
+                'Course_Number': course_number,
+                'Course_Title': meta.get('title') or course_number,
+                'Credits': float(meta.get('credits') or 0.0),
+                'Instructor': meta.get('instructor') or '',
+                'Day_and_Period': day_period or meta.get('day_and_period') or '',
+                'Area_of_Study': meta.get('area') or '',
+                'Prerequisite': '',
+            }
+
+        resolved_day_period = str(day_period or payload.get('Day_and_Period') or 'TBA').strip() or 'TBA'
+        resolved_semester = normalize_dataset_semester(semester or payload.get('semester') or schedule.semester)
+        resolved_year = str(year or payload.get('year') or schedule.year).strip()
+        resolved_dataset_name = str(dataset_name or payload.get('dataset_name') or '').strip()
+
+        payload['entry_id'] = row.get('entry_id')
+        payload['grade'] = row.get('grade')
+        payload['identity_day_period'] = resolved_day_period
+        payload['identity_semester'] = resolved_semester
+        payload['identity_year'] = resolved_year
+        payload['identity_dataset_name'] = resolved_dataset_name
+        payload['identity_source'] = row.get('source')
+        payload['Day_and_Period'] = payload.get('Day_and_Period') or resolved_day_period
+        courses.append(_add_display_fields(payload))
+
+    return courses
 
 
 def _update_learning_profile_snapshot_safe(user_id: int) -> None:

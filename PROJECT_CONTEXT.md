@@ -279,6 +279,16 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - `tests/test_admin_dataset_and_tba_contracts.py`
   - `tests/test_student_view_and_export_contracts.py`
 
+## 2026-03-24 — Beta 1.4.1 (production deploy syntax hotfix)
+
+- Fixed a production-blocking `SyntaxError` in `Routes/student_routes.py` where identity helper functions were accidentally nested inside `_safe_json_load_dict` before its `except` block.
+- Restored proper function boundaries for:
+  - `_safe_json_load_dict`
+  - `_catalog_identity_key`
+  - `_schedule_course_rows_for_schedule`
+  - `_hydrate_schedule_courses`
+- Verified local test suite after fix: `31 passed`.
+
 ## 2026-03-18 — Beta 0.1
 
 - Added initial dataset ingestion architecture and admin data management foundations.
