@@ -12,8 +12,8 @@ database.db
 instance/
 
 .DS_Store
-Routes/.DS_Store
-migrations/.DS_Store
+**/.DS_Store
+~$*.xlsx
 
 .env
 .env.*
