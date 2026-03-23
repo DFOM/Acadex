@@ -11,9 +11,19 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.2**
+- Current version: **Beta 1.3**
 
 ## Changelog
+
+### Beta 1.3 — 2026-03-24
+
+- Added schedule level support (`level` on `Schedule`) with creation-time level selection (`First` through `Fourth` year).
+- Added level-aware course catalog filtering in schedule editor APIs/UI with a toggle: `Show only my level` / `Show all levels`.
+- Upgraded unlock dependency inference to prioritize the latest active dataset so reverse-prerequisite results stay current.
+- Added compact dashboard mini schedule overviews with day/period/title/faculty rows and quick links to full schedule editor.
+- Added schedule grid PNG export from editor UI using client-side capture.
+- Hardened admin dataset deletion with explicit transaction handling, retry-safe registry cleanup fallback, and structured success/failure logging.
+- Simplified user-facing course detail surfaces to focus on title, area, credits, faculty, prerequisites, and unlocks.
 
 ### Beta 1.2 — 2026-03-24
 

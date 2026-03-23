@@ -1768,7 +1768,6 @@ def _delete_registry_dataset_row(row: DatasetRegistry) -> dict:
             db.session.delete(ds)
 
     db.session.delete(row)
-    db.session.commit()
 
     return {
         'dataset_name': dataset_name,
@@ -1812,7 +1811,30 @@ def api_delete_dataset(dataset_id: int):
     row = DatasetRegistry.query.get(dataset_id)
     if not row:
         return jsonify({'success': False, 'message': 'Dataset not found.'}), 404
-    result = _delete_registry_dataset_row(row)
+
+    try:
+        result = _delete_registry_dataset_row(row)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.error('Dataset delete failed for id=%s: %s', dataset_id, exc, exc_info=True)
+        fallback_row = DatasetRegistry.query.get(dataset_id)
+        if fallback_row:
+            try:
+                db.session.delete(fallback_row)
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+        return jsonify({'success': False, 'message': 'Dataset delete failed. Please retry or use force-delete.'}), 500
+
+    current_app.logger.info(
+        'Dataset delete success id=%s name=%s source=%s dropped_table=%s deleted_rows=%s',
+        dataset_id,
+        result.get('dataset_name'),
+        result.get('source'),
+        result.get('dropped_table'),
+        result.get('deleted_rows'),
+    )
     return jsonify({'success': True, 'message': f'Dataset {result.get("dataset_name")} deleted.', 'result': result})
 
 

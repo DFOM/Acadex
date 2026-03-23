@@ -46,6 +46,17 @@
                         </div>
                     </div>
 
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-muted small text-uppercase">Your Level</label>
+                        <select class="form-select form-select-lg shadow-sm border-0" name="level" id="levelSelect" required>
+                            <option value="" disabled {{ 'selected' if not default_level else '' }}>Select level...</option>
+                            <option value="1" {{ 'selected' if default_level == 1 else '' }}>First-Year</option>
+                            <option value="2" {{ 'selected' if default_level == 2 else '' }}>Second-Year</option>
+                            <option value="3" {{ 'selected' if default_level == 3 else '' }}>Third-Year</option>
+                            <option value="4" {{ 'selected' if default_level == 4 else '' }}>Fourth-Year</option>
+                        </select>
+                    </div>
+
                     {% if schedule_type == 'future' %}
                     <div class="alert alert-info small py-2" id="futurePlanningNotice">
                         Future planning is limited to {{ current_year }} through {{ future_max_year }} based on available dataset registry terms.

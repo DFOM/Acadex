@@ -172,15 +172,16 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 ## Student-facing
 
 - Create/edit schedules (past/future)
+- Schedule creation now captures student level (`1-4`) for level-adaptive planning.
 - Create-schedule year/semester options are now driven strictly by `DatasetRegistry` availability (no free-form term selection).
 - Future planning supports fallback to the nearest available registry term within `current_year + 5` and surfaces warning messages.
-- Search/browse courses by contextual dataset resolution
+- Search/browse courses by contextual dataset resolution with optional future-plan level scope toggle (`my level` vs `all levels`).
 - Add/remove schedule courses with:
   - real time-overlap conflict detection using Period start/end windows
   - prerequisite status checks
-- Course detail API with unlock analysis and prereq state
-- Schedule editor is grid-only and includes inline grade selection chips (A/B/C/D/F) with tooltip guidance.
-- Dashboard with GPA/progress and notifications
+- Course detail API now returns a cleaner student payload (title/area/credits/faculty/prerequisites/unlocks) and unlock analysis uses latest active dataset when available.
+- Schedule editor is grid-only and includes inline grade selection chips (A/B/C/D/F) with tooltip guidance, plus PNG export.
+- Dashboard with GPA/progress, notifications, and mini schedule overview cards.
 - AI recommendation preview and generation flows (feature-gated)
 
 ## Admin-facing
@@ -190,7 +191,7 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Mixed-term CSV uploads (Fall+Spring) are split into semester-specific dataset names during ingestion.
   - Registry listing with source/year/semester/type/table metadata
   - Refresh/delete/force-delete registry entries
-  - delete action uses a confirmation modal and supports `DELETE /admin/api/datasets/<id>`
+  - delete action uses a confirmation modal, supports `DELETE /admin/api/datasets/<id>`, and now runs a hardened transactional delete flow with structured logs
   - Bulk clean invalid datasets
   - Orphan table scan/cleanup
   - Dataset column inspection
@@ -336,6 +337,16 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Hardened course detail endpoint with safer null handling and defensive error responses while preserving unlock dependency analysis.
 - Removed list mode from schedule editor and standardized on grid-only interaction.
 - Added in-grid grade chips (`A/B/C/D/F`) with select/deselect toggle behavior and themed tooltip instructions.
+
+## 2026-03-24 — Beta 1.3 (dependency intelligence + UX/final fixes)
+
+- Added `Schedule.level` persistence and migration (`b8d9e0f1a2b3_add_level_to_schedules.py`) with create-schedule level selector.
+- Added level-aware catalog filtering in `student.courses.search` and schedule editor UI toggle (`my level` / `all levels`).
+- Updated unlock dependency derivation to prefer latest dataset catalog context so reverse prerequisites reflect current offerings.
+- Added dashboard mini schedule overview section with compact day/period/course/faculty rows and deep links to full schedule pages.
+- Added editor-side PNG export for the schedule grid.
+- Hardened admin dataset delete API transaction flow and added explicit success/failure logging with registry-row cleanup fallback.
+- Simplified student course detail and courses view presentation by removing non-essential day/period emphasis in detail/unlock surfaces.
 
 ---
 

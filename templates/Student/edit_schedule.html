@@ -52,6 +52,9 @@
         <small class="text-muted fw-bold">{{ schedule.semester }} {{ schedule.year }} <span class="badge {{ 'bg-secondary' if schedule.schedule_type == 'past' else 'bg-warning' }} rounded-pill ms-2" style="color: var(--ax-text);">{{ schedule.schedule_type | upper }}</span></small>
     </div>
     <div class="d-flex align-items-center gap-2">
+        <button type="button" class="btn btn-outline-primary shadow-sm fw-bold px-3" id="exportSchedulePngBtn">
+            {{ hi('arrow-down-tray', 'ax-icon me-1') }}Export PNG
+        </button>
         {% if current_user.is_authenticated %}
         <button type="button"
                 class="btn btn-outline-danger shadow-sm fw-bold px-3"
@@ -89,6 +92,14 @@
                 <label class="small fw-bold text-muted mb-1">Faculty / Instructor</label>
                 <input class="form-control form-control-sm mb-3 border-0" list="instructorList" id="filterInstructor" placeholder="Type or select Faculty...">
                 <datalist id="instructorList"></datalist>
+
+                {% if schedule.schedule_type == 'future' and schedule_level %}
+                <label class="small fw-bold text-muted mb-1">Course Level Scope</label>
+                <select class="form-select form-select-sm mb-3 border-0" id="filterLevelScope">
+                    <option value="my" selected>Show only my level ({{ schedule_level }})</option>
+                    <option value="all">Show all levels</option>
+                </select>
+                {% endif %}
 
                 <label class="small fw-bold text-muted mb-1">Credits</label>
                 <div id="creditsCheckboxContainer" class="d-flex flex-wrap mb-2">
@@ -190,7 +201,10 @@
 <script>
     window.IS_AUTHENTICATED = {{ 'true' if current_user.is_authenticated else 'false' }};
     window.SCHEDULE_TYPE = "{{ schedule.schedule_type }}";
+    window.SCHEDULE_LEVEL = {{ schedule_level if schedule_level else 'null' }};
 </script>
+
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {

@@ -149,6 +149,7 @@ class Schedule(db.Model):
     year = db.Column(db.Integer, nullable=False)
     semester = db.Column(db.String(50), nullable=False)
     schedule_type = db.Column(db.String(50), default='future') # past or future
+    level = db.Column(db.Integer, nullable=True)
     
     # Relationship: If a schedule is deleted, all its courses are automatically deleted
     courses = db.relationship('ScheduleCourse', backref='schedule', lazy=True, cascade="all, delete-orphan")

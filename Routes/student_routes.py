@@ -82,6 +82,14 @@ def _normalize_semester_text(value: Any) -> str:
     return normalize_dataset_semester(value)
 
 
+def _parse_schedule_level(value: Any) -> int | None:
+    try:
+        parsed = int(str(value or '').strip())
+    except Exception:
+        return None
+    return parsed if parsed in {1, 2, 3, 4} else None
+
+
 def _is_full_year_semester(value: Any) -> bool:
     sem = _normalize_semester_text(value)
     return sem == 'full_year'
@@ -1293,6 +1301,18 @@ def _load_catalog_for_term(year: int, semester: str) -> tuple[list[Dict[str, Any
         return rows, f"scraped_dataset_{dataset_id}"
     return rows, f"unified_catalog_{year}_{semester}"
 
+
+def _filter_rows_by_level(catalog_rows: list[Dict[str, Any]], schedule_level: int | None, level_scope: str) -> list[Dict[str, Any]]:
+    if level_scope != 'my' or schedule_level not in {1, 2, 3, 4}:
+        return catalog_rows
+
+    filtered = [
+        row
+        for row in catalog_rows
+        if _parse_schedule_level(row.get('year_level')) == schedule_level
+    ]
+    return filtered if filtered else catalog_rows
+
 @student_bp.route('/courses/search')
 def search_courses():
     # Supports two modes:
@@ -1310,6 +1330,7 @@ def search_courses():
     resolved_year = year
     resolved_semester = semester
 
+    schedule_level = None
     if schedule_id:
         try:
             schedule_id_int = int(schedule_id)
@@ -1326,14 +1347,20 @@ def search_courses():
 
         resolved_year = sched.year
         resolved_semester = sched.semester
+        schedule_level = _parse_schedule_level(getattr(sched, 'level', None))
+
+    level_scope = str(request.args.get('level_scope') or '').strip().lower()
+    if level_scope not in {'my', 'all'}:
+        level_scope = 'my'
 
     catalog_rows, dataset_id = _load_scraped_catalog_for_term(resolved_year, resolved_semester)
     if not catalog_rows:
         return jsonify([])
+    filtered_catalog_rows = _filter_rows_by_level(catalog_rows, schedule_level, level_scope)
     # Full catalog load for the schedule editor.
     if json_mode and schedule_id and query_str == '':
         try:
-            payload = [_add_display_fields(dict(r)) for r in catalog_rows]
+            payload = [_add_display_fields(dict(r)) for r in filtered_catalog_rows]
 
             log_behavior_event_safe(
                 'catalog_loaded',
@@ -1344,6 +1371,8 @@ def search_courses():
                     'semester': resolved_semester,
                     'source': 'schedule_editor',
                     'dataset_id': dataset_id,
+                    'level_scope': level_scope,
+                    'schedule_level': schedule_level,
                 },
             )
             return jsonify(payload)
@@ -1370,7 +1399,7 @@ def search_courses():
     try:
         q = query_str.lower()
         filtered = [
-            row for row in catalog_rows
+            row for row in filtered_catalog_rows
             if q in str(row.get('Course_Number') or '').lower()
             or q in str(row.get('Course_Title') or '').lower()
         ]
@@ -1454,7 +1483,6 @@ def _build_unlocks_for_course(catalog_rows: list[Dict[str, Any]], target_row: Di
                 'display_course_number': mapped.get('display_course_number'),
                 'course_title': mapped.get('Course_Title'),
                 'display_title': mapped.get('display_title'),
-                'day_and_period': mapped.get('Day_and_Period'),
                 'instructor': instructor_text,
                 'credits': mapped.get('Credits'),
                 'prerequisite': mapped.get('Prerequisite'),
@@ -1464,7 +1492,7 @@ def _build_unlocks_for_course(catalog_rows: list[Dict[str, Any]], target_row: Di
     unlocks.sort(
         key=lambda row: (
             str(row.get('course_number') or ''),
-            str(row.get('day_and_period') or ''),
+            str(row.get('display_title') or row.get('course_title') or ''),
         )
     )
     return unlocks
@@ -1547,13 +1575,16 @@ def api_course_detail():
             minor_name=minor_name,
             prereq_title_lookup=_build_prereq_title_lookup(),
         )
-        unlocks = _build_unlocks_for_course(catalog_rows, target_row)
+        latest_catalog_rows, latest_dataset_id = _load_scraped_catalog_for_term('', '')
+        unlock_source_rows = latest_catalog_rows if latest_catalog_rows else catalog_rows
+        unlocks = _build_unlocks_for_course(unlock_source_rows, target_row)
 
         return jsonify(
             {
                 'success': True,
                 'dataset_id': dataset_id,
                 'resolved_dataset_name': resolved_dataset_name or None,
+                'unlock_dataset_id': latest_dataset_id,
                 'course': {
                     'course_number': target_row.get('Course_Number'),
                     'display_course_number': target_row.get('display_course_number'),
@@ -1561,7 +1592,6 @@ def api_course_detail():
                     'display_title': target_row.get('display_title'),
                     'credits': target_row.get('Credits'),
                     'instructor': target_row.get('Instructor'),
-                    'day_and_period': target_row.get('Day_and_Period'),
                     'area_of_study': target_row.get('Area_of_Study'),
                     'prerequisite': target_row.get('Prerequisite'),
                 },
@@ -1604,6 +1634,7 @@ def courses_view():
     selected_detail = None
     selected_prereq_status = None
     selected_unlocks: list[dict] = []
+    latest_catalog_rows, _latest_dataset_id = _load_scraped_catalog_for_term('', '')
 
     if selected_course_number:
         matches = [
@@ -1624,7 +1655,7 @@ def courses_view():
                 minor_name=area_names.get('minor'),
                 prereq_title_lookup=_build_prereq_title_lookup(),
             )
-            selected_unlocks = _build_unlocks_for_course(rows, selected_detail)
+            selected_unlocks = _build_unlocks_for_course(latest_catalog_rows if latest_catalog_rows else rows, selected_detail)
 
     return render_template(
         'Student/courses.html',
@@ -1741,6 +1772,53 @@ def user_dashboard():
         db.session.rollback()
         print(f"Dashboard notification load failed: {e}")
 
+    schedule_ids = [int(s.id) for s in schedules]
+    schedule_courses_by_schedule: dict[int, list[dict[str, Any]]] = {sid: [] for sid in schedule_ids}
+    if schedule_ids:
+        try:
+            rows = (
+                db.session.query(ScheduleCourse.schedule_id, ScheduleCourse.course_number)
+                .filter(ScheduleCourse.schedule_id.in_(schedule_ids))
+                .all()
+            )
+            for row in rows:
+                sid = int(row.schedule_id)
+                code = _normalize_course_number(row.course_number)
+                meta = metadata_index.get(code, {})
+                day_period = str(meta.get('day_and_period') or '').strip()
+                instructor = _normalize_instructor(meta.get('instructor') or '') or 'TBA'
+                title = str(meta.get('title') or row.course_number or '').strip()
+                if not day_period:
+                    continue
+                for day, period_name in _day_period_structured_blocks(day_period):
+                    schedule_courses_by_schedule.setdefault(sid, []).append(
+                        {
+                            'day': day,
+                            'period': period_name,
+                            'title': title,
+                            'faculty': instructor,
+                        }
+                    )
+        except Exception:
+            db.session.rollback()
+
+    dashboard_mini_schedules: list[dict[str, Any]] = []
+    for sched in schedules[:3]:
+        slot_rows = sorted(
+            schedule_courses_by_schedule.get(int(sched.id), []),
+            key=lambda item: (item.get('day') or '', str(item.get('period') or '')),
+        )
+        dashboard_mini_schedules.append(
+            {
+                'id': sched.id,
+                'name': sched.schedule_name,
+                'semester': sched.semester,
+                'year': sched.year,
+                'schedule_type': sched.schedule_type,
+                'slots': slot_rows[:25],
+            }
+        )
+
     return render_template('Student/dashboard.html', 
                            schedules=schedules, 
                            has_past=len(past_schedules) > 0,
@@ -1758,6 +1836,7 @@ def user_dashboard():
                            ai_data_collection_enabled=ai_data_collection_enabled,
                            has_dataset_years=bool(dataset_years),
                            dataset_years=dataset_years,
+                           dashboard_mini_schedules=dashboard_mini_schedules,
                            notifications=notifications,
                            unread_notifications_count=unread_notifications_count)
 
@@ -2069,6 +2148,7 @@ def create_schedule():
         sched_type = str(sched_type or 'future').strip().lower()
         if sched_type not in {'past', 'future'}:
             sched_type = 'future'
+        schedule_level = _parse_schedule_level(request.form.get('level'))
 
         if not all([name, year, semester]):
             flash("Please fill out all fields.", "error")
@@ -2119,7 +2199,8 @@ def create_schedule():
             schedule_name=name,
             year=resolved_year,
             semester=resolved_semester.title(),
-            schedule_type=sched_type
+            schedule_type=sched_type,
+            level=schedule_level,
         )
 
         if current_user.is_authenticated:
@@ -2151,6 +2232,7 @@ def create_schedule():
                     'schedule_type': new_sched.schedule_type,
                     'year': new_sched.year,
                     'semester': new_sched.semester,
+                    'level': new_sched.level,
                 },
             )
             _update_learning_profile_snapshot_safe(current_user.id)
@@ -2162,6 +2244,7 @@ def create_schedule():
                 'schedule_type': new_sched.schedule_type,
                 'year': new_sched.year,
                 'semester': new_sched.semester,
+                'level': new_sched.level,
             },
         )
 
@@ -2202,6 +2285,7 @@ def create_schedule():
         ai_enabled=get_bool_setting('ai_enabled', False),
         ai_recommendations_enabled=get_bool_setting('ai_recommendations_enabled', True),
         ai_data_collection_enabled=get_bool_setting('ai_data_collection_enabled', False),
+        default_level=_parse_schedule_level(getattr(current_user, 'year_of_study', None)) if current_user.is_authenticated else None,
         user_area_names=_resolve_user_area_names() if current_user.is_authenticated else {'major': '', 'minor': ''},
         ai_suggestions_allowed=suggestions_allowed,
         ai_suggestions_gate_message=suggestions_gate_message,
@@ -2307,6 +2391,7 @@ def edit_schedule(schedule_id):
                            schedule=schedule, 
                            current_courses=current_courses,
                            obtained_courses=obtained_courses,
+                           schedule_level=_parse_schedule_level(getattr(schedule, 'level', None)),
                            periods=periods,
                            lunch_start_time=lunch_start_time,
                            lunch_end_time=lunch_end_time)

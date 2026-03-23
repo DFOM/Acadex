@@ -14,10 +14,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const obtainedCoursesElement = document.getElementById('obtainedCoursesData');
     const resultCountBadge = document.getElementById('resultCountBadge');
     const totalCreditsBadge = document.getElementById('totalCreditsBadge');
+    const levelScopeSelect = document.getElementById('filterLevelScope');
+    const exportSchedulePngBtn = document.getElementById('exportSchedulePngBtn');
 
     // Load the student's historical obtained courses
     const obtainedCourses = obtainedCoursesElement ? JSON.parse(obtainedCoursesElement.textContent) : [];
     const scheduleType = String(window.SCHEDULE_TYPE || '').toLowerCase();
+    const scheduleLevel = Number(window.SCHEDULE_LEVEL);
 
     // Current schedule courses (server-rendered initial state)
     let currentScheduleCourses = coursesDataElement ? JSON.parse(coursesDataElement.textContent) : [];
@@ -231,7 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? unlocks.slice(0, 60).map((item) => `
                     <li class="list-group-item px-0 py-2 border-0 border-bottom">
                         <div class="fw-semibold">${escapeHtml(item.display_title || item.course_title || 'Untitled')}</div>
-                        <div class="small text-muted">${escapeHtml(item.display_course_number || item.course_number || '')} · ${escapeHtml(item.day_and_period || 'TBA')} · ${escapeHtml(item.instructor || 'TBA')}</div>
+                        <div class="small text-muted">${escapeHtml(item.display_course_number || item.course_number || '')} · ${escapeHtml(item.instructor || 'TBA')}</div>
                     </li>
                 `).join('')
                 : '<div class="small text-muted">No reverse dependencies found in this term.</div>';
@@ -241,7 +244,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="d-flex flex-wrap gap-2 mb-1">
                         <span class="badge bg-light text-dark border">${escapeHtml(course.display_course_number || course.course_number || '')}</span>
                         <span class="badge bg-primary-subtle text-primary border border-primary-subtle">${escapeHtml(String(course.credits ?? 0))} CR</span>
-                        <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">${escapeHtml(course.day_and_period || 'TBA')}</span>
                     </div>
                     <div class="small text-muted">Instructor: ${escapeHtml(course.instructor || 'TBA')} · Area: ${escapeHtml(course.area_of_study || 'General')}</div>
                 </div>
@@ -515,7 +517,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const scheduleId = scheduleIdInput.value;
 
         try {
-            const response = await fetch(`/student/courses/search?query=&schedule_id=${scheduleId}&json=true`);
+            const params = new URLSearchParams({
+                query: '',
+                schedule_id: String(scheduleId || ''),
+                json: 'true',
+            });
+            if (levelScopeSelect && Number.isFinite(scheduleLevel) && scheduleLevel > 0) {
+                params.set('level_scope', String(levelScopeSelect.value || 'my'));
+            }
+            const response = await fetch(`/student/courses/search?${params.toString()}`);
             allCatalogCourses = await response.json();
 
             prereqTitleLookup.clear();
@@ -550,7 +560,9 @@ document.addEventListener('DOMContentLoaded', () => {
             c.ComputedSubject = subj.trim();
             subjects.add(c.ComputedSubject);
 
-            if (c.Instructor && c.Instructor.trim() !== "") instructors.add(c.Instructor.trim());
+            const instructorName = cleanInstructorDisplay(c.Instructor);
+            c.Instructor = instructorName;
+            if (instructorName && instructorName !== 'TBA') instructors.add(instructorName);
             if (c.Credits !== null && c.Credits !== undefined) credits.add(String(c.Credits));
             
             if (c.Day_and_Period && c.Day_and_Period !== 'TBA') {
@@ -741,11 +753,47 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (scheduleIdInput) loadCatalog();
     if (searchInput) searchInput.addEventListener('input', applyFiltersAndRender);
+    if (levelScopeSelect) levelScopeSelect.addEventListener('change', loadCatalog);
 
     // Initial grid/list render (only on schedule editor page)
     if (scheduleIdInput && document.querySelectorAll('.schedule-cell').length) {
         renderGrid(currentScheduleCourses);
         updateTotalCredits(currentScheduleCourses);
+    }
+
+    if (exportSchedulePngBtn) {
+        exportSchedulePngBtn.addEventListener('click', async () => {
+            const gridRoot = document.querySelector('#grid-view .ax-grid-wrap');
+            if (!gridRoot || typeof html2canvas !== 'function') {
+                alert('PNG export is unavailable right now.');
+                return;
+            }
+
+            exportSchedulePngBtn.disabled = true;
+            const originalText = exportSchedulePngBtn.textContent;
+            exportSchedulePngBtn.textContent = 'Exporting...';
+
+            try {
+                const canvas = await html2canvas(gridRoot, {
+                    backgroundColor: '#ffffff',
+                    scale: 2,
+                    useCORS: true,
+                    onclone: (doc) => {
+                        doc.querySelectorAll('.remove-course-btn, .grade-chip, .badge').forEach((el) => el.remove());
+                    },
+                });
+                const link = document.createElement('a');
+                const stamp = new Date().toISOString().slice(0, 10);
+                link.download = `schedule-${stamp}.png`;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            } catch (err) {
+                alert('Unable to export schedule right now.');
+            } finally {
+                exportSchedulePngBtn.disabled = false;
+                exportSchedulePngBtn.textContent = originalText;
+            }
+        });
     }
 
 

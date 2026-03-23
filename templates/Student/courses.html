@@ -58,7 +58,6 @@
                             <th>Course Title</th>
                             <th>Credits</th>
                             <th>Instructor</th>
-                            <th>Day &amp; Period</th>
                             <th></th>
                         </tr>
                     </thead>
@@ -71,7 +70,6 @@
                             </td>
                             <td>{{ c.Credits }}</td>
                             <td>{{ c.Instructor or 'TBA' }}</td>
-                            <td>{{ c.Day_and_Period or 'TBA' }}</td>
                             <td class="text-end">
                                 <a class="btn btn-sm btn-outline-primary"
                                    href="{{ url_for('student.courses_view', year=selected_year, semester=selected_semester, subject_area=selected_subject, course_number=c.Course_Number, day_and_period=c.Day_and_Period) }}">
@@ -81,7 +79,7 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="5" class="text-center text-muted py-4">Currently there are no courses for this selection.</td>
+                            <td colspan="4" class="text-center text-muted py-4">Currently there are no courses for this selection.</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -101,7 +99,6 @@
             <div class="small mb-3" style="color:var(--ax-text-dim);">
                 <div><strong>Credits:</strong> {{ selected_detail.Credits }}</div>
                 <div><strong>Instructor(s):</strong> {{ selected_detail.Instructor or 'TBA' }}</div>
-                <div><strong>Day &amp; Period:</strong> {{ selected_detail.Day_and_Period or 'TBA' }}</div>
                 <div><strong>Subject Area:</strong> {{ selected_detail.Area_of_Study or 'General' }}</div>
             </div>
 
@@ -127,7 +124,7 @@
                     {% for row in selected_unlocks %}
                     <li class="list-group-item px-0" style="background:transparent;">
                         <div class="fw-semibold">{{ row.display_title or row.course_title }}</div>
-                        <div class="small text-muted">{{ row.display_course_number or row.course_number }} · {{ row.day_and_period or 'TBA' }}</div>
+                        <div class="small text-muted">{{ row.display_course_number or row.course_number }} · {{ row.instructor or 'TBA' }}</div>
                     </li>
                     {% endfor %}
                 </ul>

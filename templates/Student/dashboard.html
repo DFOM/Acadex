@@ -88,6 +88,53 @@
             </div>
             {% endif %}
         </div>
+
+        <div class="mb-1 mt-4 d-flex align-items-center justify-content-between" style="border-bottom:1px solid var(--ax-border);padding-bottom:.6rem;">
+            <h4 class="fw-bold mb-0" style="font-size:1rem;">Mini Schedule Overview</h4>
+        </div>
+        <div class="d-flex flex-column gap-3 mt-3">
+            {% if dashboard_mini_schedules %}
+                {% for mini in dashboard_mini_schedules %}
+                <div class="ax-card p-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div>
+                            <div class="fw-bold" style="font-size:.9rem;color:var(--ax-text);">{{ mini.name }}</div>
+                            <div style="font-size:.76rem;color:var(--ax-muted);">{{ mini.semester }} {{ mini.year }}</div>
+                        </div>
+                        <a href="{{ url_for('student.edit_schedule', schedule_id=mini.id) }}" class="btn btn-sm btn-outline-primary">View Full Schedule</a>
+                    </div>
+                    {% if mini.slots %}
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th style="font-size:.72rem;">Day</th>
+                                    <th style="font-size:.72rem;">Period</th>
+                                    <th style="font-size:.72rem;">Course</th>
+                                    <th style="font-size:.72rem;">Faculty</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for slot in mini.slots %}
+                                <tr>
+                                    <td style="font-size:.76rem;">{{ slot.day }}</td>
+                                    <td style="font-size:.76rem;">{{ slot.period }}</td>
+                                    <td style="font-size:.76rem;">{{ slot.title }}</td>
+                                    <td style="font-size:.76rem;">{{ slot.faculty }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div style="font-size:.8rem;color:var(--ax-muted);">No scheduled courses yet.</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            {% else %}
+            <div class="ax-card p-3" style="font-size:.85rem;color:var(--ax-muted);">Create a schedule to see a compact overview here.</div>
+            {% endif %}
+        </div>
     </div>
 
     {# ══ RIGHT COLUMN ══ #}
