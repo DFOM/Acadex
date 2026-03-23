@@ -94,6 +94,107 @@ def _resolve_contextual_dataset_name(year: Any, semester: Any, *, source: str | 
     return resolve_dataset_name(year, semester, source=source)
 
 
+def _current_year_setting_value() -> int:
+    current_year_setting = Setting.query.get('current_year')
+    if current_year_setting and str(current_year_setting.value or '').isdigit():
+        return int(current_year_setting.value)
+    return datetime.utcnow().year
+
+
+def _registry_terms_index() -> dict[int, set[str]]:
+    index: dict[int, set[str]] = {}
+    try:
+        rows = DatasetRegistry.query.order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).all()
+    except Exception:
+        db.session.rollback()
+        return index
+
+    for row in rows:
+        semester = normalize_dataset_semester(getattr(row, 'semester', None))
+        if semester not in {'spring', 'fall'}:
+            continue
+        year_text = str(getattr(row, 'year', '') or '').strip()
+        if not year_text.isdigit():
+            continue
+        year_val = int(year_text)
+        if year_val < 2000 or year_val > 2199:
+            continue
+        index.setdefault(year_val, set()).add(semester)
+    return index
+
+
+def _eligible_term_index(term_index: dict[int, set[str]], schedule_type: str, current_year: int) -> dict[int, set[str]]:
+    if schedule_type == 'past':
+        return {y: set(v) for y, v in term_index.items() if y < current_year}
+    max_future_year = current_year + 5
+    return {y: set(v) for y, v in term_index.items() if current_year <= y <= max_future_year}
+
+
+def _resolve_term_with_fallback(
+    requested_year: int,
+    requested_semester: str,
+    schedule_type: str,
+    *,
+    current_year: int,
+    term_index: dict[int, set[str]],
+) -> tuple[int | None, str | None, str | None]:
+    sem = normalize_dataset_semester(requested_semester)
+    if sem not in {'spring', 'fall'}:
+        return None, None, None
+
+    eligible = _eligible_term_index(term_index, schedule_type, current_year)
+    if sem in eligible.get(requested_year, set()):
+        return requested_year, sem, None
+
+    if schedule_type != 'future':
+        return None, None, None
+
+    max_future_year = current_year + 5
+    candidate_years = sorted(y for y in eligible.keys() if requested_year <= y <= max_future_year)
+    for year_val in candidate_years:
+        if sem in eligible.get(year_val, set()):
+            return year_val, sem, f'No {sem.title()} catalog was found for {requested_year}. Using {sem.title()} {year_val}.'
+
+    for year_val in candidate_years:
+        semesters = sorted(eligible.get(year_val, set()))
+        if semesters:
+            chosen_sem = semesters[0]
+            return year_val, chosen_sem, f'No {sem.title()} catalog was found for {requested_year}. Using {chosen_sem.title()} {year_val}.'
+
+    return None, None, None
+
+
+def _course_offering_cycle(row: Dict[str, Any]) -> str | None:
+    text_blob = ' '.join(
+        [
+            str(row.get('Course_Title') or ''),
+            str(row.get('Prerequisite') or ''),
+            str(row.get('Area_of_Study') or ''),
+            str(row.get('Day_and_Period') or ''),
+        ]
+    ).lower()
+    if re.search(r'\b(offered?|available)\s+(in\s+)?odd\s+years?\b|\bodd\s+years?\s+only\b', text_blob):
+        return 'odd'
+    if re.search(r'\b(offered?|available)\s+(in\s+)?even\s+years?\b|\beven\s+years?\s+only\b', text_blob):
+        return 'even'
+    return None
+
+
+def _apply_offering_cycle_filter(rows: list[Dict[str, Any]], year: Any) -> list[Dict[str, Any]]:
+    try:
+        year_val = int(str(year or '').strip())
+    except Exception:
+        return rows
+
+    parity = 'even' if year_val % 2 == 0 else 'odd'
+    filtered: list[Dict[str, Any]] = []
+    for row in rows:
+        cycle = _course_offering_cycle(row)
+        if cycle is None or cycle == parity:
+            filtered.append(row)
+    return filtered
+
+
 def _humanize_day_and_period(value: Any) -> str:
     raw = str(value or '').strip()
     if not raw:
@@ -362,6 +463,7 @@ def _manual_or_csv_course_to_catalog_row(row: Course) -> Dict[str, Any]:
         'dataset_name': row.dataset_name,
         'semester': str(row.semester or '').strip(),
         'year': str(row.year or '').strip(),
+        'Year_Level': row.year_level,
         'source': str(row.source or '').strip().lower() or 'manual',
         'updated_ts': row.last_updated or row.updated_at or row.created_at,
     }
@@ -690,6 +792,7 @@ def _load_scraped_catalog_for_term(year: Any, semester: Any) -> tuple[list[Dict[
             str(item.get('Day_and_Period') or ''),
         )
     )
+    resolved = _apply_offering_cycle_filter(resolved, year_text)
     return resolved, dataset_id
 
 
@@ -1818,16 +1921,21 @@ def ai_consent():
 @student_bp.route('/schedule/create', methods=['GET', 'POST'])
 def create_schedule():
     dataset_years = get_available_dataset_years()
+    current_year = _current_year_setting_value()
+    registry_terms = _registry_terms_index()
 
     if request.method == 'POST':
         name = (request.form.get('schedule_name') or '').strip()[:150]
         year = request.form.get('year')
-        semester = (request.form.get('semester') or '').strip()[:50]
+        semester = normalize_dataset_semester((request.form.get('semester') or '').strip()[:50])
         
         if not current_user.is_authenticated:
             sched_type = 'future'
         else:
             sched_type = request.form.get('schedule_type', 'future')
+        sched_type = str(sched_type or 'future').strip().lower()
+        if sched_type not in {'past', 'future'}:
+            sched_type = 'future'
 
         if not all([name, year, semester]):
             flash("Please fill out all fields.", "error")
@@ -1847,7 +1955,22 @@ def create_schedule():
                 else url_for('student.create_schedule', schedule_type='future')
             )
 
-        resolved_dataset = resolve_dataset(year_int, semester)
+        resolved_year, resolved_semester, fallback_warning = _resolve_term_with_fallback(
+            year_int,
+            semester,
+            sched_type,
+            current_year=current_year,
+            term_index=registry_terms,
+        )
+        if resolved_year is None or not resolved_semester:
+            flash("No course data available for selected year/semester", "error")
+            return redirect(
+                url_for('student.user_dashboard')
+                if current_user.is_authenticated
+                else url_for('student.create_schedule', schedule_type='future')
+            )
+
+        resolved_dataset = resolve_dataset(resolved_year, resolved_semester)
         if resolved_dataset is None:
             flash("No course data available for selected year/semester", "error")
             return redirect(
@@ -1856,10 +1979,13 @@ def create_schedule():
                 else url_for('student.create_schedule', schedule_type='future')
             )
 
+        if fallback_warning:
+            flash(fallback_warning, 'warning')
+
         new_sched = Schedule(
             schedule_name=name,
-            year=year_int,
-            semester=semester,
+            year=resolved_year,
+            semester=resolved_semester.title(),
             schedule_type=sched_type
         )
 
@@ -1913,16 +2039,19 @@ def create_schedule():
         if not requested_type:
             return redirect(url_for('auth.choose_schedule_type'))
 
-    current_year_setting = Setting.query.get('current_year')
-    current_year = int(current_year_setting.value) if current_year_setting and current_year_setting.value.isdigit() else 2024
-
     schedule_type = (request.args.get('schedule_type') or 'future').strip().lower()
     if schedule_type not in {'past', 'future'}:
         schedule_type = 'future'
     if not current_user.is_authenticated:
         schedule_type = 'future'
-    
-    available_years = dataset_years
+
+    eligible_terms = _eligible_term_index(registry_terms, schedule_type, current_year)
+    available_term_map: dict[int, list[str]] = {
+        int(year): [s.title() for s in sorted(semesters)]
+        for year, semesters in sorted(eligible_terms.items())
+        if semesters
+    }
+    available_years = sorted(available_term_map.keys())
 
     suggestions_allowed = False
     suggestions_gate_message = None
@@ -1932,7 +2061,9 @@ def create_schedule():
     return render_template(
         'Student/create_schedule.html',
         available_years=available_years,
+        available_term_map=available_term_map,
         current_year=current_year,
+        future_max_year=current_year + 5,
         schedule_type=schedule_type,
         has_dataset_years=bool(available_years),
         ai_enabled=get_bool_setting('ai_enabled', False),
@@ -2052,13 +2183,13 @@ def edit_schedule(schedule_id):
 @login_required
 def api_recommendations_preview():
     year_raw = request.args.get('year')
-    semester = (request.args.get('semester') or '').strip()
+    semester = normalize_dataset_semester((request.args.get('semester') or '').strip())
 
     try:
         year = int(year_raw)
     except Exception:
         return jsonify({'success': False, 'message': 'Invalid year'}), 400
-    if semester not in {'Spring', 'Fall'}:
+    if semester not in {'spring', 'fall'}:
         return jsonify({'success': False, 'message': 'Invalid semester'}), 400
 
     schedule_type = (request.args.get('schedule_type') or 'future').strip().lower()
@@ -2071,30 +2202,41 @@ def api_recommendations_preview():
         limit = 5
     limit = max(1, min(limit, 5))
 
+    current_year = _current_year_setting_value()
+    resolved_year, resolved_semester, fallback_warning = _resolve_term_with_fallback(
+        year,
+        semester,
+        'future',
+        current_year=current_year,
+        term_index=_registry_terms_index(),
+    )
+    if resolved_year is None or not resolved_semester:
+        return jsonify({'success': False, 'message': 'No course data available for selected year/semester'}), 400
+
     log_behavior_event_safe(
         'ai_preview_requested',
-        metadata={'year': year, 'semester': semester, 'limit': limit},
+        metadata={'year': resolved_year, 'semester': resolved_semester, 'limit': limit},
     )
 
     if not get_bool_setting('ai_enabled', False) or not get_bool_setting('ai_recommendations_enabled', True):
         log_ai_event_safe(
             'ai_preview_blocked',
-            metadata={'year': year, 'semester': semester, 'reason': 'feature_disabled'},
+            metadata={'year': resolved_year, 'semester': resolved_semester, 'reason': 'feature_disabled'},
         )
         return jsonify({'success': False, 'message': 'AI recommendations are currently disabled.'}), 403
 
     if not bool(getattr(current_user, 'ai_opt_in', False)):
         log_ai_event_safe(
             'ai_preview_blocked',
-            metadata={'year': year, 'semester': semester, 'reason': 'opt_in_required'},
+            metadata={'year': resolved_year, 'semester': resolved_semester, 'reason': 'opt_in_required'},
         )
         return jsonify({'success': False, 'message': 'AI recommendations require opt-in.'}), 403
 
-    catalog, table_name = _load_catalog_for_term(year, semester)
+    catalog, table_name = _load_catalog_for_term(resolved_year, resolved_semester)
     if not table_name:
         log_ai_event_safe(
             'ai_preview_blocked',
-            metadata={'year': year, 'semester': semester, 'reason': 'catalog_unavailable'},
+            metadata={'year': resolved_year, 'semester': resolved_semester, 'reason': 'catalog_unavailable'},
         )
         return jsonify({'success': False, 'message': 'No course data available for selected year/semester'}), 400
 
@@ -2161,15 +2303,15 @@ def api_recommendations_preview():
     log_ai_event_safe(
         'ai_preview_generated',
         metadata={
-            'year': year,
-            'semester': semester,
+            'year': resolved_year,
+            'semester': resolved_semester,
             'table_name': table_name,
             'recommendation_count': len(payload),
             'parse_error_count': len(errors),
         },
     )
 
-    return jsonify({
+    response_payload = {
         'success': True,
         'recommendations': payload,
         'context': {
@@ -2179,7 +2321,11 @@ def api_recommendations_preview():
             'remaining_to_graduate': progress.get('remaining_to_graduate', 0.0),
             'graduation_required_credits': progress.get('graduation_required_credits', 124.0),
         },
-    })
+    }
+    if fallback_warning:
+        response_payload['message'] = fallback_warning
+
+    return jsonify(response_payload)
 
 
 @student_bp.route('/api/schedule/<int:schedule_id>/courses', methods=['GET'])

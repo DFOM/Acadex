@@ -29,21 +29,11 @@
                             <label class="form-label fw-bold text-muted small text-uppercase">Academic Year</label>
                             <select class="form-select form-select-lg shadow-sm border-0" name="year" id="yearSelect" required>
                                 <option value="" disabled selected>Year...</option>
-                                {% set current = current_year | int %}
-                                {% set count = namespace(value=0) %}
-                                
                                 {% for year in available_years %}
-                                    {% set y = year | int %}
-                                    {% if schedule_type == 'past' and y < current %}
-                                        <option value="{{ y }}">{{ y }}</option>
-                                        {% set count.value = count.value + 1 %}
-                                    {% elif schedule_type != 'past' and y >= current %}
-                                        <option value="{{ y }}">{{ y }}</option>
-                                        {% set count.value = count.value + 1 %}
-                                    {% endif %}
+                                    <option value="{{ year }}">{{ year }}</option>
                                 {% endfor %}
 
-                                {% if count.value == 0 %}
+                                {% if not available_years %}
                                     <option value="" disabled>No course catalogs available</option>
                                 {% endif %}
                             </select>
@@ -52,11 +42,15 @@
                             <label class="form-label fw-bold text-muted small text-uppercase">Semester</label>
                             <select class="form-select form-select-lg shadow-sm border-0" name="semester" id="semesterSelect" required>
                                 <option value="" disabled selected>Semester...</option>
-                                <option value="Spring">Spring</option>
-                                <option value="Fall">Fall</option>
                             </select>
                         </div>
                     </div>
+
+                    {% if schedule_type == 'future' %}
+                    <div class="alert alert-info small py-2" id="futurePlanningNotice">
+                        Future planning is limited to {{ current_year }} through {{ future_max_year }} based on available dataset registry terms.
+                    </div>
+                    {% endif %}
 
                     <div class="mb-4">
                         <label class="form-label fw-bold text-muted small text-uppercase">Plan Name</label>
@@ -69,7 +63,7 @@
                     </div>
 
                     <div class="d-grid gap-2 mt-4">
-                        <button type="submit" class="btn btn-primary btn-lg fw-bold shadow-sm rounded-pill" {% if count.value == 0 %}disabled{% endif %}>
+                        <button type="submit" class="btn btn-primary btn-lg fw-bold shadow-sm rounded-pill" {% if not has_dataset_years %}disabled{% endif %}>
                             Create & Continue &rarr;
                         </button>
                         {% if current_user.is_authenticated %}
@@ -127,11 +121,27 @@ document.addEventListener('DOMContentLoaded', function() {
     const suggestionStatus = document.getElementById('aiSuggestionStatus');
     const suggestionList = document.getElementById('aiSuggestionList');
     const progressHint = document.getElementById('aiProgressHint');
+    const availableTermMap = {{ available_term_map | tojson }};
 
     const userName = "{{ current_user.username | default('Plan', true) }}".trim();
     const isAuthenticated = {{ 'true' if current_user.is_authenticated else 'false' }};
     const scheduleType = "{{ schedule_type }}";
     const aiSuggestionsAllowed = {{ 'true' if ai_suggestions_allowed else 'false' }};
+
+    function updateSemestersForYear() {
+        const year = yearSelect.value;
+        const terms = Array.isArray(availableTermMap[String(year)]) ? availableTermMap[String(year)] : [];
+        semesterSelect.innerHTML = '<option value="" disabled selected>Semester...</option>';
+
+        terms.forEach((term) => {
+            const opt = document.createElement('option');
+            opt.value = term;
+            opt.textContent = term;
+            semesterSelect.appendChild(opt);
+        });
+
+        semesterSelect.disabled = terms.length === 0;
+    }
 
     function autoFillName() {
         const year = yearSelect.value;
@@ -236,10 +246,23 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    yearSelect.addEventListener('change', updateSemestersForYear);
     yearSelect.addEventListener('change', autoFillName);
     semesterSelect.addEventListener('change', autoFillName);
     yearSelect.addEventListener('change', loadAiPreview);
     semesterSelect.addEventListener('change', loadAiPreview);
+
+    if (yearSelect && yearSelect.options.length > 1) {
+        yearSelect.selectedIndex = 1;
+        updateSemestersForYear();
+        if (semesterSelect && semesterSelect.options.length > 1) {
+            semesterSelect.selectedIndex = 1;
+        }
+        autoFillName();
+        loadAiPreview();
+    } else {
+        semesterSelect.disabled = true;
+    }
 
     // Realtime refresh hooks: if course add/remove events happen in another tab,
     // this page refreshes preview suggestions automatically.

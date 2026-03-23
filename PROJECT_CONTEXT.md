@@ -172,6 +172,8 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 ## Student-facing
 
 - Create/edit schedules (past/future)
+- Create-schedule year/semester options are now driven strictly by `DatasetRegistry` availability (no free-form term selection).
+- Future planning supports fallback to the nearest available registry term within `current_year + 5` and surfaces warning messages.
 - Search/browse courses by contextual dataset resolution
 - Add/remove schedule courses with:
   - conflict detection
@@ -184,6 +186,7 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 - Dataset management:
   - CSV upload and metadata registration
+  - Mixed-term CSV uploads (Fall+Spring) are split into semester-specific dataset names during ingestion.
   - Registry listing with source/year/semester/type/table metadata
   - Refresh/delete/force-delete registry entries
   - Bulk clean invalid datasets
@@ -199,6 +202,7 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 - RBAC + per-route permission enforcement
 - Notifications + behavior/AI events
+- Catalog filtering applies odd/even year offering text guards when course metadata includes odd-only/even-only language.
 - Alembic migrations and startup bootstrap protections
 - Policy enforcement for `PROJECT_CONTEXT.md` in both local pre-commit and GitHub Actions CI
 
@@ -311,6 +315,16 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - structured per-row parsed payload logs with empty-critical-field error logging.
 - Added subject-area persistence sync during ingestion (auto-creates missing `SubjectArea` rows).
 - Simplified admin faculty course display to title-only labels in faculty payload serialization.
+
+## 2026-03-23 — Beta 1.1 (data consistency + future planning)
+
+- Refactored CSV ingestion update matching to be term-scoped (`course_number + day_period + year + semester + dataset_name`) so cross-term course history is not overwritten.
+- Added semester-specific dataset split behavior for mixed Fall/Spring CSV imports and per-term `CatalogStatus` updates.
+- Enforced schedule creation year/semester availability strictly from `DatasetRegistry` with past/future windows.
+- Added future-term fallback resolver (up to `current_year + 5`) for schedule creation and AI recommendation preview.
+- Updated create-schedule UI to dynamically populate semester options per selected year from backend-provided registry map.
+- Added odd/even offering filtering pass based on course text signals (odd years only / even years only).
+- Added global theme alias tokens (`--text-primary`, `--text-secondary`, `--background`, `--surface`) and baseline contrast-safe form/card/table text rules.
 
 ---
 

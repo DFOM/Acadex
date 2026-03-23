@@ -11,9 +11,19 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1**
+- Current version: **Beta 1.1**
 
 ## Changelog
+
+### Beta 1.1 — 2026-03-23
+
+- Upgraded CSV ingestion to preserve course history by term-scoping updates (`course_number + day_period + year + semester + dataset_name`) instead of cross-term overwrites.
+- Added automatic split behavior for mixed Fall/Spring CSV uploads so local CSV course rows and registry entries are stored under semester-specific dataset names.
+- Enforced schedule creation options from dataset registry availability only, with strict past/future term windows.
+- Added future-planning fallback logic (up to `current_year + 5`) so unavailable requested terms resolve to the nearest available registry term with a warning.
+- Updated create-schedule UI to dynamically load semester options per selected year from registry-backed availability.
+- Added odd/even offering filtering support by excluding rows tagged in course text as odd-only/even-only when year parity does not match.
+- Improved global theme visibility by introducing generic color aliases (`--text-primary`, `--text-secondary`, `--background`, `--surface`) and applying contrast-safe defaults to cards/tables/forms.
 
 ### Beta 1 — 2026-03-23
 

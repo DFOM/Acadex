@@ -62,6 +62,12 @@
 
   /* ── Legacy compat ────────────────────────────────────── */
   --ax-muted-rgb: 100, 116, 139;
+
+  /* ── Generic aliases for cross-page visibility ────────── */
+  --text-primary: var(--ax-text);
+  --text-secondary: var(--ax-text-dim);
+  --background: var(--ax-bg);
+  --surface: var(--ax-surface);
 }
 
 /* Light theme override */
@@ -82,6 +88,11 @@
   --ax-shadow-lg: 0 20px 48px rgba(15,23,42,0.14);
   --ax-glow-sm:   0 0 12px rgba(99,102,241,0.25);
   --ax-glow-md:   0 0 24px rgba(99,102,241,0.35);
+
+  --text-primary: var(--ax-text);
+  --text-secondary: var(--ax-text-dim);
+  --background: var(--ax-bg);
+  --surface: var(--ax-surface);
 }
 
 /* ======================================
@@ -134,14 +145,43 @@ html {
 
 body {
   font-family: var(--ax-font);
-  background: var(--ax-bg);
-  color: var(--ax-text);
+  background: var(--background);
+  color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.6;
   /* Animated gradient background orbs */
   position: relative;
   overflow-x: hidden;
+}
+
+.card,
+.modal-content,
+.dropdown-menu,
+.offcanvas,
+.list-group-item,
+.table,
+.table td,
+.table th {
+  color: var(--text-primary);
+}
+
+.form-control,
+.form-select,
+.input-group-text,
+textarea {
+  background-color: var(--surface);
+  color: var(--text-primary);
+}
+
+.form-control::placeholder,
+textarea::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.9;
+}
+
+.text-muted {
+  color: var(--text-secondary) !important;
 }
 
 /* Ambient background orbs */

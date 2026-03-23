@@ -1420,6 +1420,7 @@ def upload_dataset():
     skipped_invalid = 0
     skipped_missing_faculty = 0
     total_rows_read = 0
+    touched_registry_terms: set[tuple[str, str, str]] = set()
     instructor_samples: list[str] = []
     parsed_faculty_samples: list[list[str]] = []
 
@@ -1481,6 +1482,28 @@ def upload_dataset():
             inferred_semester = normalize_dataset_semester(only_sem)
             inferred_type = infer_dataset_type(inferred_semester)
 
+        fallback_year = sorted(year_values)[-1] if year_values else (inferred_year or str(get_app_setting('current_year', '') or '').strip())
+
+        def _dataset_name_for_term(term_semester: str | None, term_year: str | None) -> str:
+            sem_norm = normalize_dataset_semester(term_semester)
+            year_value = str(term_year or '').strip() or str(fallback_year or '').strip() or str(inferred_year or '').strip()
+            base_name = str(dataset_name or '').strip()
+
+            has_multiple_semesters = len(semester_values) > 1
+            if sem_norm in {'fall', 'spring'} and has_multiple_semesters:
+                if base_name:
+                    cleaned = re.sub(r'\b(full[_\- ]?year|full|all\s*courses?)\b', '', base_name, flags=re.IGNORECASE).strip(' _-')
+                    if re.search(r'\b(fall|spring)\b', cleaned, flags=re.IGNORECASE):
+                        return cleaned
+                    if year_value:
+                        return f'{year_value} {sem_norm.title()} Course List'
+                    return f'{cleaned} {sem_norm.title()} Course List'.strip()
+                return f'{year_value} {sem_norm.title()} Course List'.strip()
+
+            if base_name:
+                return base_name
+            return f"{year_value}_{sem_norm or 'term'}_CSV".strip('_')
+
         initial_faculty_count = int(Faculty.query.count() or 0)
         subject_area_cache: dict[str, SubjectArea] = {
             str(a.name or '').strip().lower(): a
@@ -1539,11 +1562,18 @@ def upload_dataset():
             year_raw = _pick_from_payload(row_payload, 'year') or year_hint or ''
             semester, year = _parse_semester_year(semester_raw, year_raw)
             year_level = _parse_year_level(_pick_from_payload(row_payload, 'year_level'))
+            row_dataset_name = _dataset_name_for_term(semester, year)
+            row_semester_norm = normalize_dataset_semester(semester)
+            row_year_norm = str(year or '').strip().lower()
+            row_dataset_norm = str(row_dataset_name or '').strip().lower()
 
             existing = (
                 Course.query.filter(
                     sa.func.lower(Course.course_number) == course_number.strip().lower(),
                     sa.func.lower(Course.day_period) == day_period.strip().lower(),
+                    sa.func.lower(sa.func.coalesce(Course.year, '')) == row_year_norm,
+                    sa.func.lower(sa.func.coalesce(Course.semester, '')) == row_semester_norm,
+                    sa.func.lower(sa.func.coalesce(Course.dataset_name, '')) == row_dataset_norm,
                 )
                 .order_by(Course.last_updated.desc(), Course.id.desc())
                 .first()
@@ -1561,7 +1591,7 @@ def upload_dataset():
                 current_app.logger.warning(
                     'FAILED TO EXTRACT: faculty from row %s (dataset=%s, course=%s).',
                     row_index,
-                    dataset_name,
+                    row_dataset_name,
                     course_number,
                 )
                 continue
@@ -1594,9 +1624,12 @@ def upload_dataset():
                 'prerequisite': _pick_from_payload(row_payload, 'prerequisite') or None,
                 'subject_area': subject_area_text or None,
                 'faculty': parsed_faculty,
-                'dataset_name': dataset_name or None,
+                'dataset_name': row_dataset_name or None,
                 'source': 'csv',
             }
+
+            if row_year_norm and row_semester_norm in {'fall', 'spring'} and row_dataset_name:
+                touched_registry_terms.add((str(year or '').strip(), row_semester_norm, row_dataset_name))
 
             if existing:
                 if str(existing.source or '').strip().lower() == 'manual':
@@ -1635,17 +1668,39 @@ def upload_dataset():
             faculty_created,
         )
 
-        _upsert_dataset_registry_entry(
-            dataset_name,
-            'csv',
-            _dataset_table_name_from_name(dataset_name, 'csv'),
-            year=(inferred_year or None),
-            semester=(inferred_semester or None),
-            dataset_type=inferred_type,
-        )
+        if touched_registry_terms:
+            for term_year, term_semester, term_dataset_name in sorted(touched_registry_terms):
+                _upsert_dataset_registry_entry(
+                    term_dataset_name,
+                    'csv',
+                    _dataset_table_name_from_name(term_dataset_name, 'csv'),
+                    year=(term_year or None),
+                    semester=(term_semester or None),
+                    dataset_type=infer_dataset_type(term_semester),
+                )
+        else:
+            _upsert_dataset_registry_entry(
+                dataset_name,
+                'csv',
+                _dataset_table_name_from_name(dataset_name, 'csv'),
+                year=(inferred_year or None),
+                semester=(inferred_semester or None),
+                dataset_type=inferred_type,
+            )
         db.session.commit()
 
-        if inferred_semester and inferred_year:
+        if touched_registry_terms:
+            for term_year, term_semester, term_dataset_name in sorted(touched_registry_terms):
+                term_key = f"{term_semester} {term_year}".strip()
+                row = CatalogStatus.query.filter_by(term=term_key).first()
+                if not row:
+                    row = CatalogStatus(term=term_key, status='available', dataset=term_dataset_name)
+                    db.session.add(row)
+                else:
+                    row.status = 'available'
+                    row.dataset = term_dataset_name
+            db.session.commit()
+        elif inferred_semester and inferred_year:
             term_key = f"{inferred_semester} {inferred_year}".strip()
             row = CatalogStatus.query.filter_by(term=term_key).first()
             if not row:
