@@ -176,9 +176,10 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Future planning supports fallback to the nearest available registry term within `current_year + 5` and surfaces warning messages.
 - Search/browse courses by contextual dataset resolution
 - Add/remove schedule courses with:
-  - conflict detection
+  - real time-overlap conflict detection using Period start/end windows
   - prerequisite status checks
 - Course detail API with unlock analysis and prereq state
+- Schedule editor is grid-only and includes inline grade selection chips (A/B/C/D/F) with tooltip guidance.
 - Dashboard with GPA/progress and notifications
 - AI recommendation preview and generation flows (feature-gated)
 
@@ -189,6 +190,7 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Mixed-term CSV uploads (Fall+Spring) are split into semester-specific dataset names during ingestion.
   - Registry listing with source/year/semester/type/table metadata
   - Refresh/delete/force-delete registry entries
+  - delete action uses a confirmation modal and supports `DELETE /admin/api/datasets/<id>`
   - Bulk clean invalid datasets
   - Orphan table scan/cleanup
   - Dataset column inspection
@@ -210,15 +212,13 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 # 5. Known Issues / Pending Fixes
 
-1. Repository version metadata drift:
-   - `README.md` still shows earlier beta numbering (Beta 0.2) while active project label is Beta 0.9 in folder naming.
-2. Test invocation environment sensitivity:
+1. Test invocation environment sensitivity:
    - `pytest` may require `PYTHONPATH=.` for module imports in current local setup.
-3. Legacy data model retention:
+2. Legacy data model retention:
    - `ScrapedDataset` and `ScrapedCourse` models remain for backward compatibility cleanup, but ingestion no longer uses them.
-4. CI workflow maintenance:
+3. CI workflow maintenance:
    - Keep branch protection configured to require the `Project Context Guard` workflow so policy checks cannot be bypassed.
-5. Python 3.14 local runtime compatibility:
+4. Python 3.14 local runtime compatibility:
   - SQLAlchemy/Flask stack may require newer SQLAlchemy than historical pin when running full app imports under Python 3.14.
   - Local validation used an isolated SQLite DB harness to execute admin ingestion handlers directly.
 
@@ -325,6 +325,17 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Updated create-schedule UI to dynamically populate semester options per selected year from backend-provided registry map.
 - Added odd/even offering filtering pass based on course text signals (odd years only / even years only).
 - Added global theme alias tokens (`--text-primary`, `--text-secondary`, `--background`, `--surface`) and baseline contrast-safe form/card/table text rules.
+
+## 2026-03-24 — Beta 1.2 (system stability + UX fixes)
+
+- Replaced token-string clash checks with real time-window overlap checks in student add-course backend flow and schedule editor section-selection UI.
+- Added period-time parsing utilities and overlap comparison helpers to enforce `same day + overlapping time` conflict semantics.
+- Added stable dataset delete route support for `DELETE /admin/api/datasets/<id>` and ensured table drops use `DROP TABLE IF EXISTS ... CASCADE`.
+- Added admin dataset delete confirmation modal and wired delete UI to the DELETE endpoint.
+- Normalized faculty/instructor display formatting for list-like encoded values so UI output is human-readable.
+- Hardened course detail endpoint with safer null handling and defensive error responses while preserving unlock dependency analysis.
+- Removed list mode from schedule editor and standardized on grid-only interaction.
+- Added in-grid grade chips (`A/B/C/D/F`) with select/deselect toggle behavior and themed tooltip instructions.
 
 ---
 

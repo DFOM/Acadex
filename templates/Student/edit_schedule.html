@@ -10,6 +10,40 @@
     .filters-section { flex: 0 0 auto; max-height: 45%; overflow-y: auto; padding-right: 5px; }
     .results-section { flex: 1 1 auto; overflow-y: auto; padding-right: 5px; background-color: color-mix(in srgb, var(--ax-surface) 92%, var(--ax-bg)); }
     .filter-pill { cursor: pointer; border-radius: 20px; font-size: 0.75rem; font-weight: bold; margin-bottom: 5px; margin-right: 5px; }
+    .grade-chip {
+        border: 1px solid var(--ax-border);
+        background: color-mix(in srgb, var(--ax-surface) 88%, var(--ax-bg));
+        color: var(--ax-text-dim);
+        border-radius: 999px;
+        padding: 1px 6px;
+        font-size: 0.58rem;
+        font-weight: 700;
+        transition: transform .18s ease, background-color .2s ease, color .2s ease, box-shadow .2s ease;
+    }
+    .grade-chip:hover {
+        transform: translateY(-1px);
+        color: var(--ax-text);
+        box-shadow: var(--ax-shadow-sm);
+    }
+    .grade-chip.grade-active {
+        background: var(--ax-primary);
+        color: #fff;
+        border-color: transparent;
+    }
+    .grade-chip:disabled {
+        opacity: .5;
+        cursor: not-allowed;
+    }
+    .tooltip.show { opacity: 1; }
+    .tooltip .tooltip-inner {
+        border-radius: var(--ax-radius-xs);
+        background: var(--ax-surface-2);
+        color: var(--ax-text);
+        border: 1px solid var(--ax-border);
+        box-shadow: var(--ax-shadow-md);
+        max-width: 280px;
+        transition: transform .18s ease;
+    }
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-4 mt-3 pb-3 border-bottom">
@@ -100,21 +134,12 @@
     <div class="col-lg-8 col-md-7 mb-4">
         <div class="ax-card h-100 overflow-hidden">
             <div class="card-header border-bottom py-3 d-flex justify-content-between align-items-center" style="background: var(--ax-surface);">
-                <ul class="nav nav-pills" id="scheduleTabs" role="tablist">
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link active fw-bold px-3 py-1" id="grid-tab" data-bs-toggle="pill" data-bs-target="#grid-view" type="button" role="tab">Grid</button>
-                    </li>
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link fw-bold px-3 py-1 ms-2" id="list-tab" data-bs-toggle="pill" data-bs-target="#list-view" type="button" role="tab">List</button>
-                    </li>
-                </ul>
+                <div class="fw-bold">Grid View</div>
                 <span id="totalCreditsBadge" class="badge bg-success rounded-pill px-3 py-2 fs-6 shadow-sm">Total Credits: {{ current_courses|sum(attribute='Credits') }}</span>
             </div>
             
             <div class="card-body p-0">
-                <div class="tab-content h-100" id="scheduleTabsContent">
-                    
-                    <div class="tab-pane fade show active p-2 h-100" id="grid-view" role="tabpanel">
+                <div class="p-2 h-100" id="grid-view" role="tabpanel">
                         <div class="ax-grid-wrap h-100">
                             <table class="table table-bordered mb-0 text-center ax-grid-table" style="table-layout: fixed; min-width: 500px;">
                                 <thead>
@@ -130,7 +155,7 @@
                                 <tbody>
                                     {% for period in periods %}
                                     <tr style="height: 100px;">
-                                        <th class="align-middle text-muted border-end-0 py-1">
+                                        <th class="align-middle text-muted border-end-0 py-1" data-period-name="{{ period.name }}" data-start-time="{{ period.start_time }}" data-end-time="{{ period.end_time }}">
                                             <div class="fw-bold text-primary" style="font-size: 0.75rem; line-height: 1;">Period {{ period.name }}</div>
                                             <div class="fw-bold" style="font-size: 0.8rem; line-height: 1; color: var(--ax-text);">{{ period.start_time }}</div>
                                             <div class="text-muted" style="font-size: 0.7rem; line-height: 1.5;">{{ period.end_time }}</div>
@@ -154,54 +179,6 @@
                                 </tbody>
                             </table>
                         </div>
-                    </div>
-
-                    <div class="tab-pane fade h-100" id="list-view" role="tabpanel">
-                        <div class="table-responsive h-100">
-                            <table class="table table-hover align-middle mb-0">
-                                <thead>
-                                    <tr>
-                                        <th>Title</th>
-                                        <th>CR</th>
-                                        <th>Schedule</th>
-                                        <th>Grade</th>
-                                        <th class="text-end pe-3">Drop</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for course in current_courses %}
-                                    <tr>
-                                        <td class="fw-bold small">{{ course.display_title or course.Course_Title }}</td>
-                                        <td class="small">{{ course.Credits }}</td>
-                                        <td><span class="badge bg-info" style="font-size: 0.65rem; color: var(--ax-text);">{{ course.Day_and_Period or 'TBA' }}</span></td>
-                                        <td>
-                                            {% if current_user.is_authenticated %}
-                                            <select class="form-select form-select-sm border-0 shadow-sm grade-select" data-entry-id="{{ course.entry_id }}" style="width: 75px; font-size: 0.75rem; font-weight: bold;">
-                                                <option value="" {% if not course.grade %}selected{% endif %}>--</option>
-                                                <option value="A" {% if course.grade == 'A' %}selected{% endif %}>A</option>
-                                                <option value="B" {% if course.grade == 'B' %}selected{% endif %}>B</option>
-                                                <option value="C" {% if course.grade == 'C' %}selected{% endif %}>C</option>
-                                                <option value="D" {% if course.grade == 'D' %}selected{% endif %}>D</option>
-                                                <option value="F" {% if course.grade == 'F' %}selected{% endif %}>F</option>
-                                            </select>
-                                            {% else %}
-                                            <span class="text-muted small">—</span>
-                                            {% endif %}
-                                        </td>
-                                        <td class="text-end pe-3">
-                                            <button class="btn btn-sm btn-outline-danger remove-course-btn drop-no-confirm py-0 px-2 shadow-sm fw-bold" data-entry-id="{{ course.entry_id }}">✖</button>
-                                        </td>
-                                    </tr>
-                                    {% else %}
-                                    <tr>
-                                        <td colspan="5" class="text-center py-5 text-muted small">Empty Schedule. Add courses from the left panel.</td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
                 </div>
             </div>
         </div>

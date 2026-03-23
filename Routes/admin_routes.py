@@ -663,7 +663,7 @@ def _safe_drop_table_if_exists(table_name: str) -> bool:
     if not name or name.lower() in _protected_tables() or not re.match(r'^[A-Za-z0-9_]+$', name):
         return False
     try:
-        db.session.execute(text(f'DROP TABLE IF EXISTS "{name}"'))
+        db.session.execute(text(f'DROP TABLE IF EXISTS "{name}" CASCADE'))
         db.session.commit()
         return True
     except Exception:
@@ -1803,6 +1803,7 @@ def api_datasets():
 
 
 @admin_bp.route('/api/datasets/<int:dataset_id>/delete', methods=['POST'])
+@admin_bp.route('/api/datasets/<int:dataset_id>', methods=['DELETE', 'POST'])
 @login_required
 @admin_required
 def api_delete_dataset(dataset_id: int):

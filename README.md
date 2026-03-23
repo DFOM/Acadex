@@ -11,9 +11,20 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.1**
+- Current version: **Beta 1.2**
 
 ## Changelog
+
+### Beta 1.2 — 2026-03-24
+
+- Replaced token-based clash checks with real time-overlap checks (same day + overlapping start/end minutes) in both backend add-course validation and schedule editor selection UI.
+- Added resilient period-time parsing and overlap comparison helpers so conflicts are validated using `Period.start_time`/`Period.end_time` instead of raw day-period strings.
+- Hardened dataset deletion flow with explicit `DELETE /admin/api/datasets/<id>` support and `DROP TABLE IF EXISTS ... CASCADE` behavior while still deleting registry rows if physical tables are missing.
+- Added dataset delete confirmation modal in admin dataset management UI and wired delete action to the new DELETE route.
+- Normalized faculty/instructor formatting across student-facing flows to clean list-like values (e.g., `["Dr. X"]` -> `Dr. X`).
+- Stabilized course detail endpoint with stronger null-safe fallbacks and defensive error handling; unlocks payload remains dataset-context aware.
+- Removed schedule editor list mode and standardized on grid-only editing.
+- Added in-grid interactive grade chips (`A/B/C/D/F`) with toggle select/deselect behavior and themed tooltip guidance for GPA estimation.
 
 ### Beta 1.1 — 2026-03-23
 
@@ -38,21 +49,6 @@ It supports:
 - Added mandatory row-level parser debug logs including extracted subject area/day period and structured row payload summaries.
 - Simplified faculty table course display to title-only labels in admin faculty APIs/UI payloads.
 
-### Beta 0.2 — 2026-03-18
-
-- Completed migration of remaining route flows from legacy CSV table helpers to scraper-backed models.
-- Refactored student schedule editor, add-course validation, schedule course APIs, and AI generation to use `ScrapedDataset`/`ScrapedCourse` metadata.
-- Refactored admin instructors/courses management and analytics metadata paths to use scraper datasets.
-- Refactored landing and dashboard catalog visibility to derive from completed scraped datasets.
-- Removed deprecated legacy CSV helper functions from `utils.py` (`get_course_data_tables`, `get_best_course_table`, semester/table column helpers).
-
-### Beta 0.1 — 2026-03-18
-
-- Introduced scraper-first dataset architecture with canonical `scraped_courses` columns and dynamic attributes.
-- Added robust scraper popup lifecycle handling, configurable row transition delay, and pause/resume controls.
-- Added async-friendly scraper controls in admin integration UI and expanded scraper state reporting.
-- Added a new Admin System Health tab with real-time app/scraper metrics and version-control visibility.
-- Initialized versioning protocol for future structural changes.
 
 ## Versioning Protocol
 

@@ -37,6 +37,25 @@ document.addEventListener('DOMContentLoaded', () => {
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
 
+    const cleanInstructorDisplay = (value) => {
+        if (Array.isArray(value)) {
+            return value.map((v) => String(v || '').trim()).filter(Boolean).join(', ');
+        }
+        let text = String(value || '').trim();
+        if (!text) return 'TBA';
+        try {
+            const parsed = JSON.parse(text);
+            if (Array.isArray(parsed)) {
+                const joined = parsed.map((v) => String(v || '').trim()).filter(Boolean).join(', ');
+                if (joined) return joined;
+            }
+        } catch (_) {}
+        if (text.startsWith('[') && text.endsWith(']')) {
+            text = text.slice(1, -1).replace(/["']/g, '').trim();
+        }
+        return text || 'TBA';
+    };
+
     const getDisplayCourseNumber = (course) => {
         return (
             course?.display_course_number ||
@@ -292,6 +311,48 @@ document.addEventListener('DOMContentLoaded', () => {
         return blocks;
     };
 
+    const parseHHMMToMinutes = (value) => {
+        const text = String(value || '').trim();
+        const match = text.match(/^(\d{1,2}):(\d{2})$/);
+        if (!match) return null;
+        const hour = Number(match[1]);
+        const minute = Number(match[2]);
+        if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+        return (hour * 60) + minute;
+    };
+
+    const getPeriodTimeMap = () => {
+        const map = {};
+        document.querySelectorAll('th[data-period-name]').forEach((th) => {
+            const period = String(th.getAttribute('data-period-name') || '').trim();
+            const startMins = parseHHMMToMinutes(th.getAttribute('data-start-time'));
+            const endMins = parseHHMMToMinutes(th.getAttribute('data-end-time'));
+            if (!period || startMins === null || endMins === null || endMins <= startMins) return;
+            map[period] = { start: startMins, end: endMins };
+        });
+        return map;
+    };
+
+    const buildTimeWindows = (dayPeriodValue, periodMap) => {
+        return parseDayPeriodBlocks(dayPeriodValue)
+            .map((block) => {
+                const slot = periodMap[String(block.period || '')];
+                if (!slot) return null;
+                return { day: block.day, start: slot.start, end: slot.end };
+            })
+            .filter(Boolean);
+    };
+
+    const hasAnyTimeOverlap = (windowsA, windowsB) => {
+        for (const left of windowsA) {
+            for (const right of windowsB) {
+                if (left.day !== right.day) continue;
+                if (left.start < right.end && right.start < left.end) return true;
+            }
+        }
+        return false;
+    };
+
     const popoverHtmlForCourse = (course) => {
         const title = getDisplayTitle(course) || '(Untitled)';
         const credits = course.Credits ?? '';
@@ -332,6 +393,17 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
+    const initTooltips = () => {
+        const els = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        els.forEach((el) => {
+            try {
+                const existing = bootstrap.Tooltip.getInstance(el);
+                if (existing) existing.dispose();
+                new bootstrap.Tooltip(el, { container: 'body', trigger: 'hover focus' });
+            } catch (_) {}
+        });
+    };
+
     const renderGrid = (courses) => {
         const cells = document.querySelectorAll('.schedule-cell');
         if (!cells.length) return;
@@ -342,11 +414,19 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!blocks.length) return;
 
             const title = getDisplayTitle(course) || '(Untitled)';
-            const instructor = (course.Instructor || '').trim() || 'TBA';
+            const instructor = cleanInstructorDisplay(course.Instructor);
             const prereqStatus = analyzePrerequisiteStatus(course.Prerequisite);
             const prereqPill = prereqStatus.hasPrerequisites
                 ? `<span class="badge ${prereqStatus.state === 'satisfied' ? 'bg-success-subtle text-success border border-success-subtle' : 'bg-warning-subtle text-warning border border-warning-subtle'} rounded-pill mt-1" style="font-size: 0.58rem;">${prereqStatus.state === 'satisfied' ? 'Prereq ✓' : 'Prereq !'}</span>`
                 : '';
+            const isAuthed = Boolean(window.IS_AUTHENTICATED);
+            const gradeValue = String(course.grade || '').toUpperCase();
+            const gradeChips = ['A', 'B', 'C', 'D', 'F']
+                .map((gradeLabel) => {
+                    const isActive = gradeValue === gradeLabel;
+                    return `<button type="button" class="grade-chip ${isActive ? 'grade-active' : ''}" data-entry-id="${course.entry_id}" data-grade="${gradeLabel}" ${isAuthed ? '' : 'disabled'} data-bs-toggle="tooltip" data-bs-title="Optional: Select a grade to help estimate GPA and performance.">${gradeLabel}</button>`;
+                }).join('');
+            const gradeRow = `<div class="d-flex flex-wrap gap-1 mt-1">${gradeChips}</div>`;
             const popTitle = title.replace(/"/g, '&quot;');
             const popContent = popoverHtmlForCourse(course).replace(/"/g, '&quot;');
 
@@ -369,6 +449,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <strong class="d-block lh-sm mb-1" style="font-size: 0.75rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">${title}</strong>
                         <span class="d-block text-truncate" style="font-size: 0.65rem; opacity: 0.9;">${instructor}</span>
                         ${prereqPill}
+                        ${gradeRow}
                     </div>
                     <button class="btn btn-sm btn-link text-white position-absolute top-0 end-0 p-0 m-1 remove-course-btn drop-no-confirm" 
                             data-entry-id="${course.entry_id}" 
@@ -380,54 +461,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         initPopovers();
-    };
-
-    const renderListView = (courses) => {
-        const table = document.querySelector('#list-view table');
-        if (!table) return;
-        const tbody = table.querySelector('tbody');
-        if (!tbody) return;
-
-        if (!courses.length) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5 text-muted bg-light small">Empty Schedule. Add courses from the left panel.</td></tr>';
-            return;
-        }
-
-        const isAuthed = Boolean(window.IS_AUTHENTICATED);
-        tbody.innerHTML = courses
-            .map((course) => {
-                const title = getDisplayTitle(course);
-                const credits = course.Credits ?? '';
-                const when = course.Day_and_Period || 'TBA';
-                const grade = course.grade || '';
-                const prereqBadge = getPrereqBadgeHtml(course.Prerequisite);
-
-                const gradeCell = isAuthed
-                    ? `
-                        <select class="form-select form-select-sm border-0 bg-light shadow-sm grade-select" data-entry-id="${course.entry_id}" style="width: 75px; font-size: 0.75rem; font-weight: bold;">
-                            <option value="" ${!grade ? 'selected' : ''}>--</option>
-                            <option value="A" ${grade === 'A' ? 'selected' : ''}>A</option>
-                            <option value="B" ${grade === 'B' ? 'selected' : ''}>B</option>
-                            <option value="C" ${grade === 'C' ? 'selected' : ''}>C</option>
-                            <option value="D" ${grade === 'D' ? 'selected' : ''}>D</option>
-                            <option value="F" ${grade === 'F' ? 'selected' : ''}>F</option>
-                        </select>
-                      `.trim()
-                    : '<span class="text-muted small">—</span>';
-
-                return `
-                    <tr>
-                        <td class="fw-bold small">${title}${prereqBadge}</td>
-                        <td class="small">${credits}</td>
-                        <td><span class="badge bg-info text-dark" style="font-size: 0.65rem;">${when}</span></td>
-                        <td>${gradeCell}</td>
-                        <td class="text-end pe-3">
-                            <button class="btn btn-sm btn-outline-danger remove-course-btn drop-no-confirm py-0 px-2 shadow-sm fw-bold" data-entry-id="${course.entry_id}">✖</button>
-                        </td>
-                    </tr>
-                `.trim();
-            })
-            .join('');
+        initTooltips();
     };
 
     const updateTotalCredits = (courses) => {
@@ -466,7 +500,6 @@ document.addEventListener('DOMContentLoaded', () => {
             currentScheduleCourses = result.courses || [];
             if (coursesDataElement) coursesDataElement.textContent = JSON.stringify(currentScheduleCourses);
             renderGrid(currentScheduleCourses);
-            renderListView(currentScheduleCourses);
             updateTotalCredits(currentScheduleCourses);
             applyFiltersAndRender();
         } catch (e) {
@@ -615,15 +648,26 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         const currentCourses = coursesDataElement ? JSON.parse(coursesDataElement.textContent) : [];
-        const occupiedBlocks = {};
+        const periodTimeMap = getPeriodTimeMap();
+        const occupiedWindows = [];
         currentCourses.forEach(c => {
-            if(c.Day_and_Period && c.Day_and_Period !== 'TBA') {
-                c.Day_and_Period.trim().split(/[\s,]+/).forEach(b => { 
-                    const cleanB = b.replace(/[^a-zA-Z0-9]/g, '');
-                    if(cleanB) occupiedBlocks[cleanB] = getDisplayTitle(c) || 'Existing Course';
-                });
-            }
+            const windows = buildTimeWindows(c.Day_and_Period, periodTimeMap);
+            windows.forEach((w) => {
+                occupiedWindows.push({ ...w, title: getDisplayTitle(c) || 'Existing Course' });
+            });
         });
+
+        const findOverlapTitle = (candidateWindows) => {
+            for (const window of candidateWindows) {
+                for (const occupied of occupiedWindows) {
+                    if (window.day !== occupied.day) continue;
+                    if (window.start < occupied.end && occupied.start < window.end) {
+                        return occupied.title;
+                    }
+                }
+            }
+            return '';
+        };
 
         let html = '<div class="list-group list-group-flush">';
         for (const [baseTitle, sections] of Object.entries(groupedCourses)) {
@@ -647,13 +691,11 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 let isClash = false;
                 let clashMessage = '';
-                const secBlocks = sample.Day_and_Period && sample.Day_and_Period !== 'TBA' ? sample.Day_and_Period.trim().split(/[\s,]+/) : [];
-                
-                for (let b of secBlocks) {
-                    const cleanB = b.replace(/[^a-zA-Z0-9]/g, '');
-                    if (cleanB && occupiedBlocks[cleanB]) {
-                        isClash = true; clashMessage = `Clash: ${occupiedBlocks[cleanB]}`; break;
-                    }
+                const candidateWindows = buildTimeWindows(sample.Day_and_Period, periodTimeMap);
+                const overlapTitle = findOverlapTitle(candidateWindows);
+                if (overlapTitle) {
+                    isClash = true;
+                    clashMessage = `Clash: ${overlapTitle}`;
                 }
                 if (currentCourses.some(c => c.Course_Number === sample.Course_Number)) {
                     isClash = true; clashMessage = "Added";
@@ -711,34 +753,47 @@ document.addEventListener('DOMContentLoaded', () => {
     // 3. MODAL, GRADES, & ADD/REMOVE LISTENERS
     // ==========================================
     
-    // NEW: Listen for Grade Dropdown changes
-    document.addEventListener('change', async (e) => {
-        if (e.target.classList.contains('grade-select')) {
-            const entryId = e.target.getAttribute('data-entry-id');
-            const grade = e.target.value;
+    document.addEventListener('click', async (e) => {
+        const gradeBtn = e.target.closest('.grade-chip');
+        if (gradeBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!window.IS_AUTHENTICATED) return;
+
+            const entryId = gradeBtn.getAttribute('data-entry-id');
+            const selectedGrade = String(gradeBtn.getAttribute('data-grade') || '').toUpperCase();
+            if (!entryId || !selectedGrade) return;
+
+            const currentCourse = currentScheduleCourses.find((c) => String(c.entry_id) === String(entryId));
+            const currentGrade = String((currentCourse && currentCourse.grade) || '').toUpperCase();
+            const nextGrade = currentGrade === selectedGrade ? '' : selectedGrade;
 
             try {
                 const response = await fetch('/student/api/update_grade', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ entry_id: entryId, grade: grade })
+                    body: JSON.stringify({ entry_id: entryId, grade: nextGrade })
                 });
                 const result = await response.json();
-                
-                if (result.success) {
-                    // Flash green to show it saved securely
-                    e.target.classList.add('is-valid');
-                    setTimeout(() => e.target.classList.remove('is-valid'), 1500);
-                } else {
-                    alert("Failed to save grade: " + result.message);
+                if (!response.ok || !result.success) {
+                    alert(`Failed to save grade: ${result.message || 'Unknown error'}`);
+                    return;
                 }
+
+                currentScheduleCourses = currentScheduleCourses.map((course) => {
+                    if (String(course.entry_id) === String(entryId)) {
+                        return { ...course, grade: nextGrade };
+                    }
+                    return course;
+                });
+                if (coursesDataElement) coursesDataElement.textContent = JSON.stringify(currentScheduleCourses);
+                renderGrid(currentScheduleCourses);
             } catch (err) {
                 console.error(err);
             }
+            return;
         }
-    });
 
-    document.addEventListener('click', async (e) => {
         const detailBtn = e.target.closest('.view-course-detail-btn');
         if (detailBtn) {
             const scheduleId = detailBtn.getAttribute('data-schedule-id') || '';
@@ -758,27 +813,25 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('sectionModalTitle').innerText = baseTitle;
 
             const currentCourses = JSON.parse(document.getElementById('currentCoursesData').textContent);
-            const occupiedBlocks = {};
+            const periodTimeMap = getPeriodTimeMap();
+            const occupiedWindows = [];
             currentCourses.forEach(c => {
-                if(c.Day_and_Period && c.Day_and_Period !== 'TBA') {
-                    c.Day_and_Period.trim().split(/[\s,]+/).forEach(b => { 
-                        const cleanB = b.replace(/[^a-zA-Z0-9]/g, '');
-                        if(cleanB) occupiedBlocks[cleanB] = getDisplayTitle(c) || 'Existing Course';
-                    });
-                }
+                buildTimeWindows(c.Day_and_Period, periodTimeMap).forEach((w) => {
+                    occupiedWindows.push({ ...w, title: getDisplayTitle(c) || 'Existing Course' });
+                });
             });
 
             let bodyHtml = '';
             sections.forEach(sec => {
                 let isClash = false;
                 let clashMessage = '';
-                
-                const secBlocks = sec.Day_and_Period && sec.Day_and_Period !== 'TBA' ? sec.Day_and_Period.trim().split(/[\s,]+/) : [];
-                for (let b of secBlocks) {
-                    const cleanB = b.replace(/[^a-zA-Z0-9]/g, '');
-                    if (cleanB && occupiedBlocks[cleanB]) {
+
+                const candidateWindows = buildTimeWindows(sec.Day_and_Period, periodTimeMap);
+                for (const w of candidateWindows) {
+                    const overlap = occupiedWindows.find((o) => o.day === w.day && w.start < o.end && o.start < w.end);
+                    if (overlap) {
                         isClash = true;
-                        clashMessage = `Overlap: ${occupiedBlocks[cleanB]}`;
+                        clashMessage = `Overlap: ${overlap.title}`;
                         break;
                     }
                 }

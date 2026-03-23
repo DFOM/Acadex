@@ -196,6 +196,25 @@
     </div>
 </div>
 
+<div class="modal fade" id="datasetDeleteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Confirm Dataset Delete</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-1">Delete dataset <strong id="datasetDeleteName">this dataset</strong> and its associated rows?</p>
+                <div class="small text-muted">If the physical table is already missing, the registry entry will still be removed.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirmDatasetDeleteBtn">Delete Dataset</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 (function() {
     const body = document.getElementById('datasetRegistryBody');
@@ -208,6 +227,11 @@
     const previewColumns = document.getElementById('csvPreviewColumns');
     const previewMapped = document.getElementById('csvPreviewMapped');
     const previewSample = document.getElementById('csvPreviewSample');
+    const datasetDeleteModalEl = document.getElementById('datasetDeleteModal');
+    const datasetDeleteName = document.getElementById('datasetDeleteName');
+    const confirmDatasetDeleteBtn = document.getElementById('confirmDatasetDeleteBtn');
+    let pendingDeleteDatasetId = null;
+    const datasetDeleteModal = datasetDeleteModalEl ? new bootstrap.Modal(datasetDeleteModalEl) : null;
 
     function esc(v) {
         return String(v || '')
@@ -437,8 +461,11 @@
             if (target.classList.contains('ds-refresh')) {
                 await postAction(`/admin/api/datasets/${id}/refresh`);
             } else if (target.classList.contains('ds-delete')) {
-                if (!confirm('Delete this dataset and its associated data?')) return;
-                await postAction(`/admin/api/datasets/${id}/delete`);
+                pendingDeleteDatasetId = id;
+                const nameCell = row.querySelector('td.fw-semibold');
+                if (datasetDeleteName) datasetDeleteName.textContent = (nameCell && nameCell.textContent) ? nameCell.textContent.trim() : 'this dataset';
+                datasetDeleteModal?.show();
+                return;
             } else if (target.classList.contains('ds-force-delete')) {
                 if (!confirm('Force delete this dataset? This is irreversible.')) return;
                 await postAction(`/admin/api/datasets/${id}/force-delete`, 'DELETE');
@@ -456,6 +483,22 @@
             await loadOrphans();
         } catch (err) {
             alert(String(err));
+        }
+    });
+
+    confirmDatasetDeleteBtn?.addEventListener('click', async () => {
+        if (!pendingDeleteDatasetId) return;
+        confirmDatasetDeleteBtn.disabled = true;
+        try {
+            await postAction(`/admin/api/datasets/${pendingDeleteDatasetId}`, 'DELETE');
+            datasetDeleteModal?.hide();
+            pendingDeleteDatasetId = null;
+            await loadRegistry();
+            await loadOrphans();
+        } catch (err) {
+            alert(String(err));
+        } finally {
+            confirmDatasetDeleteBtn.disabled = false;
         }
     });
 

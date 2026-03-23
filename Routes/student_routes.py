@@ -5,6 +5,7 @@ from sqlalchemy import text, or_, and_, inspect, func
 import uuid
 import re
 import json
+import ast
 import os
 from datetime import datetime
 from typing import Optional, Dict, Any, Set, Iterable
@@ -20,7 +21,7 @@ from utils import (
     normalize_dataset_semester,
 )
 from services.eligibility import normalize_course_code_for_prereqs
-from services.conflicts import parse_day_period_blocks, has_conflict
+from services.conflicts import parse_day_period_blocks
 from services.ai.recommendations import recommend_courses
 from services.ai.generator import generate_schedule_courses
 
@@ -218,10 +219,128 @@ def _humanize_day_and_period(value: Any) -> str:
 
 
 def _normalize_instructor(value: Any) -> str:
+    def _clean_token(token: Any) -> str:
+        text = str(token or '').strip()
+        if not text:
+            return ''
+        text = text.strip('[]').strip()
+        text = re.sub(r'^["\']+|["\']+$', '', text).strip()
+        text = re.sub(r'\s+', ' ', text).strip()
+        if text.lower() in {'tba', 'n/a', 'na', 'none', 'unknown'}:
+            return ''
+        return text
+
+    if isinstance(value, (list, tuple, set)):
+        names = []
+        seen = set()
+        for item in value:
+            cleaned = _clean_token(item)
+            lowered = cleaned.lower()
+            if cleaned and lowered not in seen:
+                seen.add(lowered)
+                names.append(cleaned)
+        return ', '.join(names)
+
     instructor = str(value or '').strip()
-    if not instructor or instructor.lower() in {'tba', 'n/a', 'na', 'none'}:
+    if not instructor:
         return ''
-    return instructor
+
+    parsed_candidates = []
+    try:
+        parsed_candidates.append(json.loads(instructor))
+    except Exception:
+        parsed_candidates.append(None)
+    try:
+        parsed_candidates.append(ast.literal_eval(instructor))
+    except Exception:
+        parsed_candidates.append(None)
+
+    for parsed in parsed_candidates:
+        if isinstance(parsed, (list, tuple, set)):
+            return _normalize_instructor(parsed)
+
+    if instructor.startswith('[') and instructor.endswith(']'):
+        parts = [p for p in re.split(r'\s*,\s*', instructor.strip('[]')) if p]
+        return _normalize_instructor(parts)
+
+    cleaned = _clean_token(instructor)
+    return cleaned
+
+
+def _parse_hhmm_to_minutes(value: Any) -> int | None:
+    text = str(value or '').strip()
+    if not text:
+        return None
+    match = re.fullmatch(r'(\d{1,2}):(\d{2})', text)
+    if not match:
+        return None
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return None
+    return hour * 60 + minute
+
+
+def _period_time_map() -> dict[str, tuple[int, int]]:
+    period_map: dict[str, tuple[int, int]] = {}
+    try:
+        rows = Period.query.all()
+    except Exception:
+        db.session.rollback()
+        return period_map
+
+    for row in rows:
+        period_name = str(getattr(row, 'name', '') or '').strip()
+        if not period_name:
+            continue
+        start = _parse_hhmm_to_minutes(getattr(row, 'start_time', None))
+        end = _parse_hhmm_to_minutes(getattr(row, 'end_time', None))
+        if start is None or end is None or end <= start:
+            continue
+        period_map[period_name] = (start, end)
+    return period_map
+
+
+def _day_period_structured_blocks(day_and_period: Any) -> list[tuple[str, str]]:
+    text = str(day_and_period or '').strip()
+    if not text or text.upper() == 'TBA':
+        return []
+
+    tokens = re.split(r'[\s,;]+', text)
+    blocks: list[tuple[str, str]] = []
+    current_day = ''
+    for token in tokens:
+        if not token:
+            continue
+        day_match = re.search(r'(Mon|Tue|Wed|Thu|Fri|Sat|Sun)', token, re.IGNORECASE)
+        if day_match:
+            current_day = day_match.group(1)[:3].title()
+        num_match = re.search(r'(\d+)', token)
+        if current_day and num_match:
+            blocks.append((current_day, num_match.group(1)))
+    return blocks
+
+
+def _time_windows_from_day_period(day_and_period: Any, period_map: dict[str, tuple[int, int]]) -> list[tuple[str, int, int]]:
+    windows: list[tuple[str, int, int]] = []
+    for day, period_name in _day_period_structured_blocks(day_and_period):
+        slot = period_map.get(period_name)
+        if not slot:
+            continue
+        windows.append((day, slot[0], slot[1]))
+    return windows
+
+
+def _windows_overlap(left_windows: list[tuple[str, int, int]], right_windows: list[tuple[str, int, int]]) -> bool:
+    if not left_windows or not right_windows:
+        return False
+    for left_day, left_start, left_end in left_windows:
+        for right_day, right_start, right_end in right_windows:
+            if left_day != right_day:
+                continue
+            if left_start < right_end and right_start < left_end:
+                return True
+    return False
 
 
 def should_collect_ai_events() -> bool:
@@ -1328,6 +1447,7 @@ def _build_unlocks_for_course(catalog_rows: list[Dict[str, Any]], target_row: Di
         seen_unlocks.add(dedupe_key)
 
         mapped = _add_display_fields(dict(row))
+        instructor_text = _normalize_instructor(mapped.get('Instructor'))
         unlocks.append(
             {
                 'course_number': mapped.get('Course_Number'),
@@ -1335,7 +1455,7 @@ def _build_unlocks_for_course(catalog_rows: list[Dict[str, Any]], target_row: Di
                 'course_title': mapped.get('Course_Title'),
                 'display_title': mapped.get('display_title'),
                 'day_and_period': mapped.get('Day_and_Period'),
-                'instructor': mapped.get('Instructor'),
+                'instructor': instructor_text,
                 'credits': mapped.get('Credits'),
                 'prerequisite': mapped.get('Prerequisite'),
             }
@@ -1352,95 +1472,108 @@ def _build_unlocks_for_course(catalog_rows: list[Dict[str, Any]], target_row: Di
 
 @student_bp.route('/api/course_detail', methods=['GET'])
 def api_course_detail():
-    schedule_id_raw = request.args.get('schedule_id')
-    course_number_raw = str(request.args.get('course_number') or '').strip()
-    day_period_raw = str(request.args.get('day_and_period') or '').strip().lower()
+    try:
+        schedule_id_raw = request.args.get('schedule_id')
+        course_number_raw = str(request.args.get('course_number') or '').strip()
+        day_period_raw = str(request.args.get('day_and_period') or '').strip().lower()
 
-    if not course_number_raw:
-        return jsonify({'success': False, 'message': 'course_number is required.'}), 400
+        if not course_number_raw:
+            return jsonify({'success': False, 'message': 'course_number is required.'}), 400
 
-    sched = None
-    if schedule_id_raw not in (None, ''):
-        try:
-            schedule_id = int(schedule_id_raw)
-        except Exception:
-            return jsonify({'success': False, 'message': 'Invalid schedule_id.'}), 400
+        sched = None
+        if schedule_id_raw not in (None, ''):
+            try:
+                schedule_id = int(schedule_id_raw)
+            except Exception:
+                return jsonify({'success': False, 'message': 'Invalid schedule_id.'}), 400
 
-        if current_user.is_authenticated:
-            sched = Schedule.query.filter_by(id=schedule_id, user_id=current_user.id).first()
+            if current_user.is_authenticated:
+                sched = Schedule.query.filter_by(id=schedule_id, user_id=current_user.id).first()
+            else:
+                sched = Schedule.query.filter_by(id=schedule_id, session_id=get_guest_id()).first()
+
+            if not sched:
+                return jsonify({'success': False, 'message': 'Unauthorized.'}), 403
+
+        if sched:
+            catalog_rows, dataset_id = _load_scraped_catalog_for_term(sched.year, sched.semester)
+            resolved_dataset_name = _resolve_contextual_dataset_name(sched.year, sched.semester)
         else:
-            sched = Schedule.query.filter_by(id=schedule_id, session_id=get_guest_id()).first()
+            catalog_rows, dataset_id = _load_scraped_catalog_for_term('', '')
+            resolved_dataset_name = _resolve_contextual_dataset_name('', '')
 
-        if not sched:
-            return jsonify({'success': False, 'message': 'Unauthorized.'}), 403
+        if not catalog_rows:
+            return jsonify({'success': False, 'message': 'No course data available for selected year/semester'}), 404
 
-    if sched:
-        catalog_rows, dataset_id = _load_scraped_catalog_for_term(sched.year, sched.semester)
-        resolved_dataset_name = _resolve_contextual_dataset_name(sched.year, sched.semester)
-    else:
-        catalog_rows, dataset_id = _load_scraped_catalog_for_term('', '')
-        resolved_dataset_name = _resolve_contextual_dataset_name('', '')
+        normalized_target_code = _normalize_course_number(course_number_raw)
+        matches = [
+            row
+            for row in catalog_rows
+            if _normalize_course_number(row.get('Course_Number')) == normalized_target_code
+        ]
+        if not matches:
+            return jsonify({'success': False, 'message': 'Course not found in catalog.'}), 404
 
-    if not catalog_rows:
-        return jsonify({'success': False, 'message': 'No course data available for selected year/semester'}), 404
+        target = matches[0]
+        if day_period_raw:
+            for row in matches:
+                if str(row.get('Day_and_Period') or '').strip().lower() == day_period_raw:
+                    target = row
+                    break
 
-    normalized_target_code = _normalize_course_number(course_number_raw)
-    matches = [
-        row
-        for row in catalog_rows
-        if _normalize_course_number(row.get('Course_Number')) == normalized_target_code
-    ]
-    if not matches:
-        return jsonify({'success': False, 'message': 'Course not found in catalog.'}), 404
+        target_row = _add_display_fields(dict(target))
+        metadata = _build_course_metadata_index().get(normalized_target_code, {})
+        if not target_row.get('Course_Title'):
+            target_row['Course_Title'] = metadata.get('title') or normalized_target_code
+        if target_row.get('Credits') in (None, ''):
+            target_row['Credits'] = metadata.get('credits', 0.0)
+        if not target_row.get('Day_and_Period'):
+            target_row['Day_and_Period'] = metadata.get('day_and_period') or 'TBA'
+        target_row['Instructor'] = _normalize_instructor(target_row.get('Instructor') or metadata.get('instructor')) or 'TBA'
 
-    target = matches[0]
-    if day_period_raw:
-        for row in matches:
-            if str(row.get('Day_and_Period') or '').strip().lower() == day_period_raw:
-                target = row
-                break
+        completed_identifiers: Iterable[str] = []
+        major_name = ''
+        minor_name = ''
+        if current_user.is_authenticated:
+            completed_identifiers = _completed_passing_prereq_identifiers(current_user.id)
+            user_areas = _resolve_user_area_names()
+            major_name = user_areas.get('major') or ''
+            minor_name = user_areas.get('minor') or ''
 
-    target_row = _add_display_fields(dict(target))
+        prereq_status = _build_prerequisite_status(
+            target_row.get('Prerequisite'),
+            completed_identifiers,
+            major_name=major_name,
+            minor_name=minor_name,
+            prereq_title_lookup=_build_prereq_title_lookup(),
+        )
+        unlocks = _build_unlocks_for_course(catalog_rows, target_row)
 
-    completed_identifiers: Iterable[str] = []
-    major_name = ''
-    minor_name = ''
-    if current_user.is_authenticated:
-        completed_identifiers = _completed_passing_prereq_identifiers(current_user.id)
-        user_areas = _resolve_user_area_names()
-        major_name = user_areas.get('major') or ''
-        minor_name = user_areas.get('minor') or ''
-
-    prereq_status = _build_prerequisite_status(
-        target_row.get('Prerequisite'),
-        completed_identifiers,
-        major_name=major_name,
-        minor_name=minor_name,
-        prereq_title_lookup=_build_prereq_title_lookup(),
-    )
-    unlocks = _build_unlocks_for_course(catalog_rows, target_row)
-
-    return jsonify(
-        {
-            'success': True,
-            'dataset_id': dataset_id,
-            'resolved_dataset_name': resolved_dataset_name or None,
-            'course': {
-                'course_number': target_row.get('Course_Number'),
-                'display_course_number': target_row.get('display_course_number'),
-                'course_title': target_row.get('Course_Title'),
-                'display_title': target_row.get('display_title'),
-                'credits': target_row.get('Credits'),
-                'instructor': target_row.get('Instructor'),
-                'day_and_period': target_row.get('Day_and_Period'),
-                'area_of_study': target_row.get('Area_of_Study'),
-                'prerequisite': target_row.get('Prerequisite'),
-            },
-            'prerequisite_status': prereq_status,
-            'unlocks': unlocks[:250],
-            'unlock_count': len(unlocks),
-        }
-    )
+        return jsonify(
+            {
+                'success': True,
+                'dataset_id': dataset_id,
+                'resolved_dataset_name': resolved_dataset_name or None,
+                'course': {
+                    'course_number': target_row.get('Course_Number'),
+                    'display_course_number': target_row.get('display_course_number'),
+                    'course_title': target_row.get('Course_Title'),
+                    'display_title': target_row.get('display_title'),
+                    'credits': target_row.get('Credits'),
+                    'instructor': target_row.get('Instructor'),
+                    'day_and_period': target_row.get('Day_and_Period'),
+                    'area_of_study': target_row.get('Area_of_Study'),
+                    'prerequisite': target_row.get('Prerequisite'),
+                },
+                'prerequisite_status': prereq_status,
+                'unlocks': unlocks[:250],
+                'unlock_count': len(unlocks),
+            }
+        )
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.error('Course detail lookup failed: %s', exc, exc_info=True)
+        return jsonify({'success': False, 'message': 'Could not load course details right now.'}), 500
 
 
 @student_bp.route('/courses')
@@ -2497,7 +2630,8 @@ def add_course():
             text('SELECT course_number FROM schedule_courses WHERE schedule_id = :sid'),
             {'sid': sched.id},
         ).fetchall()
-        occupied_blocks = set()
+        period_map = _period_time_map()
+        occupied_windows: list[tuple[str, int, int]] = []
         meta_index = _build_course_metadata_index()
         for r in existing_rows:
             code = _normalize_course_number(r[0])
@@ -2505,10 +2639,10 @@ def add_course():
             existing_dp = (existing or {}).get('Day_and_Period') if existing else None
             if not existing_dp:
                 existing_dp = meta_index.get(code, {}).get('day_and_period')
-            occupied_blocks |= parse_day_period_blocks(existing_dp)
+            occupied_windows.extend(_time_windows_from_day_period(existing_dp, period_map))
 
-        candidate_blocks = parse_day_period_blocks(candidate_day_period)
-        if has_conflict(occupied_blocks, candidate_blocks):
+        candidate_windows = _time_windows_from_day_period(candidate_day_period, period_map)
+        if _windows_overlap(occupied_windows, candidate_windows):
             return (
                 jsonify(
                     {
