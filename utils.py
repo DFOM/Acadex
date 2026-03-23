@@ -114,8 +114,10 @@ def mapped_course_payload_from_row(row: dict[str, Any], mapping: dict[str, list[
         'day_period': mapped_value_from_row(row, 'day_period', normalized_mapping),
         'semester': mapped_value_from_row(row, 'semester', normalized_mapping),
         'year': mapped_value_from_row(row, 'year', normalized_mapping),
+        'year_level': mapped_value_from_row(row, 'year_level', normalized_mapping),
         'prerequisite': prerequisites,
         'prerequisites': prerequisites,
+        'subject_area': mapped_value_from_row(row, 'subject_area', normalized_mapping),
     }
 
 

@@ -291,6 +291,27 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - row-level extraction logs emitted,
   - ingestion totals emitted (`total_rows_read=118`, `total_courses_updated=107`, warnings for missing `day_period` rows).
 
+## 2026-03-23 — Beta 1 (mapping/parsing completion and admin cleanup)
+
+- Enforced mapped-payload-driven extraction across ingestion loop to ensure centralized mapping is always applied.
+- Updated mapping defaults to include required aliases:
+  - `subject_area`: `subject area`, `area`, `department`
+  - `day_period`: `day and period`, `schedule`, `time`
+  - introduced `year_level` mapping (separate from `year`) to avoid polluting year parsing.
+- Added robust term parser for values like `Fall Semester 2025` -> `semester=Fall`, `year=2025`.
+- Added `Course.year_level` model field and Alembic migration `a1b2c3d4e5f7_add_year_level_to_courses.py`.
+- Added auto dataset naming from parsed CSV term coverage:
+  - `YYYY Full Course List`
+  - `YYYY Fall Course List`
+  - `YYYY Spring Course List`
+  - manual dataset name override remains supported.
+- Added required debug logging:
+  - `Extracted Subject Area: ...`
+  - `Extracted Day Period: ...`
+  - structured per-row parsed payload logs with empty-critical-field error logging.
+- Added subject-area persistence sync during ingestion (auto-creates missing `SubjectArea` rows).
+- Simplified admin faculty course display to title-only labels in faculty payload serialization.
+
 ---
 
 # 7. Developer Notes (AI Self-Guide)

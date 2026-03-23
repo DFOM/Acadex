@@ -371,6 +371,7 @@ def _serialize_local_course(row: Course) -> dict:
         'day_period': row.day_period,
         'semester': row.semester,
         'year': row.year,
+        'year_level': row.year_level,
         'prerequisite': row.prerequisite,
         'subject_area': row.subject_area,
         'faculty': '; '.join(f.name for f in row.faculty) if row.faculty else (row.instructor or ''),
@@ -482,9 +483,9 @@ def _serialize_faculty(row: Faculty) -> dict:
         'email': row.email,
         'assigned_courses_count': len(row.courses or []),
         'assigned_course_refs': [_ref_for_course(c) for c in (row.courses or [])],
-        'assigned_course_labels': [f"{c.course_number} — {c.title}" for c in (row.courses or [])],
+        'assigned_course_labels': [str(c.title or '').strip() for c in (row.courses or []) if str(c.title or '').strip()],
         'course_refs': [_ref_for_course(c) for c in (row.courses or [])],
-        'course_labels': [f"{c.course_number} — {c.title}" for c in (row.courses or [])],
+        'course_labels': [str(c.title or '').strip() for c in (row.courses or []) if str(c.title or '').strip()],
         'advisor_area_ids': [a.id for a in (row.advisor_areas or [])],
         'advisor_area_names': [a.name for a in (row.advisor_areas or [])],
         'advisor_areas': [a.name for a in (row.advisor_areas or [])],
@@ -1370,23 +1371,48 @@ def upload_dataset():
         inferred_semester = normalize_dataset_semester(semester_hint)
         inferred_type = infer_dataset_type(inferred_semester)
 
-    if not dataset_name:
-        fallback_year = inferred_year or str(get_app_setting('current_year', '') or '').strip()
-        fallback_sem = inferred_semester or normalize_dataset_semester(get_app_setting('current_semester', ''))
-        dataset_name = f"{fallback_year}_{fallback_sem}_CSV".strip('_')
+    def _pick_from_payload(row_payload: dict, key: str) -> str:
+        return str((row_payload or {}).get(key) or '').strip()
 
-    def _pick(row: dict, key: str) -> str:
-        payload = mapped_course_payload_from_row(row or {}, mapping_normalized)
-        return str(payload.get(key) or '').strip()
+    def _parse_semester_year(raw_semester: str, raw_year: str) -> tuple[str | None, str | None]:
+        merged = f"{raw_semester} {raw_year}".strip()
+        merged_lower = merged.lower()
 
-    def _normalize_term_values(raw_semester: str, raw_year: str) -> tuple[str | None, str | None]:
-        guessed_year, guessed_semester, _ = extract_dataset_context(raw_year, raw_semester)
-        sem = normalize_dataset_semester(raw_semester or guessed_semester or inferred_semester or '') or None
-        yr = str(raw_year or guessed_year or inferred_year or '').strip() or None
-        if yr:
-            year_match = re.search(r'\b(20\d{2})\b', yr)
-            yr = year_match.group(1) if year_match else yr
-        return sem, yr
+        semester_value = None
+        if 'fall' in merged_lower:
+            semester_value = 'Fall'
+        elif 'spring' in merged_lower:
+            semester_value = 'Spring'
+
+        year_value = None
+        year_match = re.search(r'\b(20\d{2})\b', merged)
+        if year_match:
+            year_value = year_match.group(1)
+
+        if not semester_value:
+            sem_norm = normalize_dataset_semester(raw_semester or inferred_semester or '')
+            if sem_norm == 'fall':
+                semester_value = 'Fall'
+            elif sem_norm == 'spring':
+                semester_value = 'Spring'
+
+        if not year_value:
+            year_value = str(inferred_year or '').strip() or None
+
+        return semester_value, year_value
+
+    def _parse_year_level(raw_value: str) -> int | None:
+        text = str(raw_value or '').strip()
+        if not text:
+            return None
+        match = re.search(r'(\d+)', text)
+        if not match:
+            return None
+        try:
+            value = int(match.group(1))
+            return value if value > 0 else None
+        except Exception:
+            return None
 
     inserted = 0
     updated = 0
@@ -1406,6 +1432,7 @@ def upload_dataset():
         current_app.logger.info('Detected CSV Columns: %s', [repr(c) for c in detected_columns])
 
         detected = detected_mapping_fields(list(reader.fieldnames or []), mapping_normalized)
+        current_app.logger.info('Mapped Fields Detected: %s', detected)
         required = {'course_number', 'title', 'faculty', 'day_period'}
         missing_required = sorted([field for field in required if field not in detected])
         if missing_required:
@@ -1418,31 +1445,79 @@ def upload_dataset():
             flash(f'CSV mapping missing required fields: {", ".join(missing_required)}. Update mapping and retry.', 'error')
             return redirect(url_for('admin.manage_datasets'))
 
-        initial_faculty_count = int(Faculty.query.count() or 0)
+        all_rows = list(reader)
+        if not all_rows:
+            raise ValueError('CSV ingestion failed — no rows found')
 
-        for row_index, raw_row in enumerate(reader, start=1):
+        semester_values: set[str] = set()
+        year_values: set[str] = set()
+        for raw_row in all_rows:
+            row_payload = mapped_course_payload_from_row(raw_row or {}, mapping_normalized)
+            sem_guess, year_guess = _parse_semester_year(
+                _pick_from_payload(row_payload, 'semester'),
+                _pick_from_payload(row_payload, 'year'),
+            )
+            if sem_guess:
+                semester_values.add(sem_guess)
+            if year_guess:
+                year_values.add(year_guess)
+
+        if not dataset_name:
+            fallback_year = sorted(year_values)[-1] if year_values else (inferred_year or str(get_app_setting('current_year', '') or '').strip())
+            if semester_values == {'Fall', 'Spring'}:
+                dataset_name = f'{fallback_year} Full Course List'.strip()
+            elif semester_values == {'Fall'}:
+                dataset_name = f'{fallback_year} Fall Course List'.strip()
+            elif semester_values == {'Spring'}:
+                dataset_name = f'{fallback_year} Spring Course List'.strip()
+            else:
+                fallback_sem = inferred_semester or normalize_dataset_semester(get_app_setting('current_semester', ''))
+                dataset_name = f"{fallback_year}_{fallback_sem}_CSV".strip('_')
+
+        if not inferred_year and year_values:
+            inferred_year = sorted(year_values)[-1]
+        if not inferred_semester and len(semester_values) == 1:
+            only_sem = next(iter(semester_values))
+            inferred_semester = normalize_dataset_semester(only_sem)
+            inferred_type = infer_dataset_type(inferred_semester)
+
+        initial_faculty_count = int(Faculty.query.count() or 0)
+        subject_area_cache: dict[str, SubjectArea] = {
+            str(a.name or '').strip().lower(): a
+            for a in SubjectArea.query.all()
+            if str(a.name or '').strip()
+        }
+
+        for row_index, raw_row in enumerate(all_rows, start=1):
             total_rows_read += 1
+            row_payload = mapped_course_payload_from_row(raw_row or {}, mapping_normalized)
 
             if row_index <= 5:
                 current_app.logger.info('CSV Row %s raw: %s', row_index, raw_row)
 
-            course_number = _pick(raw_row, 'course_number')
-            title = _pick(raw_row, 'title')
-            day_period = _pick(raw_row, 'day_period')
+            course_number = _pick_from_payload(row_payload, 'course_number')
+            title = _pick_from_payload(row_payload, 'title')
+            day_period = _pick_from_payload(row_payload, 'day_period')
+            subject_area_text = _pick_from_payload(row_payload, 'subject_area')
 
             if row_index <= 5:
                 current_app.logger.info(
-                    'CSV Row %s extracted => course_number=%r title=%r credits=%r faculty=%r day_period=%r semester=%r year=%r prerequisite=%r',
+                    'CSV Row %s extracted => course_number=%r title=%r credits=%r faculty=%r day_period=%r subject_area=%r semester=%r year=%r year_level=%r prerequisite=%r',
                     row_index,
                     course_number,
                     title,
-                    _pick(raw_row, 'credits'),
-                    _pick(raw_row, 'faculty'),
+                    _pick_from_payload(row_payload, 'credits'),
+                    _pick_from_payload(row_payload, 'faculty'),
                     day_period,
-                    _pick(raw_row, 'semester'),
-                    _pick(raw_row, 'year'),
-                    _pick(raw_row, 'prerequisite'),
+                    subject_area_text,
+                    _pick_from_payload(row_payload, 'semester'),
+                    _pick_from_payload(row_payload, 'year'),
+                    _pick_from_payload(row_payload, 'year_level'),
+                    _pick_from_payload(row_payload, 'prerequisite'),
                 )
+
+            current_app.logger.info('Extracted Subject Area: %s', subject_area_text or '')
+            current_app.logger.info('Extracted Day Period: %s', day_period or '')
 
             if not course_number or not title or not day_period:
                 skipped_invalid += 1
@@ -1454,15 +1529,16 @@ def upload_dataset():
                     current_app.logger.warning('FAILED TO EXTRACT: day_period from row %s', row_index)
                 continue
 
-            credits_raw = _pick(raw_row, 'credits')
+            credits_raw = _pick_from_payload(row_payload, 'credits')
             try:
                 credits = float(credits_raw) if str(credits_raw or '').strip() else 0.0
             except Exception:
                 credits = 0.0
 
-            semester_raw = _pick(raw_row, 'semester') or semester_hint or ''
-            year_raw = _pick(raw_row, 'year') or year_hint or ''
-            semester, year = _normalize_term_values(semester_raw, year_raw)
+            semester_raw = _pick_from_payload(row_payload, 'semester') or semester_hint or ''
+            year_raw = _pick_from_payload(row_payload, 'year') or year_hint or ''
+            semester, year = _parse_semester_year(semester_raw, year_raw)
+            year_level = _parse_year_level(_pick_from_payload(row_payload, 'year_level'))
 
             existing = (
                 Course.query.filter(
@@ -1473,7 +1549,7 @@ def upload_dataset():
                 .first()
             )
 
-            faculty_text = _pick(raw_row, 'faculty')
+            faculty_text = _pick_from_payload(row_payload, 'faculty')
             if row_index <= 5 and faculty_text:
                 instructor_samples.append(faculty_text)
             parsed_faculty = extract_faculty_names(faculty_text)
@@ -1490,6 +1566,23 @@ def upload_dataset():
                 )
                 continue
 
+            row_debug_payload = {
+                'title': title,
+                'subject_area': subject_area_text,
+                'day_period': day_period,
+                'faculty': '; '.join(parsed_faculty),
+            }
+            current_app.logger.info('Row Parsed Payload: %s', row_debug_payload)
+            if not subject_area_text or not day_period or not parsed_faculty:
+                current_app.logger.error('Row Parsed Payload has empty critical field(s): %s', row_debug_payload)
+
+            if subject_area_text:
+                area_key = subject_area_text.strip().lower()
+                if area_key and area_key not in subject_area_cache:
+                    area_row = SubjectArea(name=subject_area_text.strip(), area_type='generic', is_active=True)
+                    db.session.add(area_row)
+                    subject_area_cache[area_key] = area_row
+
             payload = {
                 'course_number': course_number,
                 'title': title,
@@ -1497,8 +1590,9 @@ def upload_dataset():
                 'day_period': day_period,
                 'semester': semester,
                 'year': year,
-                'prerequisite': _pick(raw_row, 'prerequisite') or None,
-                'subject_area': _pick(raw_row, 'subject_area') or None,
+                'year_level': year_level,
+                'prerequisite': _pick_from_payload(row_payload, 'prerequisite') or None,
+                'subject_area': subject_area_text or None,
                 'faculty': parsed_faculty,
                 'dataset_name': dataset_name or None,
                 'source': 'csv',
@@ -1819,6 +1913,7 @@ def api_dataset_preview():
             'day_period',
             'semester',
             'year',
+            'year_level',
             'prerequisite',
             'subject_area',
         ]
@@ -2653,6 +2748,7 @@ def api_course_duplicate(course_ref: str):
         'day_period': payload.get('day_period'),
         'semester': payload.get('semester'),
         'year': payload.get('year'),
+        'year_level': payload.get('year_level'),
         'prerequisite': payload.get('prerequisite'),
         'subject_area': payload.get('subject_area'),
         'faculty': payload.get('faculty') or '; '.join(payload.get('faculty_names') or []),

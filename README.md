@@ -11,9 +11,22 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 0.2**
+- Current version: **Beta 1**
 
 ## Changelog
+
+### Beta 1 — 2026-03-23
+
+- Fixed CSV mapping engine application by enforcing centralized mapped payload extraction per row.
+- Added normalized mapping aliases for `subject_area`, `day_period`, and `year_level` in `config/data_mapping.py`.
+- Fixed semester/year parsing for labels like `Fall Semester 2025` -> `semester=Fall`, `year=2025`.
+- Added `year_level` extraction from `Year Available` (e.g., `1Year` -> `1`) and persisted it to `Course.year_level`.
+- Added automatic dataset naming from detected CSV term coverage:
+	- `YYYY Full Course List`
+	- `YYYY Fall Course List`
+	- `YYYY Spring Course List`
+- Added mandatory row-level parser debug logs including extracted subject area/day period and structured row payload summaries.
+- Simplified faculty table course display to title-only labels in admin faculty APIs/UI payloads.
 
 ### Beta 0.2 — 2026-03-18
 

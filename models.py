@@ -183,6 +183,7 @@ class Course(db.Model):
     day_period = db.Column(db.String(255), nullable=False, index=True)
     semester = db.Column(db.String(50), nullable=True, index=True)
     year = db.Column(db.String(20), nullable=True, index=True)
+    year_level = db.Column(db.Integer, nullable=True, index=True)
     prerequisite = db.Column(db.Text, nullable=True)
     subject_area = db.Column(db.String(255), nullable=True, index=True)
     instructor = db.Column(db.String(255), nullable=True, index=True)
