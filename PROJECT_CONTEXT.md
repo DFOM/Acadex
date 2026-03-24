@@ -192,7 +192,7 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Mixed-term CSV uploads (Fall+Spring) are split into semester-specific dataset names during ingestion.
   - Registry listing with source/year/semester/type/table metadata
   - Refresh/delete/force-delete registry entries
-  - delete action uses a confirmation modal, supports `DELETE /admin/api/datasets/<id>`, and now runs a hardened transactional delete flow with structured logs
+  - delete action uses a confirmation modal with dependency impact counts, supports `DELETE /admin/api/datasets/<id>`, and runs hardened transactional delete flow with linked-schedule cleanup + user notifications
   - Bulk clean invalid datasets
   - Orphan table scan/cleanup
   - Dataset column inspection
@@ -225,9 +225,9 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Affected files (implemented): `Routes/student_routes.py`.
 
 3. Dataset deletion failure:
-  - Status: ✅ Implemented (Beta 1.4.2 hardened)
+  - Status: ✅ Implemented (Beta 1.4.3 dependency-aware cleanup)
   - Issue: Deleting dataset does nothing; system cannot be cleaned.
-  - Resolution summary: Delete flow now pre-syncs registry state, returns explicit partial-cleanup success when registry deletion succeeds, and performs robust CSV-row cleanup using normalized dataset-name matching with legacy-source compatibility so rows are fully removed and registry entries do not reappear.
+  - Resolution summary: Delete flow now pre-syncs registry state, performs robust normalized cleanup, shows admin impact counts (linked schedules/users) before delete, and automatically removes linked schedules while notifying affected users.
   - Affected files (implemented): `Routes/admin_routes.py`.
 
 4. Missing courses:
@@ -261,6 +261,14 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 ---
 
 # 6. Change Log (Chronological)
+
+## 2026-03-24 — Beta 1.4.3 (dataset dependency-aware deletion)
+
+- Added dataset impact endpoint (`GET /admin/api/datasets/<id>/impact`) to compute linked schedule/user impact before deletion.
+- Updated admin dataset delete modal to display impact counts and explicit warning messaging before confirming delete.
+- Delete flow now removes linked schedules and schedule-linked events in the same transaction and creates notifications for affected signed-in users.
+- Added contract assertions for impact endpoint + linked schedule cleanup/notification behavior.
+- Verified focused contract suite after fix: `16 passed`.
 
 ## 2026-03-24 — Beta 1.4 (stabilization implementation batch)
 

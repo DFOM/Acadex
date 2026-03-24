@@ -11,9 +11,16 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.4.2**
+- Current version: **Beta 1.4.3**
 
 ## Changelog
+
+### Beta 1.4.3 — 2026-03-24
+
+- Added dataset dependency impact analysis endpoint (`GET /admin/api/datasets/<id>/impact`) so admin delete flow can show how many schedules/users are affected before confirmation.
+- Updated admin dataset delete modal to display linked-schedule impact counts and explicit warning text prior to deletion.
+- Deleting a dataset now automatically removes linked schedules (including guest schedules) and creates in-app notifications for affected signed-in users.
+- Added regression contract coverage for impact endpoint presence and schedule cleanup + notification behavior.
 
 ### Beta 1.4.2 — 2026-03-24
 

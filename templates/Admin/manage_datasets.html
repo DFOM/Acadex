@@ -206,6 +206,7 @@
             <div class="modal-body">
                 <p class="mb-1">Delete dataset <strong id="datasetDeleteName">this dataset</strong> and its associated rows?</p>
                 <div class="small text-muted">If the physical table is already missing, the registry entry will still be removed.</div>
+                <div id="datasetDeleteImpact" class="alert alert-warning mt-3 mb-0 d-none"></div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -229,6 +230,7 @@
     const previewSample = document.getElementById('csvPreviewSample');
     const datasetDeleteModalEl = document.getElementById('datasetDeleteModal');
     const datasetDeleteName = document.getElementById('datasetDeleteName');
+    const datasetDeleteImpact = document.getElementById('datasetDeleteImpact');
     const confirmDatasetDeleteBtn = document.getElementById('confirmDatasetDeleteBtn');
     let pendingDeleteDatasetId = null;
     const datasetDeleteModal = datasetDeleteModalEl ? new bootstrap.Modal(datasetDeleteModalEl) : null;
@@ -464,6 +466,40 @@
                 pendingDeleteDatasetId = id;
                 const nameCell = row.querySelector('td.fw-semibold');
                 if (datasetDeleteName) datasetDeleteName.textContent = (nameCell && nameCell.textContent) ? nameCell.textContent.trim() : 'this dataset';
+
+                if (datasetDeleteImpact) {
+                    datasetDeleteImpact.classList.remove('d-none', 'alert-danger');
+                    datasetDeleteImpact.classList.add('alert-warning');
+                    datasetDeleteImpact.textContent = 'Checking linked schedules...';
+                }
+
+                try {
+                    const impactRes = await fetch(`/admin/api/datasets/${id}/impact`, { headers: { 'Accept': 'application/json' } });
+                    const impactData = await impactRes.json();
+                    if (datasetDeleteImpact) {
+                        if (!impactRes.ok || !impactData.success || !impactData.impact) {
+                            datasetDeleteImpact.classList.remove('alert-warning');
+                            datasetDeleteImpact.classList.add('alert-danger');
+                            datasetDeleteImpact.textContent = 'Could not load schedule dependency impact. Deleting will still attempt schedule cleanup and user notification.';
+                        } else {
+                            const scheduleCount = Number(impactData.impact.schedule_count || 0);
+                            const userCount = Number(impactData.impact.user_count || 0);
+                            const guestCount = Number(impactData.impact.guest_schedule_count || 0);
+                            if (scheduleCount > 0) {
+                                datasetDeleteImpact.textContent = `${scheduleCount} schedule(s) depend on this dataset (${userCount} user account(s), ${guestCount} guest schedule(s)). Deleting now will remove linked schedules and notify affected users.`;
+                            } else {
+                                datasetDeleteImpact.textContent = 'No linked schedules were found for this dataset.';
+                            }
+                        }
+                    }
+                } catch (_) {
+                    if (datasetDeleteImpact) {
+                        datasetDeleteImpact.classList.remove('alert-warning');
+                        datasetDeleteImpact.classList.add('alert-danger');
+                        datasetDeleteImpact.textContent = 'Could not load schedule dependency impact. Deleting will still attempt schedule cleanup and user notification.';
+                    }
+                }
+
                 datasetDeleteModal?.show();
                 return;
             } else if (target.classList.contains('ds-force-delete')) {
@@ -493,6 +529,12 @@
             await postAction(`/admin/api/datasets/${pendingDeleteDatasetId}`, 'DELETE');
             datasetDeleteModal?.hide();
             pendingDeleteDatasetId = null;
+            if (datasetDeleteImpact) {
+                datasetDeleteImpact.classList.add('d-none');
+                datasetDeleteImpact.classList.remove('alert-danger');
+                datasetDeleteImpact.classList.add('alert-warning');
+                datasetDeleteImpact.textContent = '';
+            }
             await loadRegistry();
             await loadOrphans();
         } catch (err) {

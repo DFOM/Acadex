@@ -1757,6 +1757,116 @@ def _csv_courses_for_dataset_name(dataset_name: str, *, include_legacy_sources: 
     return Course.query.filter(source_filter, dataset_expr == normalized_name)
 
 
+def _dataset_dependency_schedule_ids(row: DatasetRegistry) -> set[int]:
+    dataset_name = str(getattr(row, 'name', '') or '').strip().lower()
+    semester = normalize_dataset_semester(getattr(row, 'semester', None))
+    year_text = str(getattr(row, 'year', '') or '').strip()
+
+    ids: set[int] = set()
+
+    try:
+        cols = {c['name'] for c in inspect(db.engine).get_columns('schedule_courses')}
+    except Exception:
+        db.session.rollback()
+        cols = set()
+
+    if dataset_name and 'dataset_name' in cols:
+        try:
+            strict_rows = (
+                db.session.query(Schedule.id)
+                .join(ScheduleCourse, ScheduleCourse.schedule_id == Schedule.id)
+                .filter(sa.func.lower(sa.func.trim(sa.func.coalesce(ScheduleCourse.dataset_name, ''))) == dataset_name)
+                .distinct()
+                .all()
+            )
+            ids.update(int(r[0]) for r in strict_rows if r and r[0])
+        except Exception:
+            db.session.rollback()
+
+    if year_text.isdigit() and semester in {'spring', 'fall', 'full_year'}:
+        year_val = int(year_text)
+        try:
+            term_query = (
+                db.session.query(Schedule.id)
+                .join(ScheduleCourse, ScheduleCourse.schedule_id == Schedule.id)
+                .filter(Schedule.year == year_val)
+            )
+            if semester == 'full_year':
+                term_query = term_query.filter(
+                    sa.func.lower(sa.func.coalesce(Schedule.semester, '')).in_(['spring', 'fall', 'full_year'])
+                )
+            else:
+                term_query = term_query.filter(sa.func.lower(sa.func.coalesce(Schedule.semester, '')) == semester)
+
+            term_rows = term_query.distinct().all()
+            ids.update(int(r[0]) for r in term_rows if r and r[0])
+        except Exception:
+            db.session.rollback()
+
+    return ids
+
+
+def _dataset_dependency_impact(row: DatasetRegistry) -> dict:
+    schedule_ids = _dataset_dependency_schedule_ids(row)
+    if not schedule_ids:
+        return {
+            'schedule_ids': [],
+            'schedule_count': 0,
+            'user_count': 0,
+            'guest_schedule_count': 0,
+        }
+
+    schedules = Schedule.query.filter(Schedule.id.in_(schedule_ids)).all()
+    user_ids = {int(s.user_id) for s in schedules if getattr(s, 'user_id', None)}
+    guest_count = sum(1 for s in schedules if not getattr(s, 'user_id', None))
+
+    return {
+        'schedule_ids': sorted(int(s) for s in schedule_ids),
+        'schedule_count': len(schedule_ids),
+        'user_count': len(user_ids),
+        'guest_schedule_count': int(guest_count),
+    }
+
+
+def _delete_linked_schedules_and_notify(row: DatasetRegistry) -> dict:
+    impact = _dataset_dependency_impact(row)
+    schedule_ids = impact.get('schedule_ids', [])
+    if not schedule_ids:
+        return {
+            'deleted_schedules': 0,
+            'notified_users': 0,
+            'guest_schedules_deleted': 0,
+        }
+
+    schedules = Schedule.query.filter(Schedule.id.in_(schedule_ids)).all()
+    user_ids = sorted({int(s.user_id) for s in schedules if getattr(s, 'user_id', None)})
+    guest_deleted = sum(1 for s in schedules if not getattr(s, 'user_id', None))
+
+    dataset_name = str(getattr(row, 'name', '') or 'a dataset').strip() or 'a dataset'
+    for uid in user_ids:
+        db.session.add(
+            Notification(
+                user_id=uid,
+                notif_type='warning',
+                title='Schedule removed after dataset deletion',
+                body=f'One or more schedules were removed because dataset "{dataset_name}" was deleted by an administrator.',
+                url='/student/dashboard',
+                is_read=False,
+            )
+        )
+
+    ScheduleCourse.query.filter(ScheduleCourse.schedule_id.in_(schedule_ids)).delete(synchronize_session=False)
+    AIEvent.query.filter(AIEvent.schedule_id.in_(schedule_ids)).delete(synchronize_session=False)
+    BehaviorEvent.query.filter(BehaviorEvent.schedule_id.in_(schedule_ids)).delete(synchronize_session=False)
+    Schedule.query.filter(Schedule.id.in_(schedule_ids)).delete(synchronize_session=False)
+
+    return {
+        'deleted_schedules': len(schedule_ids),
+        'notified_users': len(user_ids),
+        'guest_schedules_deleted': int(guest_deleted),
+    }
+
+
 def _delete_registry_dataset_row(row: DatasetRegistry) -> dict:
     dataset_name = str(getattr(row, 'name', '') or '').strip()
     source = str(getattr(row, 'source', '') or '').strip().lower()
@@ -1810,6 +1920,34 @@ def api_datasets():
     return jsonify({'success': True, 'datasets': payload})
 
 
+@admin_bp.route('/api/datasets/<int:dataset_id>/impact', methods=['GET'])
+@login_required
+@admin_required
+def api_dataset_impact(dataset_id: int):
+    if not _dataset_registry_supported():
+        return jsonify({'success': False, 'message': 'Dataset registry is unavailable (run migrations).'}), 500
+
+    _ensure_dataset_registry_synced()
+    row = DatasetRegistry.query.get(dataset_id)
+    if not row:
+        return jsonify({'success': False, 'message': 'Dataset not found.'}), 404
+
+    impact = _dataset_dependency_impact(row)
+    return jsonify(
+        {
+            'success': True,
+            'dataset': {
+                'id': row.id,
+                'name': row.name,
+                'year': row.year,
+                'semester': row.semester,
+                'source': row.source,
+            },
+            'impact': impact,
+        }
+    )
+
+
 @admin_bp.route('/api/datasets/<int:dataset_id>/delete', methods=['POST'])
 @admin_bp.route('/api/datasets/<int:dataset_id>', methods=['DELETE', 'POST'])
 @login_required
@@ -1824,6 +1962,7 @@ def api_delete_dataset(dataset_id: int):
         return jsonify({'success': False, 'message': 'Dataset not found.'}), 404
 
     try:
+        schedule_cleanup = _delete_linked_schedules_and_notify(row)
         result = _delete_registry_dataset_row(row)
         db.session.commit()
     except Exception as exc:
@@ -1851,14 +1990,23 @@ def api_delete_dataset(dataset_id: int):
         return jsonify({'success': False, 'message': 'Dataset delete failed. Please retry or use force-delete.'}), 500
 
     current_app.logger.info(
-        'Dataset delete success id=%s name=%s source=%s dropped_table=%s deleted_rows=%s',
+        'Dataset delete success id=%s name=%s source=%s dropped_table=%s deleted_rows=%s deleted_schedules=%s notified_users=%s',
         dataset_id,
         result.get('dataset_name'),
         result.get('source'),
         result.get('dropped_table'),
         result.get('deleted_rows'),
+        schedule_cleanup.get('deleted_schedules', 0),
+        schedule_cleanup.get('notified_users', 0),
     )
-    return jsonify({'success': True, 'message': f'Dataset {result.get("dataset_name")} deleted.', 'result': result})
+    return jsonify(
+        {
+            'success': True,
+            'message': f'Dataset {result.get("dataset_name")} deleted.',
+            'result': result,
+            'schedule_cleanup': schedule_cleanup,
+        }
+    )
 
 
 @admin_bp.route('/api/datasets/<int:dataset_id>/force-delete', methods=['DELETE', 'POST'])

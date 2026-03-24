@@ -26,6 +26,23 @@ class TestAdminDatasetAndTBAContracts(unittest.TestCase):
         self.assertIn('sa.func.lower(sa.func.trim(sa.func.coalesce(Course.dataset_name,', content)
         self.assertIn("q = _csv_courses_for_dataset_name(dataset_name, include_legacy_sources=True)", content)
 
+    def test_dataset_delete_exposes_impact_endpoint_and_cleanup(self):
+        content = self.admin_routes
+        self.assertIn("@admin_bp.route('/api/datasets/<int:dataset_id>/impact', methods=['GET'])", content)
+        self.assertIn('def api_dataset_impact(dataset_id: int):', content)
+        self.assertIn('def _dataset_dependency_impact(row: DatasetRegistry) -> dict:', content)
+        self.assertIn('def _delete_linked_schedules_and_notify(row: DatasetRegistry) -> dict:', content)
+        self.assertIn('schedule_cleanup = _delete_linked_schedules_and_notify(row)', content)
+        self.assertIn("'schedule_cleanup': schedule_cleanup", content)
+
+    def test_schedule_cleanup_notifies_users_and_deletes_schedule_data(self):
+        content = self.admin_routes
+        self.assertIn("title='Schedule removed after dataset deletion'", content)
+        self.assertIn('ScheduleCourse.query.filter(ScheduleCourse.schedule_id.in_(schedule_ids)).delete', content)
+        self.assertIn('AIEvent.query.filter(AIEvent.schedule_id.in_(schedule_ids)).delete', content)
+        self.assertIn('BehaviorEvent.query.filter(BehaviorEvent.schedule_id.in_(schedule_ids)).delete', content)
+        self.assertIn('Schedule.query.filter(Schedule.id.in_(schedule_ids)).delete', content)
+
     def test_tba_ingestion_allows_missing_day_period_mapping(self):
         content = self.admin_routes
         self.assertIn("required = {'course_number', 'title', 'faculty'}", content)
