@@ -225,9 +225,9 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Affected files (implemented): `Routes/student_routes.py`.
 
 3. Dataset deletion failure:
-  - Status: ✅ Implemented (Beta 1.4)
+  - Status: ✅ Implemented (Beta 1.4.2 hardened)
   - Issue: Deleting dataset does nothing; system cannot be cleaned.
-  - Resolution summary: Delete flow now pre-syncs registry state and returns explicit partial-cleanup success when registry deletion succeeds even if physical cleanup partially fails.
+  - Resolution summary: Delete flow now pre-syncs registry state, returns explicit partial-cleanup success when registry deletion succeeds, and performs robust CSV-row cleanup using normalized dataset-name matching with legacy-source compatibility so rows are fully removed and registry entries do not reappear.
   - Affected files (implemented): `Routes/admin_routes.py`.
 
 4. Missing courses:
@@ -288,6 +288,16 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - `_schedule_course_rows_for_schedule`
   - `_hydrate_schedule_courses`
 - Verified local test suite after fix: `31 passed`.
+
+## 2026-03-24 — Beta 1.4.2 (dataset deletion hardening)
+
+- Fixed remaining dataset deletion failures by introducing `_csv_courses_for_dataset_name(...)` with normalized dataset-name matching (`trim` + lowercase) and legacy-source-inclusive filtering (`csv` and empty source) for cleanup.
+- Applied the robust filter to:
+  - `_delete_registry_dataset_row`
+  - `api_force_delete_dataset`
+  - `api_clean_invalid_datasets`
+- Added regression contract assertion for normalized legacy-safe dataset cleanup filter behavior.
+- Verified local test suite after fix: `32 passed`.
 
 ## 2026-03-18 — Beta 0.1
 

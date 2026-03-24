@@ -19,6 +19,13 @@ class TestAdminDatasetAndTBAContracts(unittest.TestCase):
         self.assertIn("'partial_cleanup': True", content)
         self.assertIn("Dataset registry row was removed, but some physical cleanup steps failed.", content)
 
+    def test_csv_dataset_delete_uses_normalized_legacy_safe_filter(self):
+        content = self.admin_routes
+        self.assertIn('def _csv_courses_for_dataset_name(dataset_name: str, *, include_legacy_sources: bool = True):', content)
+        self.assertIn("source_expr.in_(['csv', ''])", content)
+        self.assertIn('sa.func.lower(sa.func.trim(sa.func.coalesce(Course.dataset_name,', content)
+        self.assertIn("q = _csv_courses_for_dataset_name(dataset_name, include_legacy_sources=True)", content)
+
     def test_tba_ingestion_allows_missing_day_period_mapping(self):
         content = self.admin_routes
         self.assertIn("required = {'course_number', 'title', 'faculty'}", content)

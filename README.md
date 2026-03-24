@@ -11,9 +11,15 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.4**
+- Current version: **Beta 1.4.2**
 
 ## Changelog
+
+### Beta 1.4.2 — 2026-03-24
+
+- Fixed dataset deletion reliability for legacy/dirty CSV rows by using normalized dataset-name matching (trim + case-insensitive) and legacy-source-compatible cleanup filters.
+- Applied the same robust dataset-row matching to normal delete, force delete, and invalid-dataset cleanup paths so registry rows do not reappear after sync.
+- Added regression contract coverage for the new dataset cleanup filter behavior.
 
 ### Beta 1.4 — 2026-03-24
 

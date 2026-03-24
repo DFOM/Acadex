@@ -1745,6 +1745,18 @@ def delete_dataset(table_name):
     return redirect(url_for('admin.manage_datasets'))
 
 
+def _csv_courses_for_dataset_name(dataset_name: str, *, include_legacy_sources: bool = True):
+    normalized_name = str(dataset_name or '').strip().lower()
+    if not normalized_name:
+        return Course.query.filter(sa.false())
+
+    source_expr = sa.func.lower(sa.func.trim(sa.func.coalesce(Course.source, '')))
+    dataset_expr = sa.func.lower(sa.func.trim(sa.func.coalesce(Course.dataset_name, '')))
+
+    source_filter = source_expr.in_(['csv', '']) if include_legacy_sources else (source_expr == 'csv')
+    return Course.query.filter(source_filter, dataset_expr == normalized_name)
+
+
 def _delete_registry_dataset_row(row: DatasetRegistry) -> dict:
     dataset_name = str(getattr(row, 'name', '') or '').strip()
     source = str(getattr(row, 'source', '') or '').strip().lower()
@@ -1754,10 +1766,7 @@ def _delete_registry_dataset_row(row: DatasetRegistry) -> dict:
     deleted_rows = 0
 
     if source == 'csv' and dataset_name:
-        q = Course.query.filter(
-            sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv',
-            sa.func.lower(sa.func.coalesce(Course.dataset_name, '')) == dataset_name.lower(),
-        )
+        q = _csv_courses_for_dataset_name(dataset_name, include_legacy_sources=True)
         deleted_rows = int(q.count() or 0)
         q.delete(synchronize_session=False)
 
@@ -1870,10 +1879,7 @@ def api_force_delete_dataset(dataset_id: int):
     dataset_name = str(getattr(row, 'name', '') or '').strip()
     source = str(getattr(row, 'source', '') or '').strip().lower()
     if source == 'csv' and dataset_name:
-        Course.query.filter(
-            sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv',
-            sa.func.lower(sa.func.coalesce(Course.dataset_name, '')) == dataset_name.lower(),
-        ).delete(synchronize_session=False)
+        _csv_courses_for_dataset_name(dataset_name, include_legacy_sources=True).delete(synchronize_session=False)
     if source == 'scraped' and dataset_name:
         ScrapedDataset.query.filter(sa.func.lower(ScrapedDataset.name) == dataset_name.lower()).delete(synchronize_session=False)
 
@@ -1906,13 +1912,7 @@ def api_clean_invalid_datasets():
             is_invalid = True
 
         if source == 'csv' and dataset_name:
-            row_count = int(
-                Course.query.filter(
-                    sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv',
-                    sa.func.lower(sa.func.coalesce(Course.dataset_name, '')) == dataset_name.lower(),
-                ).count()
-                or 0
-            )
+            row_count = int(_csv_courses_for_dataset_name(dataset_name, include_legacy_sources=True).count() or 0)
             if row_count == 0:
                 is_invalid = True
 
@@ -1923,10 +1923,7 @@ def api_clean_invalid_datasets():
             if table_name and re.match(r'^[A-Za-z0-9_]+$', table_name):
                 db.session.execute(text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE'))
             if source == 'csv' and dataset_name:
-                Course.query.filter(
-                    sa.func.lower(sa.func.coalesce(Course.source, '')) == 'csv',
-                    sa.func.lower(sa.func.coalesce(Course.dataset_name, '')) == dataset_name.lower(),
-                ).delete(synchronize_session=False)
+                _csv_courses_for_dataset_name(dataset_name, include_legacy_sources=True).delete(synchronize_session=False)
             if source == 'scraped' and dataset_name:
                 ScrapedDataset.query.filter(sa.func.lower(ScrapedDataset.name) == dataset_name.lower()).delete(synchronize_session=False)
             db.session.delete(row)
