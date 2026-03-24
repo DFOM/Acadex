@@ -206,6 +206,7 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 - RBAC + per-route permission enforcement
 - Notifications + behavior/AI events
+- Persistent System Health action logs for mutating requests, exposed in health metrics and copyable from the admin health UI.
 - Catalog filtering applies odd/even year offering text guards when course metadata includes odd-only/even-only language.
 - Alembic migrations and startup bootstrap protections
 - Policy enforcement for `PROJECT_CONTEXT.md` in both local pre-commit and GitHub Actions CI
@@ -261,6 +262,14 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 ---
 
 # 6. Change Log (Chronological)
+
+## 2026-03-24 — Beta 1.4.4 (system health action logs)
+
+- Added settings-backed persistent action log writer in `app.py` for mutating requests across admin/student/schedule routes.
+- Extended `GET /admin/api/health-metrics` payload with `audit.action_logs` and `audit.action_log_count`.
+- Added System Health UI panel for Action Logs with one-click copy-to-clipboard support.
+- Added regression contract suite `tests/test_system_health_action_logs_contracts.py`.
+- Verified focused contracts after fix: `10 passed`.
 
 ## 2026-03-24 — Beta 1.4.3 (dataset dependency-aware deletion)
 

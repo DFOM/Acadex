@@ -886,6 +886,35 @@ def _project_root() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 
+def _recent_system_action_logs(limit: int = 200) -> list[dict]:
+    max_rows = max(1, min(int(limit), 500))
+    row = Setting.query.get('system_health_action_logs_json')
+    if not row or not row.value:
+        return []
+
+    parsed = safe_json_loads(row.value, default=[])
+    if not isinstance(parsed, list):
+        return []
+
+    cleaned: list[dict] = []
+    for item in parsed[-max_rows:]:
+        if not isinstance(item, dict):
+            continue
+        cleaned.append(
+            {
+                'ts': str(item.get('ts') or ''),
+                'method': str(item.get('method') or ''),
+                'path': str(item.get('path') or ''),
+                'status': int(item.get('status') or 0),
+                'ok': bool(item.get('ok')),
+                'ip': str(item.get('ip') or ''),
+                'user_id': item.get('user_id'),
+                'session_sid': str(item.get('session_sid') or ''),
+            }
+        )
+    return cleaned
+
+
 def _available_root_csv_files() -> list[str]:
     try:
         root = _project_root()
@@ -3102,6 +3131,7 @@ def admin_health():
 @admin_required
 def health_metrics_api():
     now_utc = datetime.now(timezone.utc)
+    action_logs = _recent_system_action_logs(limit=200)
 
     db_ok = True
     db_error = None
@@ -3148,6 +3178,10 @@ def health_metrics_api():
             'rollback_supported': False,
         },
         'integrity': _build_integrity_payload(),
+        'audit': {
+            'action_log_count': len(action_logs),
+            'action_logs': action_logs,
+        },
     }
     return jsonify(payload)
 

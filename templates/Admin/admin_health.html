@@ -91,6 +91,19 @@
                 <pre id="rawMetrics" class="mb-0 rounded p-2" style="background:var(--ax-surface-alt); border:1px solid var(--ax-border); font-size:.74rem; max-height:240px; overflow:auto;">Waiting for first poll...</pre>
             </div>
         </div>
+
+        <div class="card shadow-sm mt-3">
+            <div class="card-header d-flex justify-content-between align-items-center" style="background: var(--ax-surface);">
+                <h5 class="mb-0">Action Logs</h5>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-secondary" id="actionLogCount">0</span>
+                    <button id="copyActionLogsBtn" class="btn btn-sm btn-outline-secondary" type="button">Copy Logs</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <pre id="actionLogs" class="mb-0 rounded p-2" style="background:var(--ax-surface-alt); border:1px solid var(--ax-border); font-size:.74rem; max-height:240px; overflow:auto;">Waiting for first poll...</pre>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -194,6 +207,33 @@
         }).join('');
     }
 
+    function renderActionLogs(auditPayload) {
+        const pre = document.getElementById('actionLogs');
+        const count = document.getElementById('actionLogCount');
+        if (!pre || !count) return;
+
+        const logs = Array.isArray(auditPayload?.action_logs) ? auditPayload.action_logs : [];
+        count.textContent = String(Number(auditPayload?.action_log_count || logs.length || 0));
+
+        if (!logs.length) {
+            pre.textContent = 'No action logs yet.';
+            return;
+        }
+
+        const lines = logs.map((log) => {
+            const ts = String(log.ts || '');
+            const method = String(log.method || '').toUpperCase();
+            const path = String(log.path || '');
+            const status = Number(log.status || 0);
+            const userId = log.user_id == null ? 'guest' : String(log.user_id);
+            const ip = String(log.ip || '');
+            const sid = String(log.session_sid || '');
+            return `${ts} | ${method} ${path} | status=${status} | user=${userId} | ip=${ip} | sid=${sid}`;
+        });
+
+        pre.textContent = lines.join('\n');
+    }
+
     async function runHealthFix(action) {
         try {
             const response = await fetch('/admin/api/health-fix', {
@@ -243,6 +283,7 @@
 
                 renderVersionRows(d.version_control?.recent_versions || []);
                 renderIntegrity(d.integrity || {});
+                renderActionLogs(d.audit || {});
                 setText('rawMetrics', JSON.stringify(d, null, 2));
             })
             .catch(err => {
@@ -260,6 +301,23 @@
         if (!action) return;
         runHealthFix(action);
     });
+
+    document.getElementById('copyActionLogsBtn')?.addEventListener('click', async () => {
+        const pre = document.getElementById('actionLogs');
+        if (!pre) return;
+        const text = String(pre.textContent || '');
+        if (!text.trim()) {
+            showAlert('No action logs available to copy.', 'warning');
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(text);
+            showAlert('Action logs copied.', 'success');
+        } catch (_) {
+            showAlert('Copy failed. Select and copy manually from the Action Logs panel.', 'warning');
+        }
+    });
+
     pollHealth();
     timer = setInterval(pollHealth, 5000);
 

@@ -11,9 +11,16 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.4.3**
+- Current version: **Beta 1.4.4**
 
 ## Changelog
+
+### Beta 1.4.4 — 2026-03-24
+
+- Added persistent System Health action logging for mutating admin/student/schedule requests (method, path, status, user, IP, session id), stored in app settings.
+- Extended `/admin/api/health-metrics` with `audit.action_logs` and `audit.action_log_count` so health diagnostics include recent action history.
+- Added new copyable Action Logs panel in System Health UI, including one-click clipboard copy for sharing/debugging.
+- Added regression contract tests for action-log persistence contract, health metrics payload exposure, and UI copy affordance.
 
 ### Beta 1.4.3 — 2026-03-24
 

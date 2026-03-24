@@ -10,8 +10,9 @@ from pathlib import Path
 from datetime import timedelta, datetime
 from werkzeug.security import generate_password_hash
 from sqlalchemy import inspect as sa_inspect, text as sa_text
-from models import db, User, Role, Permission, RegistrationField, RBAC_PERMISSION_KEYS
+from models import db, User, Role, Permission, RegistrationField, Setting, RBAC_PERMISSION_KEYS
 from flask_migrate import Migrate, upgrade, stamp
+import json
 
 from Routes.auth_routes import auth_bp
 from Routes.admin_routes import admin_bp
@@ -19,7 +20,7 @@ from Routes.main_routes import main_bp
 from Routes.student_routes import student_bp
 from Routes.schedule_routes import schedule_bp
 
-VERSION = 'Beta 1.4.3'
+VERSION = 'Beta 1.4.4'
 APP_STARTED_AT = datetime.utcnow().replace(tzinfo=None).isoformat() + 'Z'
 
 app = Flask(__name__)
@@ -109,6 +110,7 @@ if not app.logger.handlers:
 app.logger.setLevel(logging.INFO)
 
 _rate_limit_buckets: dict[str, deque] = defaultdict(deque)
+_SYSTEM_HEALTH_ACTION_LOGS_KEY = 'system_health_action_logs_json'
 
 
 def _request_ip() -> str:
@@ -116,6 +118,33 @@ def _request_ip() -> str:
     if forwarded:
         return forwarded.split(',')[0].strip()[:64]
     return (request.remote_addr or 'unknown')[:64]
+
+
+def _append_system_health_action_log(entry: dict, limit: int = 400) -> None:
+    if not isinstance(entry, dict):
+        return
+
+    try:
+        row = Setting.query.get(_SYSTEM_HEALTH_ACTION_LOGS_KEY)
+        existing: list[dict] = []
+        if row and row.value:
+            parsed = json.loads(str(row.value))
+            if isinstance(parsed, list):
+                existing = [item for item in parsed if isinstance(item, dict)]
+
+        existing.append(entry)
+        if len(existing) > int(limit):
+            existing = existing[-int(limit):]
+
+        encoded = json.dumps(existing, separators=(',', ':'), ensure_ascii=False)
+        if not row:
+            row = Setting(key=_SYSTEM_HEALTH_ACTION_LOGS_KEY, value=encoded)
+            db.session.add(row)
+        else:
+            row.value = encoded
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 
 def _apply_rate_limit(bucket: str, max_events: int, window_seconds: int) -> bool:
@@ -201,6 +230,18 @@ def _security_after_request(response):
     ):
         user_id = current_user.id if getattr(current_user, 'is_authenticated', False) else None
         app.logger.info('audit method=%s path=%s status=%s ip=%s user=%s', request.method, request.path, response.status_code, _request_ip(), user_id)
+        _append_system_health_action_log(
+            {
+                'ts': datetime.utcnow().replace(tzinfo=None).isoformat() + 'Z',
+                'method': str(request.method or ''),
+                'path': str(request.path or ''),
+                'status': int(response.status_code or 0),
+                'ok': bool(int(response.status_code or 0) < 400),
+                'ip': _request_ip(),
+                'user_id': int(user_id) if user_id is not None else None,
+                'session_sid': str(getattr(session, 'sid', '') or ''),
+            }
+        )
     return response
 
 
