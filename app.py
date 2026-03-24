@@ -1,5 +1,5 @@
 # app.py
-from flask import Flask, jsonify, request, session
+from flask import Flask, jsonify, request, session, g
 from flask_login import LoginManager, current_user
 from flask_session import Session
 import os
@@ -20,7 +20,7 @@ from Routes.main_routes import main_bp
 from Routes.student_routes import student_bp
 from Routes.schedule_routes import schedule_bp
 
-VERSION = 'Beta 1.4.4'
+VERSION = 'Beta 1.4.5'
 APP_STARTED_AT = datetime.utcnow().replace(tzinfo=None).isoformat() + 'Z'
 
 app = Flask(__name__)
@@ -147,6 +147,22 @@ def _append_system_health_action_log(entry: dict, limit: int = 400) -> None:
         db.session.rollback()
 
 
+def _safe_log_detail(value, max_len: int = 1400) -> str:
+    if value is None:
+        return ''
+    try:
+        if isinstance(value, str):
+            text = value
+        else:
+            text = json.dumps(value, ensure_ascii=False, separators=(',', ':'))
+        text = text.strip()
+        if len(text) > max_len:
+            return text[:max_len]
+        return text
+    except Exception:
+        return str(value)[:max_len]
+
+
 def _apply_rate_limit(bucket: str, max_events: int, window_seconds: int) -> bool:
     now = __import__('time').time()
     q = _rate_limit_buckets[bucket]
@@ -240,6 +256,7 @@ def _security_after_request(response):
                 'ip': _request_ip(),
                 'user_id': int(user_id) if user_id is not None else None,
                 'session_sid': str(getattr(session, 'sid', '') or ''),
+                'detail': _safe_log_detail(getattr(g, '_system_action_detail', '')),
             }
         )
     return response

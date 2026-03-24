@@ -228,7 +228,8 @@
             const userId = log.user_id == null ? 'guest' : String(log.user_id);
             const ip = String(log.ip || '');
             const sid = String(log.session_sid || '');
-            return `${ts} | ${method} ${path} | status=${status} | user=${userId} | ip=${ip} | sid=${sid}`;
+            const detail = String(log.detail || '').trim();
+            return `${ts} | ${method} ${path} | status=${status} | user=${userId} | ip=${ip} | sid=${sid}${detail ? ` | detail=${detail}` : ''}`;
         });
 
         pre.textContent = lines.join('\n');

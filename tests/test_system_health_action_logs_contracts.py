@@ -16,14 +16,22 @@ class TestSystemHealthActionLogsContracts(unittest.TestCase):
         self.assertIn('def _append_system_health_action_log(entry: dict, limit: int = 400) -> None:', content)
         self.assertIn('Setting.query.get(_SYSTEM_HEALTH_ACTION_LOGS_KEY)', content)
         self.assertIn('_append_system_health_action_log(', content)
+        self.assertIn("'detail': _safe_log_detail(getattr(g, '_system_action_detail', ''))", content)
 
     def test_health_metrics_exposes_audit_action_logs(self):
         content = self.admin_routes
         self.assertIn('def _recent_system_action_logs(limit: int = 200) -> list[dict]:', content)
         self.assertIn("row = Setting.query.get('system_health_action_logs_json')", content)
+        self.assertIn("'detail': str(item.get('detail') or '')", content)
         self.assertIn("'audit': {", content)
         self.assertIn("'action_log_count': len(action_logs)", content)
         self.assertIn("'action_logs': action_logs", content)
+
+    def test_dataset_routes_emit_health_action_detail(self):
+        content = self.admin_routes
+        self.assertIn("g._system_action_detail = {'event': 'dataset_delete'", content)
+        self.assertIn("g._system_action_detail = {'event': 'dataset_force_delete'", content)
+        self.assertIn("g._system_action_detail = {'event': 'dataset_impact'", content)
 
     def test_health_template_has_copyable_action_logs_panel(self):
         content = self.admin_health_tpl
@@ -31,6 +39,7 @@ class TestSystemHealthActionLogsContracts(unittest.TestCase):
         self.assertIn('id="copyActionLogsBtn"', content)
         self.assertIn('id="actionLogs"', content)
         self.assertIn('function renderActionLogs(auditPayload)', content)
+        self.assertIn("detail=${detail}", content)
         self.assertIn('navigator.clipboard.writeText(text)', content)
 
 

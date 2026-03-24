@@ -11,9 +11,16 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.4.4**
+- Current version: **Beta 1.4.5**
 
 ## Changelog
+
+### Beta 1.4.5 — 2026-03-24
+
+- Enriched System Health Action Logs with per-route diagnostic `detail` payloads so dataset impact/delete/force-delete operations record structured outcomes and errors.
+- Wired dataset endpoints to emit explicit diagnostic details (`dataset_id`, dataset name/source, cleanup counts, partial-cleanup/failure metadata) into persistent action logs.
+- Updated Action Logs rendering to include `detail=...` in copy output for faster production debugging.
+- Expanded regression contracts for action-log detail persistence and dataset-route diagnostic hooks.
 
 ### Beta 1.4.4 — 2026-03-24
 

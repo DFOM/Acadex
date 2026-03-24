@@ -263,6 +263,14 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 # 6. Change Log (Chronological)
 
+## 2026-03-24 — Beta 1.4.5 (action-log diagnostic detail)
+
+- Added structured `detail` payload support in persisted System Health action logs.
+- Dataset impact/delete/force-delete routes now emit route-level diagnostics into action logs (including ids, names, cleanup counts, and error/partial-cleanup metadata).
+- System Health Action Logs UI copy output now includes `detail=...` for direct debugging handoff.
+- Expanded `tests/test_system_health_action_logs_contracts.py` coverage for detail payload and dataset route diagnostic hooks.
+- Verified focused contracts after fix: `11 passed`.
+
 ## 2026-03-24 — Beta 1.4.4 (system health action logs)
 
 - Added settings-backed persistent action log writer in `app.py` for mutating requests across admin/student/schedule routes.

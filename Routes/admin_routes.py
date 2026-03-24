@@ -1,5 +1,5 @@
 # Routes/admin_routes.py
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session, current_app
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session, current_app, g
 from flask_login import login_required, current_user
 import os
 import csv
@@ -910,6 +910,7 @@ def _recent_system_action_logs(limit: int = 200) -> list[dict]:
                 'ip': str(item.get('ip') or ''),
                 'user_id': item.get('user_id'),
                 'session_sid': str(item.get('session_sid') or ''),
+                'detail': str(item.get('detail') or ''),
             }
         )
     return cleaned
@@ -1954,14 +1955,23 @@ def api_datasets():
 @admin_required
 def api_dataset_impact(dataset_id: int):
     if not _dataset_registry_supported():
+        g._system_action_detail = {'event': 'dataset_impact', 'dataset_id': dataset_id, 'error': 'registry_unavailable'}
         return jsonify({'success': False, 'message': 'Dataset registry is unavailable (run migrations).'}), 500
 
     _ensure_dataset_registry_synced()
     row = DatasetRegistry.query.get(dataset_id)
     if not row:
+        g._system_action_detail = {'event': 'dataset_impact', 'dataset_id': dataset_id, 'error': 'dataset_not_found'}
         return jsonify({'success': False, 'message': 'Dataset not found.'}), 404
 
     impact = _dataset_dependency_impact(row)
+    g._system_action_detail = {
+        'event': 'dataset_impact',
+        'dataset_id': dataset_id,
+        'dataset_name': row.name,
+        'schedule_count': impact.get('schedule_count', 0),
+        'user_count': impact.get('user_count', 0),
+    }
     return jsonify(
         {
             'success': True,
@@ -1983,11 +1993,13 @@ def api_dataset_impact(dataset_id: int):
 @admin_required
 def api_delete_dataset(dataset_id: int):
     if not _dataset_registry_supported():
+        g._system_action_detail = {'event': 'dataset_delete', 'dataset_id': dataset_id, 'error': 'registry_unavailable'}
         return jsonify({'success': False, 'message': 'Dataset registry is unavailable (run migrations).'}), 500
 
     _ensure_dataset_registry_synced()
     row = DatasetRegistry.query.get(dataset_id)
     if not row:
+        g._system_action_detail = {'event': 'dataset_delete', 'dataset_id': dataset_id, 'error': 'dataset_not_found'}
         return jsonify({'success': False, 'message': 'Dataset not found.'}), 404
 
     try:
@@ -1996,6 +2008,13 @@ def api_delete_dataset(dataset_id: int):
         db.session.commit()
     except Exception as exc:
         db.session.rollback()
+        g._system_action_detail = {
+            'event': 'dataset_delete',
+            'dataset_id': dataset_id,
+            'dataset_name': getattr(row, 'name', None),
+            'error': str(exc),
+            'fallback_registry_delete_attempted': True,
+        }
         current_app.logger.error('Dataset delete failed for id=%s: %s', dataset_id, exc, exc_info=True)
         fallback_row = DatasetRegistry.query.get(dataset_id)
         fallback_deleted = False
@@ -2008,6 +2027,12 @@ def api_delete_dataset(dataset_id: int):
                 db.session.rollback()
 
         if fallback_deleted:
+            g._system_action_detail = {
+                'event': 'dataset_delete',
+                'dataset_id': dataset_id,
+                'dataset_name': getattr(row, 'name', None),
+                'partial_cleanup': True,
+            }
             return jsonify(
                 {
                     'success': True,
@@ -2028,6 +2053,16 @@ def api_delete_dataset(dataset_id: int):
         schedule_cleanup.get('deleted_schedules', 0),
         schedule_cleanup.get('notified_users', 0),
     )
+    g._system_action_detail = {
+        'event': 'dataset_delete',
+        'dataset_id': dataset_id,
+        'dataset_name': result.get('dataset_name'),
+        'source': result.get('source'),
+        'deleted_rows': result.get('deleted_rows', 0),
+        'dropped_table': bool(result.get('dropped_table')),
+        'deleted_schedules': schedule_cleanup.get('deleted_schedules', 0),
+        'notified_users': schedule_cleanup.get('notified_users', 0),
+    }
     return jsonify(
         {
             'success': True,
@@ -2044,6 +2079,7 @@ def api_delete_dataset(dataset_id: int):
 def api_force_delete_dataset(dataset_id: int):
     row = DatasetRegistry.query.get(dataset_id)
     if not row:
+        g._system_action_detail = {'event': 'dataset_force_delete', 'dataset_id': dataset_id, 'error': 'dataset_not_found'}
         return jsonify({'success': False, 'message': 'Dataset not found.'}), 404
 
     table_name = str(getattr(row, 'table_name', '') or '').strip()
@@ -2062,6 +2098,13 @@ def api_force_delete_dataset(dataset_id: int):
 
     db.session.delete(row)
     db.session.commit()
+    g._system_action_detail = {
+        'event': 'dataset_force_delete',
+        'dataset_id': dataset_id,
+        'dataset_name': dataset_name,
+        'source': source,
+        'table_name': table_name,
+    }
     return jsonify({'success': True, 'message': f'Dataset {dataset_name} force-deleted.'})
 
 
