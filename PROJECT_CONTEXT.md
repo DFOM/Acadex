@@ -274,7 +274,9 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Text-based fallback: graph engine now falls back to substring matching when free-text prerequisites (commas, colons, course titles) cannot be parsed by the strict AST parser. This ensures reverse dependency lookup works with real-world catalog data.
   - Direct prerequisites panel now shows raw prerequisite text alongside status badges for transparency.
   - Dataset deletion fix: `_delete_registry_dataset_row` and `api_force_delete_dataset` now clear `course_faculty` FK join rows before deleting courses. Added missing imports for `ScheduleCourse`, `AIEvent`, `BehaviorEvent`, `course_faculty`. Removed premature `db.session.commit()` inside `_safe_drop_table_if_exists`.
-  - Local validation passed (`54 passed`), awaiting Render/live confirmation.
+  - Dataset management UI reworked: cleaner layout, "Delete All Datasets" button, orphan/invalid cleanup consolidated into Danger Zone section.
+  - Nuclear system reset endpoint: `POST /admin/api/system-reset` wipes all datasets, courses, schedules, events, notifications, users and creates fresh admin account. Requires `{"confirm":"RESET"}` payload. Double-confirmation in UI (confirm dialog + type "RESET").
+  - Local validation passed (`56 passed`), awaiting Render/live confirmation.
 
 ---
 

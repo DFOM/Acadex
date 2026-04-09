@@ -63,6 +63,20 @@ class TestAdminDatasetAndTBAContracts(unittest.TestCase):
             self.assertIn(model, content.split('\n')[0:20].__repr__(),
                           f'{model} must be imported at the top of admin_routes.py')
 
+    def test_system_reset_endpoint_exists_and_requires_confirmation(self):
+        content = self.admin_routes
+        self.assertIn("def api_system_reset():", content)
+        self.assertIn("confirm != 'RESET'", content)
+        self.assertIn("generate_password_hash", content)
+
+    def test_system_reset_cleans_all_data_tables(self):
+        content = self.admin_routes
+        for table in ['course_faculty.delete()', 'ScheduleCourse.query.delete',
+                       'Course.query.delete', 'Faculty.query.delete',
+                       'DatasetRegistry.query.delete', 'User.query.delete',
+                       'Notification.query.delete']:
+            self.assertIn(table, content, f'System reset must clean {table}')
+
 
 if __name__ == '__main__':
     unittest.main()

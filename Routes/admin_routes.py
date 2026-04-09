@@ -4837,3 +4837,78 @@ def ai_export_behavior_events_csv():
     except Exception as e:
         db.session.rollback()
         return jsonify({'success': False, 'message': 'Unable to export behavior events.'}), 500
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Nuclear system reset
+# ──────────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route('/api/system-reset', methods=['POST'])
+@login_required
+@admin_required
+def api_system_reset():
+    """Wipe ALL datasets, courses, schedules, events, users — then create
+    a single fresh admin account.  This is the "start from scratch" button."""
+    from werkzeug.security import generate_password_hash
+
+    confirm = str((request.get_json(silent=True) or {}).get('confirm') or '').strip()
+    if confirm != 'RESET':
+        return jsonify({'success': False, 'message': 'Send {"confirm":"RESET"} to proceed.'}), 400
+
+    try:
+        # 1. Drop any orphan / dynamic tables first
+        try:
+            orphans = _orphan_tables()
+            for tbl in orphans:
+                _safe_drop_table_if_exists(tbl)
+        except Exception:
+            pass
+
+        # 2. Wipe FK-linked data in dependency order
+        db.session.execute(course_faculty.delete())
+        ScheduleCourse.query.delete(synchronize_session=False)
+        AIEvent.query.delete(synchronize_session=False)
+        BehaviorEvent.query.delete(synchronize_session=False)
+        Notification.query.delete(synchronize_session=False)
+        Schedule.query.delete(synchronize_session=False)
+        ScrapedCourse.query.delete(synchronize_session=False)
+        ScrapedDataset.query.delete(synchronize_session=False)
+        Course.query.delete(synchronize_session=False)
+        Faculty.query.delete(synchronize_session=False)
+        DatasetRegistry.query.delete(synchronize_session=False)
+        CatalogStatus.query.delete(synchronize_session=False)
+        CourseMetadataField.query.delete(synchronize_session=False)
+
+        # 3. Wipe user sessions table
+        session_table = str(current_app.config.get('SESSION_SQLALCHEMY_TABLE') or 'user_sessions')
+        try:
+            db.session.execute(text(f'DELETE FROM "{session_table}"'))
+        except Exception:
+            db.session.rollback()
+
+        # 4. Delete all users
+        User.query.delete(synchronize_session=False)
+
+        # 5. Create fresh admin
+        admin_role = Role.query.filter_by(name='admin').first()
+        new_admin = User(
+            username='Hasan',
+            full_name='Hasan',
+            email='admin@acadex.space',
+            password=generate_password_hash('Nahary12', method='pbkdf2:sha256'),
+            role='admin',
+            is_admin=True,
+            role_id=admin_role.id if admin_role else None,
+        )
+        db.session.add(new_admin)
+        db.session.commit()
+
+        current_app.logger.warning('SYSTEM RESET executed by user before wipe. Fresh admin "Hasan" created.')
+        g._system_action_detail = {'event': 'system_reset', 'result': 'success'}
+        return jsonify({'success': True, 'message': 'System reset complete. All data wiped. Admin user "Hasan" created. Please log in again.'})
+
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.error('System reset failed: %s', exc, exc_info=True)
+        g._system_action_detail = {'event': 'system_reset', 'error': str(exc)}
+        return jsonify({'success': False, 'message': f'Reset failed: {exc}'}), 500
