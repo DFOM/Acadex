@@ -1861,6 +1861,8 @@ def courses_view():
     selected_detail = None
     selected_prereq_status = None
     selected_unlocks: list[dict] = []
+    selected_dep_graph: dict = {}
+    conditional_path_lookup: dict = {}
 
     try:
         resolved_dataset_name = _resolve_contextual_dataset_name('', '')
@@ -1900,7 +1902,20 @@ def courses_view():
                     minor_name=area_names.get('minor'),
                     prereq_title_lookup=_build_prereq_title_lookup(),
                 )
-                selected_unlocks = _build_unlocks_for_course(latest_catalog_rows if latest_catalog_rows else rows, selected_detail)
+                catalog_for_graph = _catalog_rows_with_local_course_ids(latest_catalog_rows if latest_catalog_rows else rows)
+                selected_dep_graph = dependency_graph_for_course(
+                    course_number=str(selected_detail.get('Course_Number') or ''),
+                    course_title=str(selected_detail.get('Course_Title') or ''),
+                    prerequisite_text=selected_detail.get('Prerequisite'),
+                    catalog_courses=catalog_for_graph,
+                    completed_courses=completed_identifiers,
+                    normalizer=normalize_course_code_for_prereqs,
+                )
+                selected_unlocks = selected_dep_graph.get('dependent_unlockables', [])
+                for cp in selected_dep_graph.get('conditional_paths', []):
+                    key = str(cp.get('unlock_course_number') or '').upper()
+                    if key and key not in conditional_path_lookup:
+                        conditional_path_lookup[key] = cp
     except Exception as exc:
         db.session.rollback()
         current_app.logger.error('courses_view failed: %s', exc, exc_info=True)
@@ -1911,6 +1926,8 @@ def courses_view():
         selected_detail = None
         selected_prereq_status = None
         selected_unlocks = []
+        selected_dep_graph = {}
+        conditional_path_lookup = {}
 
     return render_template(
         'Student/courses.html',
@@ -1927,6 +1944,8 @@ def courses_view():
         selected_detail=selected_detail,
         selected_prereq_status=selected_prereq_status,
         selected_unlocks=selected_unlocks,
+        selected_dep_graph=selected_dep_graph,
+        conditional_path_lookup=conditional_path_lookup,
     )
 
 # --- Premium Dashboard Logic ---

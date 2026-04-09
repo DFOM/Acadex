@@ -268,9 +268,10 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Execute phase-by-phase in order (Phase 1 -> Phase 2 -> Phase 3 -> Phase 4).
   - After each completed fix/feature: run validations, increment `VERSION`, update `README.md`, update `PROJECT_CONTEXT.md`, then commit and push.
 8. Pending production confirmation (not yet marked fixed):
-  - Candidate patch deployed for `/student/courses` internal-server-error on course click (template prerequisite iteration guard).
+  - Candidate patch deployed for `/student/courses` internal-server-error on course click (template prerequisite iteration guard). **Confirmed fixed.**
   - Phase 2 dependency-graph endpoint candidate deployed (`/api/student/course-details/<id>` alias + student blueprint path).
-  - Local validation passed (`50 passed`), awaiting Render/live confirmation before moving these items to fixed/confirmed docs.
+  - OR/AND dependency display: courses view now uses `dependency_graph_for_course` engine to distinguish hard (AND) prerequisites from conditional (OR) alternatives in the "What This Course Unlocks" panel.
+  - Local validation passed (`51 passed`), awaiting Render/live confirmation.
 
 ---
 

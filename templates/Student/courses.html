@@ -120,13 +120,31 @@
 
             <div>
                 <div class="fw-semibold mb-1">What This Course Unlocks</div>
-                <div class="small text-muted mb-2">This course is required for:</div>
                 {% if selected_unlocks %}
                 <ul class="list-group list-group-flush">
                     {% for row in selected_unlocks %}
+                    {% set cp = conditional_path_lookup.get((row.course_number or '')|upper) %}
                     <li class="list-group-item px-0" style="background:transparent;">
-                        <div class="fw-semibold">{{ row.display_title or row.course_title }}</div>
-                        <div class="small text-muted">{{ row.display_course_number or row.course_number }} · {{ row.instructor or 'TBA' }}</div>
+                        <div class="fw-semibold">{{ row.course_title }}</div>
+                        <div class="small text-muted">{{ row.course_number }}</div>
+                        {% if row.is_conditional and cp %}
+                        <div class="small mt-1" style="color:var(--ax-text-dim);">
+                            <span class="badge bg-warning-subtle text-warning border border-warning-subtle rounded-pill me-1">OR</span>
+                            This course is <strong>one of several options</strong> that can help unlock this course.
+                            {% if cp.alternative_branches %}
+                            <div class="mt-1">Alternatives: 
+                                {% for alt in cp.alternative_branches %}
+                                <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle rounded-pill">{{ alt }}</span>{{ '' if loop.last else ' ' }}
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% else %}
+                        <div class="small mt-1" style="color:var(--ax-text-dim);">
+                            <span class="badge bg-primary-subtle text-primary border border-primary-subtle rounded-pill me-1">Required</span>
+                            This course is a <strong>required prerequisite</strong> — no alternatives.
+                        </div>
+                        {% endif %}
                     </li>
                     {% endfor %}
                 </ul>

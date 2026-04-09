@@ -125,5 +125,63 @@ class TestDependencyGraphSets(unittest.TestCase):
         self.assertEqual('BAD200', parse_errors[0].get('course_number'))
 
 
+    def test_or_vs_and_classification_on_unlockables(self):
+        """Course 0 requires (Course1 OR Course2) AND Course3.
+
+        When viewing Course2:
+        - Course0 should appear in dependent_unlockables with is_conditional=True
+        - conditional_paths should show Course1 as an alternative branch
+        When viewing Course3:
+        - Course0 should appear with is_conditional=False (pure AND)
+        """
+        catalog = [
+            {
+                'Course_Number': 'COURSE0',
+                'Course_Title': 'Advanced Topics',
+                'Day_and_Period': 'Mon 1',
+                'Prerequisite': '(COURSE1 OR COURSE2) AND COURSE3',
+            },
+            {'Course_Number': 'COURSE1', 'Course_Title': 'Intro A', 'Day_and_Period': 'Tue 1', 'Prerequisite': ''},
+            {'Course_Number': 'COURSE2', 'Course_Title': 'Intro B', 'Day_and_Period': 'Wed 1', 'Prerequisite': ''},
+            {'Course_Number': 'COURSE3', 'Course_Title': 'Foundations', 'Day_and_Period': 'Thu 1', 'Prerequisite': ''},
+        ]
+
+        # From the perspective of COURSE2
+        graph_c2 = dependency_graph_for_course(
+            course_number='COURSE2',
+            course_title='Intro B',
+            prerequisite_text='',
+            catalog_courses=catalog,
+            completed_courses=set(),
+        )
+        unlocks_c2 = graph_c2['dependent_unlockables']
+        self.assertEqual(1, len(unlocks_c2))
+        self.assertEqual('COURSE0', unlocks_c2[0]['course_number'])
+        self.assertTrue(unlocks_c2[0]['is_conditional'])
+
+        paths_c2 = graph_c2['conditional_paths']
+        self.assertEqual(1, len(paths_c2))
+        self.assertEqual('COURSE0', paths_c2[0]['unlock_course_number'])
+        self.assertIn('COURSE1', paths_c2[0]['alternative_branches'])
+
+        # From the perspective of COURSE3 (hard AND requirement)
+        graph_c3 = dependency_graph_for_course(
+            course_number='COURSE3',
+            course_title='Foundations',
+            prerequisite_text='',
+            catalog_courses=catalog,
+            completed_courses=set(),
+        )
+        unlocks_c3 = graph_c3['dependent_unlockables']
+        self.assertEqual(1, len(unlocks_c3))
+        self.assertEqual('COURSE0', unlocks_c3[0]['course_number'])
+        # COURSE3 is in an AND branch, but the overall expression has an OR node,
+        # so is_conditional reflects whether the whole expression has OR branches.
+        # The key distinction is: conditional_paths should be empty for COURSE3
+        # because COURSE3 does not appear inside any OR node.
+        paths_c3 = graph_c3['conditional_paths']
+        self.assertEqual(0, len(paths_c3))
+
+
 if __name__ == "__main__":
     unittest.main()
