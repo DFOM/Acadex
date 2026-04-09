@@ -273,7 +273,8 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - OR/AND dependency display: courses view now uses `dependency_graph_for_course` engine to distinguish hard (AND) prerequisites from conditional (OR) alternatives in the "What This Course Unlocks" panel.
   - Text-based fallback: graph engine now falls back to substring matching when free-text prerequisites (commas, colons, course titles) cannot be parsed by the strict AST parser. This ensures reverse dependency lookup works with real-world catalog data.
   - Direct prerequisites panel now shows raw prerequisite text alongside status badges for transparency.
-  - Local validation passed (`52 passed`), awaiting Render/live confirmation.
+  - Dataset deletion fix: `_delete_registry_dataset_row` and `api_force_delete_dataset` now clear `course_faculty` FK join rows before deleting courses. Added missing imports for `ScheduleCourse`, `AIEvent`, `BehaviorEvent`, `course_faculty`. Removed premature `db.session.commit()` inside `_safe_drop_table_if_exists`.
+  - Local validation passed (`54 passed`), awaiting Render/live confirmation.
 
 ---
 

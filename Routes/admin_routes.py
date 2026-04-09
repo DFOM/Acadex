@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from functools import wraps
 from sqlalchemy import inspect, text
 import sqlalchemy as sa
-from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField, ScrapedDataset, ScrapedCourse, Course, Faculty, DatasetRegistry, CourseMetadataField
+from models import db, User, Schedule, ScheduleCourse, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField, ScrapedDataset, ScrapedCourse, Course, Faculty, DatasetRegistry, CourseMetadataField, AIEvent, BehaviorEvent, course_faculty
 from utils import (
     calculate_gpa,
     ensure_default_landing_sections,
@@ -677,7 +677,6 @@ def _safe_drop_table_if_exists(table_name: str) -> bool:
         return False
     try:
         db.session.execute(text(f'DROP TABLE IF EXISTS "{name}" CASCADE'))
-        db.session.commit()
         return True
     except Exception:
         db.session.rollback()
@@ -1954,8 +1953,13 @@ def _delete_registry_dataset_row(row: DatasetRegistry) -> dict:
 
     if source == 'csv' and dataset_name:
         q = _csv_courses_for_dataset_name(dataset_name, include_legacy_sources=True)
-        deleted_rows = int(q.count() or 0)
-        q.delete(synchronize_session=False)
+        course_ids = [c.id for c in q.with_entities(Course.id).all()]
+        deleted_rows = len(course_ids)
+        if course_ids:
+            db.session.execute(
+                course_faculty.delete().where(course_faculty.c.course_id.in_(course_ids))
+            )
+            Course.query.filter(Course.id.in_(course_ids)).delete(synchronize_session=False)
 
     if source == 'scraped' and dataset_name:
         ds_rows = ScrapedDataset.query.filter(sa.func.lower(ScrapedDataset.name) == dataset_name.lower()).all()
@@ -2140,7 +2144,13 @@ def api_force_delete_dataset(dataset_id: int):
     dataset_name = str(getattr(row, 'name', '') or '').strip()
     source = str(getattr(row, 'source', '') or '').strip().lower()
     if source == 'csv' and dataset_name:
-        _csv_courses_for_dataset_name(dataset_name, include_legacy_sources=True).delete(synchronize_session=False)
+        q = _csv_courses_for_dataset_name(dataset_name, include_legacy_sources=True)
+        course_ids = [c.id for c in q.with_entities(Course.id).all()]
+        if course_ids:
+            db.session.execute(
+                course_faculty.delete().where(course_faculty.c.course_id.in_(course_ids))
+            )
+            Course.query.filter(Course.id.in_(course_ids)).delete(synchronize_session=False)
     if source == 'scraped' and dataset_name:
         ScrapedDataset.query.filter(sa.func.lower(ScrapedDataset.name) == dataset_name.lower()).delete(synchronize_session=False)
 

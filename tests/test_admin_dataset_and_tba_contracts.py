@@ -53,6 +53,16 @@ class TestAdminDatasetAndTBAContracts(unittest.TestCase):
         self.assertIn("if not extracted.get('day_period'):", content)
         self.assertIn("extracted['day_period'] = 'TBA'", content)
 
+    def test_dataset_delete_clears_course_faculty_fk_before_course_delete(self):
+        content = self.admin_routes
+        self.assertIn('course_faculty.delete().where(course_faculty.c.course_id.in_(course_ids))', content)
+
+    def test_admin_routes_imports_all_required_models(self):
+        content = self.admin_routes
+        for model in ['ScheduleCourse', 'AIEvent', 'BehaviorEvent', 'course_faculty']:
+            self.assertIn(model, content.split('\n')[0:20].__repr__(),
+                          f'{model} must be imported at the top of admin_routes.py')
+
 
 if __name__ == '__main__':
     unittest.main()
