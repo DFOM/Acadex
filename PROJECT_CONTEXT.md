@@ -567,6 +567,15 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - `?major_option=1|2` query parameter added to dashboard route alongside existing `?req_year=`.
 - For 2025AY+: 36 credits, no options, no toggle shown.
 
+### 2025-06-10c – Redesign "My Schedules" card on dashboard
+
+- Replaced boxy individual schedule items with a clean row-based list inside the card.
+- Status shown as colored dot (gray=completed, indigo=future) + small pill badge instead of bordered badge.
+- Delete button now hidden by default, appears on row hover (ghost icon → red on hover).
+- Added calendar icon in card header and total count badge.
+- Empty state improved with large faded icon and smaller CTA button.
+- New CSS classes: `.ax-sched-row`, `.ax-sched-link`, `.ax-sched-dot`, `.ax-sched-delete`.
+
 ---
 
 ## Coding conventions and style

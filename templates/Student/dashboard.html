@@ -433,41 +433,54 @@
 
         {# Schedules list #}
         <div class="ax-card">
-            <div class="p-3" style="border-bottom:1px solid var(--ax-border);">
-                <h5 class="fw-bold mb-0" style="font-size:.95rem;">My Schedules</h5>
+            <div class="d-flex align-items-center justify-content-between p-3" style="border-bottom:1px solid var(--ax-border);">
+                <h5 class="fw-bold mb-0" style="font-size:.95rem;">
+                    {{ hi('calendar', 'ax-icon me-2') }}My Schedules
+                </h5>
+                {% if schedules %}
+                <span style="font-size:.68rem;color:var(--ax-muted);">{{ schedules|length }} total</span>
+                {% endif %}
             </div>
             {% if schedules %}
-                <div class="d-flex flex-column p-2 gap-1" id="scheduleList">
+                <div class="d-flex flex-column" id="scheduleList">
                     {% for sched in schedules %}
-                    <div class="ax-schedule-item" data-schedule-id="{{ sched.id }}" style="text-decoration:none;display:flex;justify-content:space-between;align-items:center;gap:.5rem;">
-                        <a href="{{ url_for('student.edit_schedule', schedule_id=sched.id) }}" style="text-decoration:none;flex:1;min-width:0;">
-                            <div class="fw-bold" style="font-size:.87rem;color:var(--ax-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ sched.schedule_name }}</div>
-                            <div style="font-size:.75rem;color:var(--ax-muted);">{{ sched.semester }} {{ sched.year }}</div>
+                    <div class="ax-sched-row" data-schedule-id="{{ sched.id }}">
+                        <a href="{{ url_for('student.edit_schedule', schedule_id=sched.id) }}" class="ax-sched-link">
+                            <div class="d-flex align-items-center gap-2 mb-0">
+                                {% if sched.schedule_type == 'past' %}
+                                <span class="ax-sched-dot" style="background:#64748B;"></span>
+                                {% else %}
+                                <span class="ax-sched-dot" style="background:#818CF8;"></span>
+                                {% endif %}
+                                <span class="fw-semibold" style="font-size:.84rem;color:var(--ax-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ sched.schedule_name }}</span>
+                            </div>
+                            <div class="d-flex align-items-center gap-2" style="padding-left:18px;">
+                                <span style="font-size:.72rem;color:var(--ax-muted);">{{ sched.semester }} {{ sched.year }}</span>
+                                {% if sched.schedule_type == 'past' %}
+                                <span style="font-size:.6rem;color:#94A3B8;background:rgba(100,116,139,.1);padding:.1rem .4rem;border-radius:10px;">Completed</span>
+                                {% else %}
+                                <span style="font-size:.6rem;color:#818CF8;background:rgba(129,140,248,.1);padding:.1rem .4rem;border-radius:10px;">Future</span>
+                                {% endif %}
+                            </div>
                         </a>
-                        <div class="d-flex align-items-center gap-2 flex-shrink-0">
-                            {% if sched.schedule_type == 'past' %}
-                                <span class="ax-badge" style="background:rgba(100,116,139,.15);color:#94A3B8;border:1px solid rgba(100,116,139,.2);font-size:.68rem;">Completed</span>
-                            {% else %}
-                                <span class="ax-badge" style="background:rgba(6,182,212,.12);color:#06B6D4;border:1px solid rgba(6,182,212,.25);font-size:.68rem;">Future</span>
-                            {% endif %}
-                            <button type="button"
-                                    class="btn btn-sm delete-schedule-btn"
-                                    data-schedule-id="{{ sched.id }}"
-                                    data-schedule-name="{{ sched.schedule_name }}"
-                                    style="padding:.2rem .45rem;font-size:.72rem;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);color:#FC8181;border-radius:var(--ax-radius-xs);">
-                                {{ hi('trash', 'ax-icon') }}
-                            </button>
-                        </div>
+                        <button type="button"
+                                class="ax-sched-delete delete-schedule-btn"
+                                data-schedule-id="{{ sched.id }}"
+                                data-schedule-name="{{ sched.schedule_name }}"
+                                title="Delete schedule">
+                            {{ hi('trash', 'ax-icon') }}
+                        </button>
                     </div>
                     {% endfor %}
                 </div>
             {% else %}
                 <div class="p-4 text-center" id="emptySchedulesState">
-                    <p style="color:var(--ax-muted);font-size:.88rem;margin:0 0 1rem;">You don't have any schedules yet.</p>
+                    <div style="font-size:1.8rem;opacity:.2;margin-bottom:.6rem;">{{ hi('calendar', 'ax-icon') }}</div>
+                    <p style="color:var(--ax-muted);font-size:.85rem;margin:0 0 .8rem;">No schedules yet. Start planning your courses!</p>
                     {% if has_dataset_years %}
-                    <a href="{{ url_for('auth.choose_schedule_type') }}" class="btn btn-primary w-100" style="font-size:.85rem;">Start Planning Now</a>
+                    <a href="{{ url_for('auth.choose_schedule_type') }}" class="btn btn-primary btn-sm" style="font-size:.82rem;">{{ hi('plus-circle', 'ax-icon me-1') }}Create Schedule</a>
                     {% else %}
-                    <button class="btn btn-primary w-100" type="button" disabled>Start Planning Now</button>
+                    <button class="btn btn-primary btn-sm" type="button" disabled style="font-size:.82rem;">Create Schedule</button>
                     {% endif %}
                 </div>
             {% endif %}
@@ -501,7 +514,7 @@ document.addEventListener('DOMContentLoaded', function () {
             const row = document.querySelector(`[data-schedule-id="${scheduleId}"]`);
             if (row) row.remove();
             if (!scheduleList.querySelector('[data-schedule-id]')) {
-                scheduleList.innerHTML = `<div class="p-4 text-center" id="emptySchedulesState"><p style="color:var(--ax-muted);font-size:.88rem;margin:0 0 1rem;">You don't have any schedules yet.</p><a href="{{ url_for('auth.choose_schedule_type') }}" class="btn btn-primary w-100" style="font-size:.85rem;">Start Planning Now</a></div>`;
+                scheduleList.innerHTML = `<div class="p-4 text-center" id="emptySchedulesState"><p style="color:var(--ax-muted);font-size:.85rem;margin:0 0 .8rem;">No schedules yet. Start planning your courses!</p><a href="{{ url_for('auth.choose_schedule_type') }}" class="btn btn-primary btn-sm" style="font-size:.82rem;">Create Schedule</a></div>`;
             }
         } catch (err) { alert('Unable to delete schedule right now.'); btn.disabled = false; }
     });
