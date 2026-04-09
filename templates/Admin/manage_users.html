@@ -1,54 +1,91 @@
 {% extends "Layouts/admin_base.html" %}
+{% from 'partials/heroicons.html' import hi %}
 {% block title %}Manage Users{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>Manage Users</h2>
+<div class="ax-page-header">
+    <h1 class="ax-page-title">Manage Users</h1>
+    <p class="ax-page-subtitle">{{ users|length }} registered user{{ 's' if users|length != 1 else '' }}.</p>
 </div>
 
-<div class="card shadow-sm">
-    <div class="card-body">
-        <table class="table table-striped table-hover smart-table">
+{# ── Search / Filter bar ── #}
+<div class="ax-admin-card mb-4">
+    <div class="ax-admin-card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label" style="font-size:.75rem;font-weight:700;color:var(--ax-muted);text-transform:uppercase;letter-spacing:.04em;">Search</label>
+                <input id="userSearch" type="text" class="admin-input form-control form-control-sm" placeholder="Username, email, or name…">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" style="font-size:.75rem;font-weight:700;color:var(--ax-muted);text-transform:uppercase;letter-spacing:.04em;">Role</label>
+                <select id="userRoleFilter" class="admin-input form-select form-select-sm">
+                    <option value="">All Roles</option>
+                    {% for role in roles %}
+                    <option value="{{ role.name|lower }}">{{ role.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" style="font-size:.75rem;font-weight:700;color:var(--ax-muted);text-transform:uppercase;letter-spacing:.04em;">Graduation Year</label>
+                <input id="userGradFilter" type="number" class="admin-input form-control form-control-sm" placeholder="e.g. 2028">
+            </div>
+            <div class="col-md-2 d-flex">
+                <button id="userResetFilter" class="btn btn-outline-secondary btn-sm flex-grow-1" style="font-size:.82rem;">Reset</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── Users table ── #}
+<div class="ax-admin-card">
+    <div class="ax-admin-card-header d-flex justify-content-between align-items-center">
+        <span>{{ hi('users', 'ax-icon me-2') }}Users</span>
+        <span class="ax-badge" id="userCountBadge" style="background:var(--ax-surface-2);color:var(--ax-text-dim);border:1px solid var(--ax-border);font-size:.7rem;">{{ users|length }} total</span>
+    </div>
+    <div class="ax-admin-card-body p-0" style="max-height:600px;overflow-y:auto;">
+        <table class="admin-table" id="usersTable">
             <thead>
                 <tr>
-                    <th>ID</th>
+                    <th class="ps-4" style="width:50px;">ID</th>
                     <th>Username</th>
                     <th>Email</th>
-                    <th>Role</th>
+                    <th style="width:220px;">Role</th>
                     <th>Gender</th>
-                    <th>Expected Graduation</th>
-                    <th>Actions</th>
+                    <th>Grad Year</th>
+                    <th style="width:150px;">Actions</th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody id="usersBody">
                 {% for user in users %}
-                <tr>
-                    <td>{{ user.id }}</td>
-                    <td>{{ user.username }}</td>
-                    <td>{{ user.email or '—' }}</td>
+                <tr data-username="{{ user.username|lower }}" data-email="{{ (user.email or '')|lower }}" data-fullname="{{ (user.full_name or '')|lower }}" data-role="{{ (user.assigned_role.name if user.assigned_role else user.role)|lower }}" data-grad="{{ user.expected_graduation or '' }}">
+                    <td class="ps-4" style="font-size:.82rem;color:var(--ax-muted);">{{ user.id }}</td>
+                    <td style="font-weight:700;font-size:.85rem;color:#818CF8;">{{ user.username }}</td>
+                    <td style="font-size:.82rem;color:var(--ax-text-dim);">{{ user.email or '—' }}</td>
                     <td>
                         <form method="POST" action="{{ url_for('admin.assign_user_role') }}" class="d-flex gap-2 align-items-center">
                             <input type="hidden" name="user_id" value="{{ user.id }}">
-                            <select name="role_id" class="form-select form-select-sm">
+                            <select name="role_id" class="admin-input form-select form-select-sm" style="font-size:.78rem;">
                                 {% for role in roles %}
                                 <option value="{{ role.id }}" {% if user.role_id == role.id or (not user.role_id and user.role == role.name) %}selected{% endif %}>{{ role.name }}</option>
                                 {% endfor %}
                             </select>
-                            <button class="btn btn-sm btn-outline-primary" type="submit">Assign</button>
+                            <button class="admin-btn-primary" type="submit" style="font-size:.72rem;padding:4px 10px;">Assign</button>
                         </form>
                     </td>
-                    <td>{{ user.gender or '—' }}</td>
-                    <td>{{ user.expected_graduation or '—' }}</td>
+                    <td style="font-size:.82rem;">{{ user.gender or '—' }}</td>
+                    <td style="font-size:.82rem;">{{ user.expected_graduation or '—' }}</td>
                     <td>
-                        <button class="btn btn-sm btn-primary edit-user-btn" 
-                                data-id="{{ user.id }}" 
-                                data-gender="{{ user.gender }}" 
-                                data-year="{{ user.expected_graduation or '' }}">Edit</button>
-                        <button class="btn btn-sm btn-danger delete-user-btn" data-id="{{ user.id }}">Delete</button>
+                        <div class="d-flex gap-1">
+                            <button class="btn btn-sm btn-outline-secondary edit-user-btn" style="font-size:.7rem;padding:3px 8px;"
+                                    data-id="{{ user.id }}" 
+                                    data-gender="{{ user.gender }}" 
+                                    data-year="{{ user.expected_graduation or '' }}">Edit</button>
+                            <button class="btn btn-sm btn-outline-danger delete-user-btn" style="font-size:.7rem;padding:3px 8px;" data-id="{{ user.id }}">Delete</button>
+                        </div>
                     </td>
                 </tr>
                 {% else %}
-                <tr><td colspan="7" class="text-center">No users found.</td></tr>
+                <tr><td colspan="7" class="text-center py-5" style="color:var(--ax-muted);font-size:.85rem;">No users found.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -86,4 +123,52 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+    const searchEl = document.getElementById('userSearch');
+    const roleEl = document.getElementById('userRoleFilter');
+    const gradEl = document.getElementById('userGradFilter');
+    const rows = document.querySelectorAll('#usersBody tr[data-username]');
+    const badge = document.getElementById('userCountBadge');
+
+    function applyFilters() {
+        const q = (searchEl.value || '').toLowerCase().trim();
+        const role = (roleEl.value || '').toLowerCase();
+        const grad = (gradEl.value || '').trim();
+        let visible = 0;
+
+        rows.forEach(tr => {
+            const uname = tr.dataset.username || '';
+            const email = tr.dataset.email || '';
+            const fname = tr.dataset.fullname || '';
+            const rName = tr.dataset.role || '';
+            const gYear = tr.dataset.grad || '';
+
+            let show = true;
+            if (q && !uname.includes(q) && !email.includes(q) && !fname.includes(q)) show = false;
+            if (role && rName !== role) show = false;
+            if (grad && gYear !== grad) show = false;
+
+            tr.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+
+        badge.textContent = visible + ' of ' + rows.length;
+    }
+
+    searchEl.addEventListener('input', applyFilters);
+    roleEl.addEventListener('change', applyFilters);
+    gradEl.addEventListener('input', applyFilters);
+
+    document.getElementById('userResetFilter').addEventListener('click', () => {
+        searchEl.value = '';
+        roleEl.value = '';
+        gradEl.value = '';
+        applyFilters();
+    });
+})();
+</script>
 {% endblock %}

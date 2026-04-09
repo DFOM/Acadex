@@ -19,6 +19,9 @@
             </div>
             <div class="ax-admin-stat-label">Total Students</div>
             <div class="ax-admin-stat-value">{{ user_count }}</div>
+            {% if new_users_week %}
+            <div class="ax-admin-stat-sub" style="color:#34D399;">+{{ new_users_week }} this week</div>
+            {% endif %}
         </div>
     </div>
     <div class="col-md-3">
@@ -47,9 +50,9 @@
             <div class="ax-admin-stat-icon" style="background:rgba(236,72,153,.12);color:#EC4899;">
                 {{ hi('bell-alert', 'ax-icon') }}
             </div>
-            <div class="ax-admin-stat-label">Recent Activity</div>
-            <div class="ax-admin-stat-value">{{ notification_count }}</div>
-            <div class="ax-admin-stat-sub">Announcements: {{ announcement_count }}</div>
+            <div class="ax-admin-stat-label">Platform Events</div>
+            <div class="ax-admin-stat-value">{{ behavior_event_count + ai_event_count }}</div>
+            <div class="ax-admin-stat-sub">{{ behavior_event_count }} behavior · {{ ai_event_count }} AI</div>
         </div>
     </div>
 </div>
@@ -99,8 +102,45 @@
         </div>
     </div>
 
-    {# ── All user schedules ── #}
+    {# ── Announcements + Schedules ── #}
     <div class="col-lg-8">
+        {# Announcements widget #}
+        <div class="ax-admin-card mb-4">
+            <div class="ax-admin-card-header d-flex justify-content-between align-items-center">
+                <span>{{ hi('megaphone', 'ax-icon me-2') }}Recent Announcements</span>
+                <a href="{{ url_for('admin.manage_landing') }}" class="ax-badge" style="background:var(--ax-grad-subtle);color:#818CF8;border:1px solid rgba(99,102,241,.2);text-decoration:none;font-size:.68rem;">Manage</a>
+            </div>
+            <div class="ax-admin-card-body p-0">
+                {% if recent_announcements %}
+                <ul class="list-unstyled mb-0">
+                    {% for ann in recent_announcements %}
+                    <li style="padding:.75rem 1.25rem;border-bottom:1px solid var(--ax-border);{% if loop.last %}border-bottom:none;{% endif %}">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <span style="font-weight:700;font-size:.85rem;color:var(--ax-text);">{{ ann.title }}</span>
+                                {% if ann.ann_type %}
+                                <span class="ax-badge ms-2" style="font-size:.62rem;
+                                    {% if ann.ann_type == 'warning' %}background:rgba(245,158,11,.12);color:#F59E0B;border:1px solid rgba(245,158,11,.2);
+                                    {% elif ann.ann_type == 'update' %}background:rgba(16,185,129,.12);color:#34D399;border:1px solid rgba(16,185,129,.2);
+                                    {% else %}background:rgba(99,102,241,.12);color:#818CF8;border:1px solid rgba(99,102,241,.2);{% endif %}
+                                ">{{ ann.ann_type }}</span>
+                                {% endif %}
+                            </div>
+                            <span style="font-size:.7rem;color:var(--ax-muted);white-space:nowrap;">{{ ann.date_posted.strftime('%b %d') if ann.date_posted else '' }}</span>
+                        </div>
+                        {% if ann.content %}
+                        <p style="margin:.25rem 0 0;font-size:.78rem;color:var(--ax-text-dim);line-height:1.4;">{{ ann.content|truncate(120) }}</p>
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <div class="text-center py-4" style="color:var(--ax-muted);font-size:.85rem;">No announcements yet.</div>
+                {% endif %}
+            </div>
+        </div>
+
+        {# All user schedules #}
         <div class="ax-admin-card h-100">
             <div class="ax-admin-card-header d-flex justify-content-between align-items-center">
                 <span>{{ hi('list', 'ax-icon me-2') }}All User Schedules</span>

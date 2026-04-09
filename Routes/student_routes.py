@@ -2478,6 +2478,9 @@ def api_catalog_course_detail():
         completed_identifiers = _completed_passing_prereq_identifiers(current_user.id)
         area_names = _resolve_user_area_names()
 
+        # Use the full combined catalog for dependency scanning
+        catalog_for_graph = _catalog_rows_with_local_course_ids(combined)
+
         title_to_code_map = _build_title_to_code_map(catalog_for_graph)
         prereq_status = _build_prerequisite_status(
             target_row.get('Prerequisite'),
@@ -2488,8 +2491,6 @@ def api_catalog_course_detail():
             title_to_code=title_to_code_map,
         )
 
-        # Use the full combined catalog for dependency scanning
-        catalog_for_graph = _catalog_rows_with_local_course_ids(combined)
         dep_graph = dependency_graph_for_course(
             course_number=str(target_row.get('Course_Number') or ''),
             course_title=str(target_row.get('Course_Title') or ''),

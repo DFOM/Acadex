@@ -205,6 +205,9 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Course/faculty CRUD and linkage workflows
 - Subject area/period/user/role/registration-field management
 - Analytics + system health dashboards
+- **Activity Log page** (`/admin/activity`): Combined BehaviorEvent + AIEvent viewer with source/type/user filters, paginated table, and metadata JSON inspection modal.
+- **Enhanced dashboard**: Stat cards now include platform event counts (behavior + AI) and new-users-this-week indicator. Announcements widget shows 5 latest announcements with type badges on the dashboard.
+- **User management search/filter**: Real-time client-side filtering by username/email/name, role dropdown, and graduation year on the manage_users page.
 - Landing page and announcements management
 
 ## Platform capabilities
@@ -607,6 +610,14 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - **Catalog detail drawer cleanup**: Removed sections/instructor/days/periods from the detail drawer and API response. Catalog is now a pure reference tool showing: course name, semester, credits, areas, level, prerequisites, and dependency graph ("what this unlocks"). Removed sections-building code from `api_catalog_course_detail` endpoint. Added level badge to course cards.
 - **Prerequisite title substitution pre-processor**: CSV prerequisites use course TITLES (e.g. "Financial Management", "Research Design") not codes. Multi-word titles caused the AST parser to break (adjacent COURSE tokens → syntax error) and AND/OR inside titles (e.g. "Painting AND Sculpting 1") were incorrectly parsed as operators. New `_build_title_to_code_map()` + `_substitute_titles_in_prereq()` functions in `services/prereqs.py` replace known multi-word course titles with their course codes before parsing. Uses longest-match-first strategy. Applied to both `dependency_graph_for_course()` and `_split_prereq_terms()` in student routes.
 - **Admin sidebar restructure**: Removed fake "Settings" link (pointed back to dashboard), removed duplicate "Datasets" from System section, moved "Registration Fields" from System to People section, renamed "Users" section to "People", renamed "Landing Management" to "Landing Page". System section now only contains System Health + Landing Page.
+
+### 2025-06-14 – Admin panel features: Activity Log, enhanced dashboard, user search
+
+- **Activity Log page** (`/admin/activity`): New full-page activity log viewer combining `BehaviorEvent` and `AIEvent` records. Features: source filter (behavior/AI), event type dropdown, user search, paginated table (50 per page), metadata JSON modal. Stat cards show total/behavior/AI event counts. API endpoint `/admin/api/activity` returns paginated, filtered, combined events sorted by timestamp.
+- **Enhanced dashboard stats**: Replaced generic "Recent Activity / Notifications" stat card with "Platform Events" card showing combined behavior + AI event counts. Added "+N this week" new user indicator on the Total Students card (queries `User.created_at >= 7 days ago` with graceful fallback).
+- **Announcements widget on dashboard**: New "Recent Announcements" card on the dashboard showing the 5 most recent announcements with type badges (info/update/warning), dates, and truncated content. Links to Landing Management for full editing.
+- **User search/filter on manage_users**: Complete template modernization to match admin design system (`ax-admin-card`, `admin-table`, `ax-page-header`). Added real-time client-side search by username/email/name, role dropdown filter, and graduation year filter. Live counter badge shows "N of M" during filtering. Reset button clears all filters.
+- **Sidebar**: Added "Activity Log" link under System section (requires `manage_users` permission).
 
 ---
 

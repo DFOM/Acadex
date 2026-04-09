@@ -1,0 +1,240 @@
+{% extends "Layouts/admin_base.html" %}
+{% from 'partials/heroicons.html' import hi %}
+{% block title %}Activity Log{% endblock %}
+
+{% block content %}
+<div class="ax-page-header">
+    <h1 class="ax-page-title">Activity Log</h1>
+    <p class="ax-page-subtitle">Browse behavior and AI events across the platform.</p>
+</div>
+
+{# ── Filters ── #}
+<div class="ax-admin-card mb-4">
+    <div class="ax-admin-card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label" style="font-size:.75rem;font-weight:700;color:var(--ax-muted);text-transform:uppercase;letter-spacing:.04em;">Source</label>
+                <select id="actSourceFilter" class="admin-input form-select form-select-sm">
+                    <option value="">All Sources</option>
+                    <option value="behavior">Behavior Events</option>
+                    <option value="ai">AI Events</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" style="font-size:.75rem;font-weight:700;color:var(--ax-muted);text-transform:uppercase;letter-spacing:.04em;">Event Type</label>
+                <select id="actTypeFilter" class="admin-input form-select form-select-sm">
+                    <option value="">All Types</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" style="font-size:.75rem;font-weight:700;color:var(--ax-muted);text-transform:uppercase;letter-spacing:.04em;">User</label>
+                <input id="actUserFilter" class="admin-input form-control form-control-sm" placeholder="Search by username…">
+            </div>
+            <div class="col-md-3 d-flex gap-2">
+                <button id="actApplyBtn" class="admin-btn-primary flex-grow-1" style="font-size:.82rem;">Apply</button>
+                <button id="actResetBtn" class="btn btn-outline-secondary btn-sm flex-grow-1" style="font-size:.82rem;">Reset</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ── Stats row ── #}
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="ax-admin-stat">
+            <div class="ax-admin-stat-accent"></div>
+            <div class="ax-admin-stat-icon">{{ hi('chart-bar', 'ax-icon') }}</div>
+            <div class="ax-admin-stat-label">Total Events</div>
+            <div class="ax-admin-stat-value" id="actTotalCount">—</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="ax-admin-stat" style="--accent:var(--ax-c-emerald);">
+            <div class="ax-admin-stat-accent" style="background:linear-gradient(135deg,var(--ax-c-emerald),#34D399);"></div>
+            <div class="ax-admin-stat-icon" style="background:rgba(16,185,129,.12);color:#34D399;">{{ hi('bolt', 'ax-icon') }}</div>
+            <div class="ax-admin-stat-label">Behavior Events</div>
+            <div class="ax-admin-stat-value" id="actBehaviorCount">—</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="ax-admin-stat">
+            <div class="ax-admin-stat-accent" style="background:linear-gradient(135deg,var(--ax-c-cyan),#38BDF8);"></div>
+            <div class="ax-admin-stat-icon" style="background:rgba(6,182,212,.12);color:#06B6D4;">{{ hi('sparkles', 'ax-icon') }}</div>
+            <div class="ax-admin-stat-label">AI Events</div>
+            <div class="ax-admin-stat-value" id="actAICount">—</div>
+        </div>
+    </div>
+</div>
+
+{# ── Events table ── #}
+<div class="ax-admin-card">
+    <div class="ax-admin-card-header d-flex justify-content-between align-items-center">
+        <span>{{ hi('list', 'ax-icon me-2') }}Events</span>
+        <span class="ax-badge" id="actPageInfo" style="background:var(--ax-surface-2);color:var(--ax-text-dim);border:1px solid var(--ax-border);font-size:.7rem;"></span>
+    </div>
+    <div class="ax-admin-card-body p-0">
+        <div id="actLoading" class="text-center py-5" style="color:var(--ax-muted);font-size:.85rem;">Loading events…</div>
+        <table class="admin-table" id="actTable" style="display:none;">
+            <thead>
+                <tr>
+                    <th class="ps-4" style="width:160px;">Time</th>
+                    <th style="width:80px;">Source</th>
+                    <th style="width:180px;">Event Type</th>
+                    <th style="width:130px;">User</th>
+                    <th>Route</th>
+                    <th style="width:60px;">Details</th>
+                </tr>
+            </thead>
+            <tbody id="actBody"></tbody>
+        </table>
+        <div id="actEmpty" class="text-center py-5 d-none" style="color:var(--ax-muted);font-size:.85rem;">No events found.</div>
+    </div>
+    <div class="ax-admin-card-body border-top d-flex justify-content-between align-items-center" style="border-color:var(--ax-border)!important;">
+        <button id="actPrev" class="btn btn-sm btn-outline-secondary" disabled>&larr; Previous</button>
+        <span id="actPageLabel" style="font-size:.78rem;color:var(--ax-muted);"></span>
+        <button id="actNext" class="btn btn-sm btn-outline-secondary" disabled>Next &rarr;</button>
+    </div>
+</div>
+
+{# ── Metadata modal ── #}
+<div id="actMetaModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);z-index:1060;" class="d-flex align-items-center justify-content-center">
+    <div style="background:var(--ax-surface-1);border:1px solid var(--ax-border);border-radius:12px;max-width:600px;width:90%;max-height:70vh;overflow:auto;padding:1.5rem;">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6 style="margin:0;font-weight:700;color:var(--ax-text);">Event Metadata</h6>
+            <button id="actMetaClose" class="btn-close"></button>
+        </div>
+        <pre id="actMetaContent" style="white-space:pre-wrap;word-break:break-all;font-size:.78rem;color:var(--ax-text-dim);background:var(--ax-surface-2);padding:1rem;border-radius:8px;max-height:50vh;overflow:auto;"></pre>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+    const esc = s => {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    };
+
+    let currentPage = 1;
+    let totalPages = 1;
+
+    function buildParams() {
+        const p = new URLSearchParams();
+        const src = document.getElementById('actSourceFilter').value;
+        const typ = document.getElementById('actTypeFilter').value;
+        const usr = document.getElementById('actUserFilter').value.trim();
+        if (src) p.set('source', src);
+        if (typ) p.set('event_type', typ);
+        if (usr) p.set('user', usr);
+        p.set('page', currentPage);
+        p.set('per_page', 50);
+        return p;
+    }
+
+    async function loadEvents() {
+        document.getElementById('actLoading').style.display = '';
+        document.getElementById('actTable').style.display = 'none';
+        document.getElementById('actEmpty').classList.add('d-none');
+
+        try {
+            const res = await fetch(`/admin/api/activity?${buildParams()}`);
+            const data = await res.json();
+            if (!data.success) throw new Error(data.message || 'Failed');
+
+            totalPages = data.pages || 1;
+            currentPage = data.page || 1;
+
+            // Stats
+            const events = data.events || [];
+            const bCount = events.filter(e => e.source === 'behavior').length;
+            const aCount = events.filter(e => e.source === 'ai').length;
+            document.getElementById('actTotalCount').textContent = data.total;
+            document.getElementById('actBehaviorCount').textContent = bCount;
+            document.getElementById('actAICount').textContent = aCount;
+
+            // Populate event type filter (only once if empty)
+            const typeSelect = document.getElementById('actTypeFilter');
+            if (typeSelect.options.length <= 1 && data.event_types) {
+                data.event_types.forEach(t => {
+                    const opt = document.createElement('option');
+                    opt.value = t;
+                    opt.textContent = t;
+                    typeSelect.appendChild(opt);
+                });
+            }
+
+            // Render table
+            const tbody = document.getElementById('actBody');
+            tbody.innerHTML = '';
+            if (events.length === 0) {
+                document.getElementById('actEmpty').classList.remove('d-none');
+            } else {
+                events.forEach(ev => {
+                    const srcBadge = ev.source === 'ai'
+                        ? '<span class="ax-badge" style="background:rgba(6,182,212,.12);color:#06B6D4;border:1px solid rgba(6,182,212,.2);font-size:.68rem;">AI</span>'
+                        : '<span class="ax-badge" style="background:rgba(99,102,241,.12);color:#818CF8;border:1px solid rgba(99,102,241,.2);font-size:.68rem;">Behavior</span>';
+
+                    const ts = ev.created_at ? new Date(ev.created_at).toLocaleString() : '—';
+                    const hasMetadata = ev.metadata && ev.metadata !== '{}' && ev.metadata !== '';
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td class="ps-4" style="font-size:.78rem;color:var(--ax-muted);">${esc(ts)}</td>
+                        <td>${srcBadge}</td>
+                        <td style="font-weight:600;font-size:.82rem;">${esc(ev.event_type)}</td>
+                        <td style="font-size:.82rem;color:#818CF8;font-weight:600;">${esc(ev.user || '—')}</td>
+                        <td style="font-size:.78rem;color:var(--ax-muted);">${esc(ev.route || '—')}</td>
+                        <td>${hasMetadata ? '<button class="btn btn-sm btn-outline-secondary act-meta-btn" style="font-size:.68rem;padding:2px 8px;">View</button>' : '<span style="font-size:.72rem;color:var(--ax-muted);">—</span>'}</td>
+                    `;
+                    if (hasMetadata) {
+                        tr.querySelector('.act-meta-btn').addEventListener('click', () => showMeta(ev.metadata));
+                    }
+                    tbody.appendChild(tr);
+                });
+            }
+
+            document.getElementById('actLoading').style.display = 'none';
+            document.getElementById('actTable').style.display = '';
+            document.getElementById('actPageLabel').textContent = `Page ${currentPage} of ${totalPages}`;
+            document.getElementById('actPageInfo').textContent = `${data.total} events`;
+            document.getElementById('actPrev').disabled = currentPage <= 1;
+            document.getElementById('actNext').disabled = currentPage >= totalPages;
+
+        } catch (err) {
+            document.getElementById('actLoading').textContent = 'Failed to load events.';
+        }
+    }
+
+    function showMeta(raw) {
+        let pretty = raw;
+        try { pretty = JSON.stringify(JSON.parse(raw), null, 2); } catch {}
+        document.getElementById('actMetaContent').textContent = pretty;
+        document.getElementById('actMetaModal').style.display = '';
+    }
+
+    document.getElementById('actMetaClose').addEventListener('click', () => {
+        document.getElementById('actMetaModal').style.display = 'none';
+    });
+    document.getElementById('actMetaModal').addEventListener('click', (e) => {
+        if (e.target === document.getElementById('actMetaModal')) {
+            document.getElementById('actMetaModal').style.display = 'none';
+        }
+    });
+
+    document.getElementById('actApplyBtn').addEventListener('click', () => { currentPage = 1; loadEvents(); });
+    document.getElementById('actResetBtn').addEventListener('click', () => {
+        document.getElementById('actSourceFilter').value = '';
+        document.getElementById('actTypeFilter').value = '';
+        document.getElementById('actUserFilter').value = '';
+        currentPage = 1;
+        loadEvents();
+    });
+    document.getElementById('actPrev').addEventListener('click', () => { if (currentPage > 1) { currentPage--; loadEvents(); } });
+    document.getElementById('actNext').addEventListener('click', () => { if (currentPage < totalPages) { currentPage++; loadEvents(); } });
+
+    loadEvents();
+})();
+</script>
+{% endblock %}

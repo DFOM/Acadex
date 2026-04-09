@@ -1125,6 +1125,20 @@ def index():
     course_tables = [d.name for d in DatasetRegistry.query.order_by(DatasetRegistry.created_at.desc()).limit(50).all()]
     notification_count = Notification.query.count()
     announcement_count = Announcement.query.count()
+
+    # Extra stats
+    from datetime import datetime, timedelta
+    week_ago = datetime.utcnow() - timedelta(days=7)
+    new_users_week = 0
+    try:
+        new_users_week = User.query.filter(User.created_at >= week_ago).count()
+    except Exception:
+        pass
+    ai_event_count = AIEvent.query.count()
+    behavior_event_count = BehaviorEvent.query.count()
+
+    # Recent announcements for widget
+    recent_announcements = Announcement.query.order_by(Announcement.date_posted.desc()).limit(5).all()
     
     # SQLAlchemy Core execution for complex joins
     all_schedules = db.session.execute(text('''
@@ -1141,6 +1155,10 @@ def index():
                            announcement_count=announcement_count,
                            course_tables=course_tables,
                            all_schedules=[dict(row._mapping) for row in all_schedules],
+                           new_users_week=new_users_week,
+                           ai_event_count=ai_event_count,
+                           behavior_event_count=behavior_event_count,
+                           recent_announcements=recent_announcements,
                            current_year_setting=get_app_setting('current_year', '2025'), 
                            current_semester_setting=get_app_setting('current_semester', 'Spring'),
                            graduation_credits_setting=get_app_setting('graduation_credits', '124'),
@@ -4936,4 +4954,96 @@ def api_system_reset():
         db.session.rollback()
         current_app.logger.error('System reset failed: %s', exc, exc_info=True)
         g._system_action_detail = {'event': 'system_reset', 'error': str(exc)}
+
+
+# ==========================================================================
+# ACTIVITY LOG — view behaviour + AI events across the platform
+# ==========================================================================
+
+@admin_bp.route('/activity')
+@login_required
+@admin_required
+def activity_log():
+    return render_template('Admin/activity_log.html')
+
+
+@admin_bp.route('/api/activity', methods=['GET'])
+@login_required
+@admin_required
+def api_activity_log():
+    """Paginated, filterable activity feed combining BehaviorEvent + AIEvent."""
+    page = max(int(request.args.get('page', 1)), 1)
+    per_page = min(int(request.args.get('per_page', 50)), 200)
+    event_type = (request.args.get('event_type') or '').strip()
+    source_filter = (request.args.get('source') or '').strip().lower()  # 'behavior' | 'ai' | ''
+    user_filter = (request.args.get('user') or '').strip()
+
+    rows: list[dict] = []
+
+    # ── Behavior events ──
+    if source_filter in ('', 'behavior'):
+        bq = BehaviorEvent.query
+        if event_type:
+            bq = bq.filter(BehaviorEvent.event_type == event_type)
+        if user_filter:
+            bq = bq.join(User, BehaviorEvent.user_id == User.id).filter(User.username.ilike(f'%{user_filter}%'))
+        for ev in bq.order_by(BehaviorEvent.created_at.desc()).limit(500).all():
+            uname = ''
+            if ev.user_id:
+                u = User.query.get(ev.user_id)
+                uname = u.username if u else f'user#{ev.user_id}'
+            rows.append({
+                'id': ev.id,
+                'source': 'behavior',
+                'created_at': ev.created_at.isoformat() if ev.created_at else '',
+                'event_type': ev.event_type or '',
+                'user': uname or (ev.session_id or 'guest')[:16],
+                'route': ev.route or '',
+                'metadata': ev.metadata_json or '',
+            })
+
+    # ── AI events ──
+    if source_filter in ('', 'ai'):
+        aq = AIEvent.query
+        if event_type:
+            aq = aq.filter(AIEvent.event_type == event_type)
+        if user_filter:
+            aq = aq.join(User, AIEvent.user_id == User.id).filter(User.username.ilike(f'%{user_filter}%'))
+        for ev in aq.order_by(AIEvent.created_at.desc()).limit(500).all():
+            uname = ''
+            if ev.user_id:
+                u = User.query.get(ev.user_id)
+                uname = u.username if u else f'user#{ev.user_id}'
+            rows.append({
+                'id': ev.id,
+                'source': 'ai',
+                'created_at': ev.created_at.isoformat() if ev.created_at else '',
+                'event_type': ev.event_type or '',
+                'user': uname,
+                'route': ev.route or '',
+                'metadata': ev.metadata_json or '',
+            })
+
+    # Sort combined by created_at desc
+    rows.sort(key=lambda r: r['created_at'], reverse=True)
+
+    total = len(rows)
+    start = (page - 1) * per_page
+    page_rows = rows[start:start + per_page]
+
+    # Collect distinct event types for filter
+    all_event_types = set()
+    for r in rows:
+        if r['event_type']:
+            all_event_types.add(r['event_type'])
+
+    return jsonify({
+        'success': True,
+        'events': page_rows,
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+        'pages': max(1, (total + per_page - 1) // per_page),
+        'event_types': sorted(all_event_types),
+    })
         return jsonify({'success': False, 'message': f'Reset failed: {exc}'}), 500
