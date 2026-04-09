@@ -140,15 +140,24 @@ MAJOR_DESIGNATED = {
 }
 
 # ── Minor requirements ─────────────────────────────────────────────────────
+# Structure derived from official PDF table layout (positional parsing).
+# Each minor has:
+#   total_courses        – total courses required
+#   level_distribution   – {level: count} courses needed per level
+#   grade_b_by_group     – [{levels: [int...], needed: int}] per level-group
+#   eligible_course_numbers – ordered list from the PDF
 MINOR_REQUIREMENTS = {
     'Psychology': {
         'total_courses': 6,
         'level_distribution': {
             100: 2,   # 2 courses from 100-level (Pathway)
-            200: 3,   # 3 courses from 200-level
-            300: 1,   # 1 course from 300-level
+            200: 2,   # 2 courses from 200-level
+            300: 2,   # 2 courses from 300-level
         },
-        'grade_b_minimum': 2,  # 2 courses need grade B or higher
+        'grade_b_by_group': [
+            {'levels': [100], 'needed': 1, 'label': '100-level'},
+            {'levels': [200, 300], 'needed': 3, 'label': '200/300-level'},
+        ],
         'eligible_course_numbers': [
             'PSYC100', 'PSYC150', 'PSYC201', 'PSYC210', 'PSYC220',
             'PSYC230', 'PSYC240', 'PSYC250', 'PSYC260', 'PSYC290',

@@ -541,11 +541,19 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - General requirements checklist with status icons (completed/in-progress/not started).
   - Course chips colored by completion status.
   - Major section with credit progress bar, designated course chips, and other-credits note.
-  - Minor section with per-level progress, grade B counter, and eligible course chips.
+  - Minor section with per-level progress, per-level-group grade B tracking, and eligible course chips.
   - Prompts user to set major/minor in profile when not declared.
 - Area progress bars now display total available credits per area (from catalog) as additional metric.
 - Added `check-circle` and `minus-circle` SVG icons to the heroicons partial.
 - New `_area_matches_major()` fuzzy matcher for area name → major name matching (handles sub-areas like "Interdisciplinary Arts - Language Arts").
+
+### 2025-06-10 – Graduation requirements fixes: title matching, PSYC minor, entry year toggle
+
+- **Fix: Foundation OR logic** – Course title matching now uses prefix/startswith matching instead of exact equality. Catalog titles include section suffixes (e.g., "Expository Research Writing Sec 1") that caused false "missing" status. `_match_completed_title()` and `_match_planned_title()` helper functions replace the old `_is_completed_title()` / `_is_planned_title()` / `_grade_for_title()`.
+- **Fix: PSYC minor level distribution** – Corrected from `{100: 2, 200: 3, 300: 1}` to `{100: 2, 200: 2, 300: 2}` per positional analysis of official PDF.
+- **Fix: PSYC minor grade B structure** – Replaced flat `grade_b_minimum: 2` with per-level-group structure: `grade_b_by_group: [{levels: [100], needed: 1}, {levels: [200, 300], needed: 3}]` (total 4 courses need B or higher).
+- **Feature: Entry year toggle** – Dashboard now includes ≤2024AY / 2025AY+ toggle buttons in the Graduation Requirements header. User can override auto-detected entry year via `?req_year=` query parameter. `_graduation_requirements_context()` accepts `entry_year_override` parameter.
+- **Template update** – Minor section now renders grade B requirements per level-group instead of a flat counter.
 
 ---
 

@@ -134,12 +134,15 @@
         {% if grad_reqs %}
         <div class="mb-1 mt-4 d-flex align-items-center justify-content-between" style="border-bottom:1px solid var(--ax-border);padding-bottom:.6rem;">
             <h4 class="fw-bold mb-0" style="font-size:1rem;">Graduation Requirements</h4>
-            {% if grad_reqs.major_name or grad_reqs.minor_name %}
-            <div class="d-flex gap-2" style="font-size:.72rem;">
+            <div class="d-flex align-items-center gap-2" style="font-size:.72rem;">
+                {# Entry year toggle #}
+                <div class="btn-group btn-group-sm" role="group" style="height:22px;">
+                    <a href="?req_year=2024" class="btn btn-outline-secondary py-0 px-2 {% if grad_reqs.entry_year <= 2024 %}active{% endif %}" style="font-size:.66rem;line-height:20px;">≤ 2024AY</a>
+                    <a href="?req_year=2025" class="btn btn-outline-secondary py-0 px-2 {% if grad_reqs.entry_year >= 2025 %}active{% endif %}" style="font-size:.66rem;line-height:20px;">2025AY+</a>
+                </div>
                 {% if grad_reqs.major_name %}<span class="badge" style="background:rgba(34,197,94,.12);color:#22C55E;border:1px solid rgba(34,197,94,.25);">{{ grad_reqs.major_name }}</span>{% endif %}
                 {% if grad_reqs.minor_name %}<span class="badge" style="background:rgba(129,140,248,.12);color:#818CF8;border:1px solid rgba(129,140,248,.25);">{{ grad_reqs.minor_name }}</span>{% endif %}
             </div>
-            {% endif %}
         </div>
         <div class="ax-card mt-3 p-3">
             {# ── General Requirements ── #}
@@ -243,15 +246,17 @@
                     <span style="color:var(--ax-text);">{{ level }}-level: {{ ls.completed }}{% if ls.planned > 0 %} (+{{ ls.planned }} planned){% endif %} / {{ ls.needed }} needed</span>
                 </div>
                 {% endfor %}
-                {# Grade B requirement #}
-                <div class="d-flex align-items-center gap-2 mb-2" style="font-size:.74rem;">
-                    {% if mn.grade_b_count >= mn.grade_b_minimum %}
+                {# Grade B requirement – per level group #}
+                {% for gb in mn.grade_b_status %}
+                <div class="d-flex align-items-center gap-2 mb-1" style="font-size:.74rem;">
+                    {% if gb.met %}
                     <span style="color:#22C55E;">{{ hi('check-circle', 'ax-icon') }}</span>
                     {% else %}
                     <span style="color:var(--ax-muted);opacity:.5;">{{ hi('minus-circle', 'ax-icon') }}</span>
                     {% endif %}
-                    <span style="color:var(--ax-text);">Grade B or higher: {{ mn.grade_b_count }} / {{ mn.grade_b_minimum }} needed</span>
+                    <span style="color:var(--ax-text);">Grade B+ ({{ gb.label }}): {{ gb.count }} / {{ gb.needed }} needed</span>
                 </div>
+                {% endfor %}
                 {# Course chips #}
                 <div class="d-flex flex-wrap gap-1">
                     {% for c in mn.courses %}
