@@ -1,11 +1,44 @@
 # utils.py
-from models import db, Setting, ScrapedDataset, Course, CatalogStatus, DatasetRegistry, Faculty
+from models import db, Setting, ScrapedDataset, Course, CatalogStatus, DatasetRegistry, Faculty, CourseMetadataField
 import re
 import json
 from typing import Any
 from sqlalchemy import func
 from difflib import get_close_matches
 from config.data_mapping import DATA_MAPPING
+
+
+COURSE_CANONICAL_FIELDS = (
+    'course_number',
+    'title',
+    'credits',
+    'faculty',
+    'day_period',
+    'semester',
+    'year',
+    'year_level',
+    'prerequisite',
+    'prerequisites',
+    'subject_area',
+)
+
+COURSE_RESERVED_INPUT_FIELDS = {
+    'id',
+    'ref',
+    'source',
+    'dataset_name',
+    'faculty_ids',
+    'faculty_names',
+    'metadata',
+    'dynamic_metadata',
+    'additional_attributes',
+    'additional_attributes_json',
+}
+
+COURSE_RESERVED_INPUT_FIELDS_NORMALIZED = {
+    re.sub(r'\s+', ' ', str(v or '').strip().lower().replace('_', ' ')).strip()
+    for v in COURSE_RESERVED_INPUT_FIELDS
+}
 
 
 def safe_json_loads(value, default):
@@ -133,6 +166,277 @@ def detected_mapping_fields(headers: list[str], mapping: dict[str, list[str]] | 
     return result
 
 
+def normalize_metadata_field_key(value: Any) -> str:
+    text = normalize_column_name(value)
+    if not text:
+        return ''
+    text = re.sub(r'[^a-z0-9]+', '_', text)
+    text = re.sub(r'_+', '_', text).strip('_')
+    if not text:
+        return ''
+    if text[0].isdigit():
+        text = f'field_{text}'
+    return text[:120]
+
+
+def _coerce_metadata_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (dict, list, int, float, bool)):
+        return value
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    lowered = text.lower()
+    if lowered in {'true', 'false'}:
+        return lowered == 'true'
+
+    if re.fullmatch(r'-?\d+', text):
+        try:
+            return int(text)
+        except Exception:
+            pass
+
+    if re.fullmatch(r'-?\d+\.\d+', text):
+        try:
+            return float(text)
+        except Exception:
+            pass
+
+    if text.startswith('{') or text.startswith('['):
+        try:
+            return json.loads(text)
+        except Exception:
+            return text
+
+    return text
+
+
+def normalize_course_metadata_for_storage(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    source = metadata or {}
+    normalized: dict[str, Any] = {}
+
+    for raw_key, raw_value in source.items():
+        field_key = normalize_metadata_field_key(raw_key)
+        if not field_key or field_key in COURSE_CANONICAL_FIELDS:
+            continue
+        coerced = _coerce_metadata_value(raw_value)
+        if coerced is None:
+            continue
+        normalized[field_key] = coerced
+    return normalized
+
+
+def merge_course_metadata(existing: dict[str, Any] | None, incoming: dict[str, Any] | None) -> dict[str, Any]:
+    merged = normalize_course_metadata_for_storage(existing)
+    merged.update(normalize_course_metadata_for_storage(incoming))
+    return merged
+
+
+def _canonical_aliases(mapping: dict[str, list[str]] | None) -> set[str]:
+    aliases = {normalize_column_name(v) for v in COURSE_CANONICAL_FIELDS}
+    normalized_mapping = mapping or get_data_mapping_normalized()
+    for field in COURSE_CANONICAL_FIELDS:
+        for alias in normalized_mapping.get(field, []):
+            aliases.add(normalize_column_name(alias))
+    return {a for a in aliases if a}
+
+
+def _extract_nested_metadata(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, dict[str, str]]]:
+    metadata: dict[str, Any] = {}
+    schema: dict[str, dict[str, str]] = {}
+    for key in ('metadata', 'dynamic_metadata', 'additional_attributes', 'additional_attributes_json'):
+        candidate = payload.get(key)
+        parsed = safe_json_loads(candidate, {}) if isinstance(candidate, str) else candidate
+        if not isinstance(parsed, dict):
+            continue
+        for nested_key, nested_value in parsed.items():
+            field_key = normalize_metadata_field_key(nested_key)
+            if not field_key or field_key in COURSE_CANONICAL_FIELDS:
+                continue
+            coerced = _coerce_metadata_value(nested_value)
+            if coerced is None:
+                continue
+            metadata[field_key] = coerced
+            schema[field_key] = {
+                'field_key': field_key,
+                'label': str(nested_key or '').strip() or field_key,
+            }
+    return metadata, schema
+
+
+def dynamic_course_payload_from_row(row: dict[str, Any], mapping: dict[str, list[str]] | None = None) -> dict[str, Any]:
+    raw = dict(row or {})
+    normalized_mapping = mapping or get_data_mapping_normalized()
+
+    canonical = mapped_course_payload_from_row(raw, normalized_mapping)
+    for key in COURSE_CANONICAL_FIELDS:
+        if canonical.get(key):
+            continue
+        if key in raw:
+            canonical[key] = str(raw.get(key) or '').strip()
+
+    if not canonical.get('prerequisite') and canonical.get('prerequisites'):
+        canonical['prerequisite'] = canonical.get('prerequisites')
+
+    excluded = _canonical_aliases(normalized_mapping)
+    metadata: dict[str, Any] = {}
+    schema: dict[str, dict[str, str]] = {}
+
+    nested_metadata, nested_schema = _extract_nested_metadata(raw)
+    metadata.update(nested_metadata)
+    schema.update(nested_schema)
+
+    for raw_key, raw_value in raw.items():
+        normalized_key = normalize_column_name(raw_key)
+        if not normalized_key:
+            continue
+        if normalized_key in excluded or normalized_key in COURSE_RESERVED_INPUT_FIELDS_NORMALIZED:
+            continue
+
+        field_key = normalize_metadata_field_key(raw_key)
+        if not field_key or field_key in COURSE_CANONICAL_FIELDS:
+            continue
+
+        coerced = _coerce_metadata_value(raw_value)
+        if coerced is None:
+            continue
+
+        metadata[field_key] = coerced
+        if field_key not in schema:
+            schema[field_key] = {
+                'field_key': field_key,
+                'label': str(raw_key or '').strip() or field_key,
+            }
+
+    return {
+        'canonical': canonical,
+        'metadata': normalize_course_metadata_for_storage(metadata),
+        'schema': schema,
+    }
+
+
+def upsert_course_metadata_fields(schema_fields: dict[str, dict[str, str]], *, default_visibility: str = 'student') -> None:
+    if not isinstance(schema_fields, dict) or not schema_fields:
+        return
+
+    visibility_default = str(default_visibility or 'student').strip().lower()
+    if visibility_default not in {'student', 'admin_only'}:
+        visibility_default = 'student'
+
+    normalized: dict[str, dict[str, str]] = {}
+    for key, value in schema_fields.items():
+        field_key = normalize_metadata_field_key(key)
+        if not field_key:
+            continue
+        label = str((value or {}).get('label') or field_key).strip() or field_key
+        normalized[field_key] = {'label': label}
+
+    if not normalized:
+        return
+
+    key_list = list(normalized.keys())
+    existing = CourseMetadataField.query.filter(func.lower(CourseMetadataField.field_key).in_([k.lower() for k in key_list])).all()
+    existing_map = {str(row.field_key or '').strip().lower(): row for row in existing}
+
+    for field_key, value in normalized.items():
+        row = existing_map.get(field_key.lower())
+        if not row:
+            db.session.add(
+                CourseMetadataField(
+                    field_key=field_key,
+                    label=value['label'],
+                    visibility=visibility_default,
+                    is_active=True,
+                )
+            )
+            continue
+
+        if not row.label and value['label']:
+            row.label = value['label']
+        if str(row.visibility or '').strip().lower() not in {'student', 'admin_only'}:
+            row.visibility = visibility_default
+
+
+def merge_dataset_registry_metadata_schema(dataset_row: DatasetRegistry | None, schema_fields: dict[str, dict[str, str]]) -> None:
+    if dataset_row is None or not isinstance(schema_fields, dict) or not schema_fields:
+        return
+
+    existing_schema = safe_json_loads(getattr(dataset_row, 'metadata_schema_json', None), default=[])
+    by_key: dict[str, dict[str, Any]] = {}
+
+    if isinstance(existing_schema, list):
+        for item in existing_schema:
+            if not isinstance(item, dict):
+                continue
+            field_key = normalize_metadata_field_key(item.get('field_key') or item.get('key'))
+            if not field_key:
+                continue
+            by_key[field_key] = {
+                'field_key': field_key,
+                'label': str(item.get('label') or field_key).strip() or field_key,
+                'visibility': str(item.get('visibility') or 'student').strip().lower() or 'student',
+            }
+
+    visibility_map = {
+        str(row.field_key or '').strip().lower(): str(row.visibility or 'student').strip().lower()
+        for row in CourseMetadataField.query.all()
+        if str(row.field_key or '').strip()
+    }
+
+    for raw_key, raw_value in schema_fields.items():
+        field_key = normalize_metadata_field_key(raw_key)
+        if not field_key:
+            continue
+        label = str((raw_value or {}).get('label') or field_key).strip() or field_key
+        by_key[field_key] = {
+            'field_key': field_key,
+            'label': label,
+            'visibility': visibility_map.get(field_key.lower(), by_key.get(field_key, {}).get('visibility', 'student')),
+        }
+
+    dataset_row.metadata_schema_json = sorted(by_key.values(), key=lambda item: str(item.get('field_key') or ''))
+
+
+def course_metadata_visibility_map(*, include_inactive: bool = False) -> dict[str, dict[str, Any]]:
+    query = CourseMetadataField.query
+    if not include_inactive:
+        query = query.filter(CourseMetadataField.is_active.is_(True))
+
+    rows = query.order_by(CourseMetadataField.field_key.asc()).all()
+    return {
+        str(row.field_key or '').strip().lower(): {
+            'field_key': str(row.field_key or '').strip(),
+            'label': str(row.label or row.field_key or '').strip(),
+            'visibility': str(row.visibility or 'student').strip().lower() or 'student',
+            'is_active': bool(row.is_active),
+        }
+        for row in rows
+        if str(row.field_key or '').strip()
+    }
+
+
+def project_course_metadata_for_role(metadata: dict[str, Any] | None, *, role: str = 'student') -> dict[str, Any]:
+    payload = normalize_course_metadata_for_storage(metadata)
+    if not payload:
+        return {}
+
+    role_name = str(role or 'student').strip().lower()
+    if role_name in {'admin', 'moderator'}:
+        return payload
+
+    visibility = course_metadata_visibility_map(include_inactive=False)
+    projected: dict[str, Any] = {}
+    for key, value in payload.items():
+        rule = visibility.get(key.lower())
+        if rule and str(rule.get('visibility') or 'student').strip().lower() == 'admin_only':
+            continue
+        projected[key] = value
+    return projected
+
+
 def normalize_dataset_semester(value: Any) -> str:
     text = str(value or '').strip().lower()
     if text in {'spring', 'spr', 'sp'}:
@@ -153,7 +457,35 @@ def infer_dataset_type(semester: Any) -> str:
     return 'term'
 
 
-def resolve_dataset(year: Any, semester: Any, *, source: str | None = None) -> DatasetRegistry | None:
+def _registry_row_has_fields(row: DatasetRegistry | None, required_fields: list[str] | None) -> bool:
+    if row is None or not required_fields:
+        return True
+    schema = safe_json_loads(getattr(row, 'metadata_schema_json', None), default=[])
+    if not isinstance(schema, list):
+        return False
+
+    available = set()
+    for item in schema:
+        if not isinstance(item, dict):
+            continue
+        key = normalize_metadata_field_key(item.get('field_key') or item.get('key'))
+        if key:
+            available.add(key)
+
+    for field in required_fields:
+        norm = normalize_metadata_field_key(field)
+        if norm and norm not in available:
+            return False
+    return True
+
+
+def resolve_dataset(
+    year: Any,
+    semester: Any,
+    *,
+    source: str | None = None,
+    required_metadata_fields: list[str] | None = None,
+) -> DatasetRegistry | None:
     year_text = str(year or '').strip().lower()
     sem_text = normalize_dataset_semester(semester)
     source_text = str(source or '').strip().lower()
@@ -172,7 +504,7 @@ def resolve_dataset(year: Any, semester: Any, *, source: str | None = None) -> D
                 .order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc())
                 .first()
             )
-            if exact:
+            if exact and _registry_row_has_fields(exact, required_metadata_fields):
                 return exact
 
         if year_text:
@@ -184,10 +516,14 @@ def resolve_dataset(year: Any, semester: Any, *, source: str | None = None) -> D
                 .order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc())
                 .first()
             )
-            if full_year:
+            if full_year and _registry_row_has_fields(full_year, required_metadata_fields):
                 return full_year
 
-        return query.order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).first()
+        rows = query.order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc()).all()
+        for row in rows:
+            if _registry_row_has_fields(row, required_metadata_fields):
+                return row
+        return None
     except Exception:
         db.session.rollback()
         return None

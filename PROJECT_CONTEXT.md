@@ -189,6 +189,8 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 - Dataset management:
   - CSV upload and metadata registration
+  - Dynamic metadata ingestion now captures non-canonical CSV/API attributes into structured course metadata (`Course.metadata_json`) with auto-discovered schema tracking in `DatasetRegistry.metadata_schema_json`.
+  - Admin metadata visibility controls are now available via API (`/admin/api/course-metadata-fields` and `/admin/api/course-metadata-fields/<field_key>/visibility`) with `student` vs `admin_only` scopes.
   - Mixed-term CSV uploads (Fall+Spring) are split into semester-specific dataset names during ingestion.
   - Registry listing with source/year/semester/type/table metadata
   - Refresh/delete/force-delete registry entries
@@ -258,9 +260,10 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Local validation used an isolated SQLite DB harness to execute admin ingestion handlers directly.
 5. Migration rollout order requirement:
   - Identity write paths expect `schedule_courses` identity columns to exist. Deployments must run Alembic upgrade before serving write traffic.
-6. Beta 1.5.0 roadmap execution status:
+6. Beta 1.5.0+ roadmap execution status:
   - A new 4-phase architecture expansion roadmap is now documented (see Change Log entry dated 2026-04-09).
-  - Current status: planning only, no backend/frontend implementation has started for Phases 1-4 yet.
+  - Current status: Phase 1 backend architecture completed (dynamic metadata schema + ingestion + admin visibility APIs).
+  - Remaining status: Phases 2-4 are pending implementation.
 7. Delivery protocol for upcoming phase work:
   - Execute phase-by-phase in order (Phase 1 -> Phase 2 -> Phase 3 -> Phase 4).
   - After each completed fix/feature: run validations, increment `VERSION`, update `README.md`, update `PROJECT_CONTEXT.md`, then commit and push.
@@ -268,6 +271,23 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 ---
 
 # 6. Change Log (Chronological)
+
+## 2026-04-09 — Beta 1.5.1-phase1 (dynamic metadata backend)
+
+- Implemented Phase 1 backend architecture for dynamic course metadata handling.
+- Added structured metadata fields to core models:
+  - `Course.metadata_json`
+  - `DatasetRegistry.metadata_schema_json`
+  - `CourseMetadataField` (visibility control table)
+- Added dynamic ingestion utilities in `utils.py` to split canonical fields from arbitrary incoming CSV/API attributes without requiring schema migrations for new attributes.
+- Updated CSV ingestion and admin manual course APIs to persist dynamic metadata, auto-register discovered fields, and merge dataset-level metadata schemas.
+- Added admin visibility control APIs:
+  - `GET/POST /admin/api/course-metadata-fields`
+  - `POST /admin/api/course-metadata-fields/<field_key>/visibility`
+- Extended dataset resolver with optional `required_metadata_fields` filtering while preserving default exact/full_year/latest fallback semantics.
+- Added migration: `migrations/versions/e7f2a1b3c4d5_dynamic_course_metadata_schema.py`.
+- Added contract coverage: `tests/test_dynamic_metadata_phase1_contracts.py`.
+- Validation after implementation: `44 passed` (`PYTHONPATH=. pytest -q`).
 
 ## 2026-04-09 — Beta 1.5.0-planning (multi-phase roadmap queued)
 

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from functools import wraps
 from sqlalchemy import inspect, text
 import sqlalchemy as sa
-from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField, ScrapedDataset, ScrapedCourse, Course, Faculty, DatasetRegistry
+from models import db, User, Schedule, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField, ScrapedDataset, ScrapedCourse, Course, Faculty, DatasetRegistry, CourseMetadataField
 from utils import (
     calculate_gpa,
     ensure_default_landing_sections,
@@ -27,7 +27,13 @@ from utils import (
     get_data_mapping,
     get_data_mapping_normalized,
     mapped_course_payload_from_row,
+    dynamic_course_payload_from_row,
     detected_mapping_fields,
+    merge_course_metadata,
+    upsert_course_metadata_fields,
+    merge_dataset_registry_metadata_schema,
+    course_metadata_visibility_map,
+    normalize_metadata_field_key,
 )
 from flask import Response
 import json
@@ -66,6 +72,8 @@ ENDPOINT_PERMISSION_MAP = {
     'admin.api_dataset_columns': 'manage_datasets',
     'admin.api_dataset_preview': 'manage_datasets',
     'admin.api_mapping': 'manage_datasets',
+    'admin.api_course_metadata_fields': 'manage_datasets',
+    'admin.api_course_metadata_field_visibility': 'manage_datasets',
     'admin.api_orphan_tables': 'manage_datasets',
     'admin.api_clean_orphan_tables': 'manage_datasets',
     'admin.manage_users': 'manage_users',
@@ -361,6 +369,7 @@ def _serialize_local_course(row: Course) -> dict:
     src = str(row.source or 'manual').strip().lower()
     if src not in {'manual', 'csv', 'scraped'}:
         src = 'manual'
+    dynamic_metadata = safe_json_loads(getattr(row, 'metadata_json', None), {})
     return {
         'id': row.id,
         'ref': f'{src}:{row.id}',
@@ -380,6 +389,7 @@ def _serialize_local_course(row: Course) -> dict:
         'last_updated': (row.last_updated or row.updated_at or row.created_at).isoformat() if (row.last_updated or row.updated_at or row.created_at) else None,
         'faculty_ids': [f.id for f in row.faculty],
         'faculty_names': [f.name for f in row.faculty],
+        'dynamic_metadata': dynamic_metadata if isinstance(dynamic_metadata, dict) else {},
         'editable': True,
         'deletable': src == 'manual',
     }
@@ -391,6 +401,7 @@ def _serialize_scraped_course(row: ScrapedCourse) -> dict:
     semester = getattr(dataset_obj, 'semester', None)
     year = getattr(dataset_obj, 'year', None)
     parsed_names = _extract_faculty_names(row.instructor)
+    dynamic_metadata = safe_json_loads(getattr(row, 'additional_attributes_json', None), {})
     return {
         'id': row.id,
         'ref': f'scraped:{row.id}',
@@ -409,6 +420,7 @@ def _serialize_scraped_course(row: ScrapedCourse) -> dict:
         'last_updated': getattr(dataset_obj, 'updated_at', None).isoformat() if getattr(dataset_obj, 'updated_at', None) else None,
         'faculty_ids': [],
         'faculty_names': parsed_names,
+        'dynamic_metadata': dynamic_metadata if isinstance(dynamic_metadata, dict) else {},
         'editable': True,
         'deletable': False,
     }
@@ -654,6 +666,7 @@ def _protected_tables() -> set[str]:
         'schedules', 'schedule_courses', 'subject_areas', 'courses', 'faculty', 'course_faculty',
         'faculty_advisor_area', 'settings', 'announcements', 'landing_page_sections', 'catalog_statuses',
         'ai_events', 'behavior_events', 'notifications', 'scraped_datasets', 'scraped_courses',
+        'course_metadata_fields',
         'dataset_registry', 'alembic_version',
     }
 
@@ -1453,6 +1466,7 @@ def upload_dataset():
     touched_registry_terms: set[tuple[str, str, str]] = set()
     instructor_samples: list[str] = []
     parsed_faculty_samples: list[list[str]] = []
+    discovered_dynamic_schema: dict[str, dict[str, str]] = {}
 
     try:
         if reader is None:
@@ -1483,7 +1497,8 @@ def upload_dataset():
         semester_values: set[str] = set()
         year_values: set[str] = set()
         for raw_row in all_rows:
-            row_payload = mapped_course_payload_from_row(raw_row or {}, mapping_normalized)
+            dynamic_info = dynamic_course_payload_from_row(raw_row or {}, mapping_normalized)
+            row_payload = dynamic_info.get('canonical') or {}
             sem_guess, year_guess = _parse_semester_year(
                 _pick_from_payload(row_payload, 'semester'),
                 _pick_from_payload(row_payload, 'year'),
@@ -1543,7 +1558,12 @@ def upload_dataset():
 
         for row_index, raw_row in enumerate(all_rows, start=1):
             total_rows_read += 1
-            row_payload = mapped_course_payload_from_row(raw_row or {}, mapping_normalized)
+            dynamic_info = dynamic_course_payload_from_row(raw_row or {}, mapping_normalized)
+            row_payload = dynamic_info.get('canonical') or {}
+            row_dynamic_metadata = dynamic_info.get('metadata') or {}
+            row_dynamic_schema = dynamic_info.get('schema') or {}
+            if isinstance(row_dynamic_schema, dict):
+                discovered_dynamic_schema.update(row_dynamic_schema)
 
             if row_index <= 5:
                 current_app.logger.info('CSV Row %s raw: %s', row_index, raw_row)
@@ -1654,6 +1674,7 @@ def upload_dataset():
                 'prerequisite': _pick_from_payload(row_payload, 'prerequisite') or None,
                 'subject_area': subject_area_text or None,
                 'faculty': parsed_faculty,
+                'metadata_json': row_dynamic_metadata,
                 'dataset_name': row_dataset_name or None,
                 'source': 'csv',
             }
@@ -1666,9 +1687,10 @@ def upload_dataset():
                     skipped_manual += 1
                     continue
                 for key, value in payload.items():
-                    if key == 'faculty':
+                    if key in {'faculty', 'metadata_json'}:
                         continue
                     setattr(existing, key, value)
+                existing.metadata_json = merge_course_metadata(existing.metadata_json, row_dynamic_metadata)
                 parsed_names = _sync_course_faculty_from_payload(existing, payload, fallback_text=faculty_text)
                 existing.instructor = '; '.join(parsed_names) if parsed_names else None
                 updated += 1
@@ -1717,6 +1739,31 @@ def upload_dataset():
                 semester=(inferred_semester or None),
                 dataset_type=inferred_type,
             )
+
+        upsert_course_metadata_fields(discovered_dynamic_schema, default_visibility='student')
+
+        if touched_registry_terms:
+            for term_year, term_semester, term_dataset_name in sorted(touched_registry_terms):
+                row = (
+                    DatasetRegistry.query.filter(
+                        sa.func.lower(sa.func.coalesce(DatasetRegistry.name, '')) == str(term_dataset_name or '').strip().lower(),
+                        sa.func.lower(sa.func.coalesce(DatasetRegistry.source, '')) == 'csv',
+                    )
+                    .order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc())
+                    .first()
+                )
+                merge_dataset_registry_metadata_schema(row, discovered_dynamic_schema)
+        elif dataset_name:
+            row = (
+                DatasetRegistry.query.filter(
+                    sa.func.lower(sa.func.coalesce(DatasetRegistry.name, '')) == str(dataset_name or '').strip().lower(),
+                    sa.func.lower(sa.func.coalesce(DatasetRegistry.source, '')) == 'csv',
+                )
+                .order_by(DatasetRegistry.created_at.desc(), DatasetRegistry.id.desc())
+                .first()
+            )
+            merge_dataset_registry_metadata_schema(row, discovered_dynamic_schema)
+
         db.session.commit()
 
         if touched_registry_terms:
@@ -1942,6 +1989,7 @@ def api_datasets():
             'semester': r.semester,
             'type': r.dataset_type,
             'table_name': r.table_name,
+            'metadata_schema': safe_json_loads(getattr(r, 'metadata_schema_json', None), default=[]),
             'created_at': r.created_at.isoformat() if r.created_at else None,
             'status': 'Available',
         }
@@ -2231,7 +2279,9 @@ def api_dataset_preview():
             if row_index > 5:
                 break
 
-            payload = mapped_course_payload_from_row(raw_row or {}, mapping_normalized)
+            dynamic_info = dynamic_course_payload_from_row(raw_row or {}, mapping_normalized)
+            payload = dynamic_info.get('canonical') or {}
+            dynamic_metadata = dynamic_info.get('metadata') or {}
             extracted = {field: str(payload.get(field) or '').strip() for field in preview_fields}
             parsed_faculty = extract_faculty_names(extracted.get('faculty'))
 
@@ -2247,6 +2297,8 @@ def api_dataset_preview():
                     'row_index': row_index,
                     'raw': {str(k): str(v or '') for k, v in (raw_row or {}).items()},
                     'extracted': extracted,
+                    'dynamic_metadata': dynamic_metadata,
+                    'dynamic_field_keys': sorted(dynamic_metadata.keys()),
                     'parsed_faculty': parsed_faculty,
                     'failed_fields': failed_fields,
                 }
@@ -2298,6 +2350,103 @@ def api_mapping():
 
     update_app_setting('data_mapping_json', safe_json_dumps(normalized_mapping))
     return jsonify({'success': True, 'message': 'Data mapping updated.', 'mapping': get_data_mapping()})
+
+
+def _normalize_visibility(value: str) -> str:
+    visibility = str(value or '').strip().lower()
+    if visibility in {'admin', 'admin-only', 'admin_only'}:
+        return 'admin_only'
+    return 'student'
+
+
+def _serialize_course_metadata_field(row: CourseMetadataField) -> dict:
+    return {
+        'field_key': str(row.field_key or '').strip(),
+        'label': str(row.label or row.field_key or '').strip(),
+        'visibility': _normalize_visibility(row.visibility),
+        'is_active': bool(row.is_active),
+        'updated_at': row.updated_at.isoformat() if getattr(row, 'updated_at', None) else None,
+    }
+
+
+@admin_bp.route('/api/course-metadata-fields', methods=['GET', 'POST'])
+@login_required
+@admin_required
+def api_course_metadata_fields():
+    if request.method == 'GET':
+        rows = CourseMetadataField.query.order_by(CourseMetadataField.field_key.asc()).all()
+        return jsonify(
+            {
+                'success': True,
+                'fields': [_serialize_course_metadata_field(row) for row in rows],
+                'visibility_map': course_metadata_visibility_map(include_inactive=True),
+            }
+        )
+
+    payload = request.get_json(silent=True) or {}
+    updates = payload.get('fields')
+    if not isinstance(updates, list):
+        updates = [payload]
+
+    changed: list[dict] = []
+    for item in updates:
+        if not isinstance(item, dict):
+            continue
+
+        field_key = normalize_metadata_field_key(item.get('field_key') or item.get('key'))
+        if not field_key:
+            continue
+
+        row = CourseMetadataField.query.filter(
+            sa.func.lower(CourseMetadataField.field_key) == field_key.lower()
+        ).first()
+        if not row:
+            row = CourseMetadataField(field_key=field_key, label=field_key)
+            db.session.add(row)
+
+        if 'label' in item:
+            new_label = str(item.get('label') or '').strip() or field_key
+            row.label = new_label
+
+        if 'visibility' in item:
+            row.visibility = _normalize_visibility(item.get('visibility'))
+
+        if 'is_active' in item:
+            row.is_active = bool(item.get('is_active'))
+
+        changed.append({'field_key': field_key})
+
+    if not changed:
+        return jsonify({'success': False, 'message': 'No valid metadata field updates provided.'}), 400
+
+    db.session.commit()
+    return jsonify({'success': True, 'updated': changed})
+
+
+@admin_bp.route('/api/course-metadata-fields/<field_key>/visibility', methods=['POST'])
+@login_required
+@admin_required
+def api_course_metadata_field_visibility(field_key: str):
+    normalized_key = normalize_metadata_field_key(field_key)
+    if not normalized_key:
+        return jsonify({'success': False, 'message': 'Invalid metadata field key.'}), 400
+
+    payload = request.get_json(silent=True) or {}
+    visibility = _normalize_visibility(payload.get('visibility'))
+
+    row = CourseMetadataField.query.filter(
+        sa.func.lower(CourseMetadataField.field_key) == normalized_key.lower()
+    ).first()
+    if not row:
+        row = CourseMetadataField(field_key=normalized_key, label=normalized_key)
+        db.session.add(row)
+
+    row.visibility = visibility
+    if 'is_active' in payload:
+        row.is_active = bool(payload.get('is_active'))
+
+    db.session.commit()
+    return jsonify({'success': True, 'field': _serialize_course_metadata_field(row)})
 
 
 @admin_bp.route('/api/datasets/<int:dataset_id>/refresh', methods=['POST'])
@@ -2857,6 +3006,7 @@ def _manual_course_from_scraped(scraped_row: ScrapedCourse, overrides: dict | No
         'prerequisite': scraped_row.prerequisite,
         'subject_area': scraped_row.area_of_study,
         'faculty': faculty_names,
+        'metadata_json': safe_json_loads(getattr(scraped_row, 'additional_attributes_json', None), {}),
         'source': 'manual',
         'dataset_name': getattr(scraped_row.dataset, 'name', None) if getattr(scraped_row, 'dataset', None) else None,
     }
@@ -2879,6 +3029,7 @@ def _manual_course_from_local(local_row: Course, overrides: dict | None = None) 
         'year': local_row.year,
         'prerequisite': local_row.prerequisite,
         'subject_area': local_row.subject_area,
+        'metadata_json': safe_json_loads(getattr(local_row, 'metadata_json', None), {}),
         'faculty': faculty_names,
         'source': 'manual',
         'dataset_name': local_row.dataset_name,
@@ -2912,16 +3063,22 @@ def api_courses():
         courses = _merged_courses_for_admin()
         faculty_rows = Faculty.query.order_by(Faculty.name.asc()).all()
         areas = SubjectArea.query.order_by(SubjectArea.name.asc()).all()
+        metadata_fields = list(course_metadata_visibility_map(include_inactive=True).values())
         return jsonify(
             {
                 'success': True,
                 'courses': courses,
                 'faculty': [_serialize_faculty(r) for r in faculty_rows],
                 'advisor_areas': [{'id': a.id, 'name': a.name} for a in areas],
+                'metadata_fields': metadata_fields,
             }
         )
 
     payload = request.get_json(silent=True) or {}
+    dynamic_info = dynamic_course_payload_from_row(payload, get_data_mapping_normalized())
+    dynamic_metadata = dynamic_info.get('metadata') or {}
+    dynamic_schema = dynamic_info.get('schema') or {}
+
     ok, err = _validate_course_payload(payload)
     if not ok:
         return jsonify({'success': False, 'message': err}), 400
@@ -2935,6 +3092,7 @@ def api_courses():
         year=str(payload.get('year') or '').strip() or None,
         prerequisite=str(payload.get('prerequisite') or '').strip() or None,
         subject_area=str(payload.get('subject_area') or '').strip() or None,
+        metadata_json=dynamic_metadata,
         source='manual',
     )
     faculty_ids = payload.get('faculty_ids')
@@ -2949,6 +3107,8 @@ def api_courses():
         row.instructor = '; '.join(f.name for f in row.faculty) or None
     else:
         row.instructor = '; '.join(faculty_names) if faculty_names else None
+
+    upsert_course_metadata_fields(dynamic_schema, default_visibility='student')
 
     db.session.add(row)
     db.session.commit()
@@ -2975,6 +3135,9 @@ def api_course_item(course_ref: str):
         return jsonify({'success': True})
 
     payload = request.get_json(silent=True) or {}
+    dynamic_info = dynamic_course_payload_from_row(payload, get_data_mapping_normalized())
+    dynamic_metadata = dynamic_info.get('metadata') or {}
+    dynamic_schema = dynamic_info.get('schema') or {}
     if source == 'manual':
         row = Course.query.get(row_id)
         if not row:
@@ -3019,6 +3182,7 @@ def api_course_item(course_ref: str):
     row.prerequisite = merged['prerequisite'] or None
     row.subject_area = merged['subject_area'] or None
     row.source = 'manual'
+    row.metadata_json = merge_course_metadata(row.metadata_json, dynamic_metadata)
 
     faculty_ids = payload.get('faculty_ids')
     if isinstance(faculty_ids, list):
@@ -3030,6 +3194,7 @@ def api_course_item(course_ref: str):
 
     if source != 'manual':
         db.session.add(row)
+    upsert_course_metadata_fields(dynamic_schema, default_visibility='student')
     db.session.commit()
     return jsonify({'success': True, 'course': _serialize_local_course(row)})
 
@@ -3066,6 +3231,7 @@ def api_course_duplicate(course_ref: str):
         'faculty': payload.get('faculty') or '; '.join(payload.get('faculty_names') or []),
         'faculty_names': payload.get('faculty_names') or [],
         'faculty_ids': payload.get('faculty_ids') or [],
+        'dynamic_metadata': payload.get('dynamic_metadata') or {},
     }
     return jsonify({'success': True, 'course': duplicate_payload})
 

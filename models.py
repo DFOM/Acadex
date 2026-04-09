@@ -2,6 +2,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from datetime import datetime
+import sqlalchemy as sa
 
 # Initialize the SQLAlchemy object
 db = SQLAlchemy()
@@ -232,6 +233,7 @@ class Course(db.Model):
     instructor = db.Column(db.String(255), nullable=True, index=True)
     source = db.Column(db.String(20), default='scraped', nullable=False, index=True)
     dataset_name = db.Column(db.String(150), nullable=True, index=True)
+    metadata_json = db.Column(sa.JSON(), nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     last_updated = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -313,8 +315,21 @@ class DatasetRegistry(db.Model):
     semester = db.Column(db.String(50), nullable=True, index=True)
     dataset_type = db.Column(db.String(20), nullable=False, default='term', index=True)  # term | full_year
     table_name = db.Column(db.String(150), nullable=False, unique=True, index=True)
+    metadata_schema_json = db.Column(sa.JSON(), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
     is_active = db.Column(db.Boolean, default=False, nullable=False, index=True)
+
+
+class CourseMetadataField(db.Model):
+    __tablename__ = 'course_metadata_fields'
+
+    id = db.Column(db.Integer, primary_key=True)
+    field_key = db.Column(db.String(120), nullable=False, unique=True, index=True)
+    label = db.Column(db.String(180), nullable=False)
+    visibility = db.Column(db.String(20), nullable=False, default='student', index=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
 class AIEvent(db.Model):

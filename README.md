@@ -11,9 +11,24 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.5.0-planning**
+- Current version: **Beta 1.5.1-phase1**
 
 ## Changelog
+
+### Beta 1.5.1-phase1 — 2026-04-09
+
+- Implemented Phase 1 backend architecture for dynamic course metadata.
+- Added structured dynamic metadata storage on `Course` (`metadata_json`) and dataset-level schema tracking on `DatasetRegistry` (`metadata_schema_json`).
+- Added `CourseMetadataField` model to control field visibility (`student` vs `admin_only`) without schema migrations.
+- Added dynamic ingestion utilities in `utils.py` that map arbitrary CSV/API fields into canonical course fields plus metadata extras.
+- Updated CSV ingestion and course create/update APIs to persist dynamic metadata, auto-register discovered fields, and merge dataset metadata schema.
+- Added admin control APIs:
+	- `GET/POST /admin/api/course-metadata-fields`
+	- `POST /admin/api/course-metadata-fields/<field_key>/visibility`
+- Extended dataset resolver to support optional metadata-field-aware resolution while preserving existing fallback behavior.
+- Added migration: `migrations/versions/e7f2a1b3c4d5_dynamic_course_metadata_schema.py`.
+- Added contract tests: `tests/test_dynamic_metadata_phase1_contracts.py`.
+- Validation: `44 passed` (`PYTHONPATH=. pytest -q`).
 
 ### Beta 1.5.0-planning — 2026-04-09
 
