@@ -4866,6 +4866,8 @@ def api_system_reset():
 
         # 2. Wipe FK-linked data in dependency order
         db.session.execute(course_faculty.delete())
+        from models import faculty_advisor_area
+        db.session.execute(faculty_advisor_area.delete())
         ScheduleCourse.query.delete(synchronize_session=False)
         AIEvent.query.delete(synchronize_session=False)
         BehaviorEvent.query.delete(synchronize_session=False)
@@ -4879,15 +4881,17 @@ def api_system_reset():
         CatalogStatus.query.delete(synchronize_session=False)
         CourseMetadataField.query.delete(synchronize_session=False)
 
-        # 3. Wipe user sessions table
+        # 3. Delete all users
+        User.query.delete(synchronize_session=False)
+
+        # 4. Flush deletes, then clear sessions
+        db.session.flush()
+
         session_table = str(current_app.config.get('SESSION_SQLALCHEMY_TABLE') or 'user_sessions')
         try:
             db.session.execute(text(f'DELETE FROM "{session_table}"'))
         except Exception:
-            db.session.rollback()
-
-        # 4. Delete all users
-        User.query.delete(synchronize_session=False)
+            pass  # table may not exist yet
 
         # 5. Create fresh admin
         admin_role = Role.query.filter_by(name='admin').first()

@@ -275,7 +275,7 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Direct prerequisites panel now shows raw prerequisite text alongside status badges for transparency.
   - Dataset deletion fix: `_delete_registry_dataset_row` and `api_force_delete_dataset` now clear `course_faculty` FK join rows before deleting courses. Added missing imports for `ScheduleCourse`, `AIEvent`, `BehaviorEvent`, `course_faculty`. Removed premature `db.session.commit()` inside `_safe_drop_table_if_exists`.
   - Dataset management UI reworked: cleaner layout, "Delete All Datasets" button, orphan/invalid cleanup consolidated into Danger Zone section.
-  - Nuclear system reset endpoint: `POST /admin/api/system-reset` wipes all datasets, courses, schedules, events, notifications, users and creates fresh admin account. Requires `{"confirm":"RESET"}` payload. Double-confirmation in UI (confirm dialog + type "RESET").
+  - Nuclear system reset endpoint: `POST /admin/api/system-reset` wipes all datasets, courses, schedules, events, notifications, users and creates fresh admin account. Requires `{"confirm":"RESET"}` payload. Double-confirmation in UI (confirm dialog + type "RESET"). Clears `faculty_advisor_area` FK before Faculty delete. Null-safe JS event wiring.
   - Local validation passed (`56 passed`), awaiting Render/live confirmation.
 
 ---
