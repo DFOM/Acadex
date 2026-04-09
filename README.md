@@ -11,9 +11,16 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.5.1-phase1**
+- Current version: **Beta 1.5.2**
 
 ## Changelog
+
+### Beta 1.5.2 — 2026-04-10
+
+- Fixed Admin Activity Log metadata modal visibility regression where the "Event Metadata" overlay could remain visible on page load.
+- Removed persistent `d-flex` class from the modal container so hidden state is respected until the user clicks "View".
+- Updated modal open behavior to explicitly use `display:flex` and preserve centered alignment only when opened.
+- Hardened metadata handling in the activity table so metadata buttons render correctly for string, object, empty, and null payload variants.
 
 ### Beta 1.5.1-phase1 — 2026-04-09
 

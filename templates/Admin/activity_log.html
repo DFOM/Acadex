@@ -97,7 +97,7 @@
 </div>
 
 {# ── Metadata modal ── #}
-<div id="actMetaModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);z-index:1060;" class="d-flex align-items-center justify-content-center">
+<div id="actMetaModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);z-index:1060;" class="align-items-center justify-content-center">
     <div style="background:var(--ax-surface-1);border:1px solid var(--ax-border);border-radius:12px;max-width:600px;width:90%;max-height:70vh;overflow:auto;padding:1.5rem;">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <h6 style="margin:0;font-weight:700;color:var(--ax-text);">Event Metadata</h6>
@@ -119,6 +119,18 @@
 
     let currentPage = 1;
     let totalPages = 1;
+
+    function hasRenderableMetadata(raw) {
+        if (raw === null || raw === undefined) return false;
+        if (typeof raw === 'string') {
+            const trimmed = raw.trim();
+            return trimmed !== '' && trimmed !== '{}' && trimmed.toLowerCase() !== 'null';
+        }
+        if (typeof raw === 'object') {
+            return Object.keys(raw).length > 0;
+        }
+        return true;
+    }
 
     function buildParams() {
         const p = new URLSearchParams();
@@ -177,7 +189,7 @@
                         : '<span class="ax-badge" style="background:rgba(99,102,241,.12);color:#818CF8;border:1px solid rgba(99,102,241,.2);font-size:.68rem;">Behavior</span>';
 
                     const ts = ev.created_at ? new Date(ev.created_at).toLocaleString() : '—';
-                    const hasMetadata = ev.metadata && ev.metadata !== '{}' && ev.metadata !== '';
+                    const hasMetadata = hasRenderableMetadata(ev.metadata);
 
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
@@ -209,9 +221,16 @@
 
     function showMeta(raw) {
         let pretty = raw;
-        try { pretty = JSON.stringify(JSON.parse(raw), null, 2); } catch {}
+        try {
+            if (typeof raw === 'string') {
+                const parsed = JSON.parse(raw);
+                pretty = JSON.stringify(parsed, null, 2);
+            } else {
+                pretty = JSON.stringify(raw, null, 2);
+            }
+        } catch {}
         document.getElementById('actMetaContent').textContent = pretty;
-        document.getElementById('actMetaModal').style.display = '';
+        document.getElementById('actMetaModal').style.display = 'flex';
     }
 
     document.getElementById('actMetaClose').addEventListener('click', () => {

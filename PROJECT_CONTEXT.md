@@ -205,7 +205,7 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Course/faculty CRUD and linkage workflows
 - Subject area/period/user/role/registration-field management
 - Analytics + system health dashboards
-- **Activity Log page** (`/admin/activity`): Combined BehaviorEvent + AIEvent viewer with source/type/user filters, paginated table, and metadata JSON inspection modal.
+- **Activity Log page** (`/admin/activity`): Combined BehaviorEvent + AIEvent viewer with source/type/user filters, paginated table, and metadata JSON inspection modal. Metadata modal is now hidden by default and opens only on explicit "View" click.
 - **Enhanced dashboard**: Stat cards now include platform event counts (behavior + AI) and new-users-this-week indicator. Announcements widget shows 5 latest announcements with type badges on the dashboard.
 - **User management search/filter**: Real-time client-side filtering by username/email/name, role dropdown, and graduation year on the manage_users page.
 - Landing page and announcements management
@@ -291,6 +291,12 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 ---
 
 # 6. Change Log (Chronological)
+
+## 2026-04-10 — Beta 1.5.2 (admin activity metadata modal fix)
+
+- Fixed an Activity Log UI regression where the "Event Metadata" modal could appear stuck on-screen due to display utility-class conflict.
+- Removed persistent `d-flex` from the modal shell and switched modal open logic to explicit `display:flex` so hidden state is stable on initial render.
+- Hardened metadata render checks to support string/object/null payload variants and avoid false-positive metadata buttons.
 
 ## 2026-04-09 — Dashboard area progress + mini schedule fixes
 
