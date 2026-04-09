@@ -317,6 +317,13 @@ app.register_blueprint(admin_bp, url_prefix='/admin')
 app.register_blueprint(student_bp, url_prefix='/student')
 app.register_blueprint(schedule_bp, url_prefix='/schedule')
 
+app.add_url_rule(
+    '/api/student/course-details/<int:course_id>',
+    endpoint='student_course_details_graph_alias',
+    view_func=app.view_functions['student.api_course_details_graph'],
+    methods=['GET'],
+)
+
 
 @app.get('/health')
 def health_check():

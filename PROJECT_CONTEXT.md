@@ -267,10 +267,27 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 7. Delivery protocol for upcoming phase work:
   - Execute phase-by-phase in order (Phase 1 -> Phase 2 -> Phase 3 -> Phase 4).
   - After each completed fix/feature: run validations, increment `VERSION`, update `README.md`, update `PROJECT_CONTEXT.md`, then commit and push.
+8. Pending production confirmation (not yet marked fixed):
+  - Candidate patch deployed for `/student/courses` internal-server-error on course click (template prerequisite iteration guard).
+  - Phase 2 dependency-graph endpoint candidate deployed (`/api/student/course-details/<id>` alias + student blueprint path).
+  - Local validation passed (`50 passed`), awaiting Render/live confirmation before moving these items to fixed/confirmed docs.
 
 ---
 
 # 6. Change Log (Chronological)
+
+## 2026-04-09 — Validation Candidate (Phase 2 + courses click fix, pending live confirmation)
+
+- Added deterministic prerequisite dependency graph service sets:
+  - direct requirements
+  - dependent unlockables
+  - conditional paths
+- Added student dependency graph endpoints:
+  - `/student/api/course-details/<id>`
+  - `/api/student/course-details/<id>` alias route
+- Added safeguard fix for student courses detail panel rendering to prevent template errors when prerequisite status payload is a dict.
+- Added/updated tests for dependency graph behavior, endpoint contracts, and template prerequisite iteration safety.
+- Status: shipped as deployment candidate, pending production confirmation before being recorded as fully fixed.
 
 ## 2026-04-09 — Beta 1.5.1-phase1 (dynamic metadata backend)
 

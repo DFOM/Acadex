@@ -8,6 +8,7 @@ class TestStudentViewAndExportContracts(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         cls.student_routes = (root / 'Routes' / 'student_routes.py').read_text(encoding='utf-8')
         cls.student_js = (root / 'static' / 'js' / 'student.js').read_text(encoding='utf-8')
+        cls.student_courses_template = (root / 'templates' / 'Student' / 'courses.html').read_text(encoding='utf-8')
 
     def test_courses_view_has_fail_safe_guard(self):
         content = self.student_routes
@@ -29,6 +30,11 @@ class TestStudentViewAndExportContracts(unittest.TestCase):
         self.assertIn("el.style.opacity = '1'", content)
         self.assertIn("el.style.fontWeight = '800'", content)
         self.assertIn("el.style.color = '#ffffff'", content)
+
+    def test_courses_template_uses_prereq_items_key_not_dict_method(self):
+        content = self.student_courses_template
+        self.assertIn("{% set prereq_items = selected_prereq_status.get('items', []) %}", content)
+        self.assertIn("{% for item in prereq_items %}", content)
 
 
 if __name__ == '__main__':

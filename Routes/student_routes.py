@@ -24,6 +24,7 @@ from services.eligibility import normalize_course_code_for_prereqs
 from services.conflicts import parse_day_period_blocks
 from services.ai.recommendations import recommend_courses
 from services.ai.generator import generate_schedule_courses
+from services.prereqs import dependency_graph_for_course
 
 student_bp = Blueprint('student', __name__)
 
@@ -1065,6 +1066,43 @@ def _build_course_metadata_index() -> Dict[str, Dict[str, Any]]:
     return index
 
 
+def _catalog_rows_with_local_course_ids(catalog_rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+    rows = [dict(r or {}) for r in catalog_rows]
+
+    local_rows = Course.query.order_by(Course.last_updated.desc(), Course.id.desc()).all()
+    local_identity_to_id: Dict[tuple[str, str, str, str], int] = {}
+    local_number_to_id: Dict[str, int] = {}
+
+    for row in local_rows:
+        key = _catalog_resolution_key(row.course_number, row.day_period, row.semester, row.year)
+        local_identity_to_id.setdefault(key, int(row.id))
+
+        number_key = _normalize_course_number(row.course_number)
+        if number_key and number_key not in local_number_to_id:
+            local_number_to_id[number_key] = int(row.id)
+
+    enriched: list[Dict[str, Any]] = []
+    for row in rows:
+        mapped = dict(row)
+        if mapped.get('course_id') is not None:
+            enriched.append(mapped)
+            continue
+
+        key = _catalog_resolution_key(
+            mapped.get('Course_Number'),
+            mapped.get('Day_and_Period'),
+            mapped.get('semester'),
+            mapped.get('year'),
+        )
+        course_id = local_identity_to_id.get(key)
+        if course_id is None:
+            course_id = local_number_to_id.get(_normalize_course_number(mapped.get('Course_Number')))
+        mapped['course_id'] = course_id
+        enriched.append(mapped)
+
+    return enriched
+
+
 def _build_prereq_title_lookup() -> Dict[str, str]:
     """Build normalized prerequisite token -> display title mapping."""
     metadata = _build_course_metadata_index()
@@ -1716,6 +1754,94 @@ def api_course_detail():
         db.session.rollback()
         current_app.logger.error('Course detail lookup failed: %s', exc, exc_info=True)
         return jsonify({'success': False, 'message': 'Could not load course details right now.'}), 500
+
+
+@student_bp.route('/api/course-details/<int:course_id>', methods=['GET'])
+def api_course_details_graph():
+    try:
+        course = Course.query.get(course_id)
+        if not course:
+            return jsonify({'success': False, 'message': 'Course not found.'}), 404
+
+        completed_identifiers: Iterable[str] = []
+        major_name = ''
+        minor_name = ''
+        if current_user.is_authenticated:
+            completed_identifiers = _completed_passing_prereq_identifiers(current_user.id)
+            user_areas = _resolve_user_area_names()
+            major_name = user_areas.get('major') or ''
+            minor_name = user_areas.get('minor') or ''
+
+        latest_catalog_rows, latest_dataset_id = _load_scraped_catalog_for_term('', '')
+        catalog_rows = _catalog_rows_with_local_course_ids(latest_catalog_rows)
+
+        target_row = _manual_or_csv_course_to_catalog_row(course)
+        target_row['course_id'] = int(course.id)
+        target_row = _add_display_fields(target_row)
+
+        target_identity = _catalog_resolution_key(
+            target_row.get('Course_Number'),
+            target_row.get('Day_and_Period'),
+            target_row.get('semester'),
+            target_row.get('year'),
+        )
+        if not any(
+            _catalog_resolution_key(r.get('Course_Number'), r.get('Day_and_Period'), r.get('semester'), r.get('year')) == target_identity
+            for r in catalog_rows
+        ):
+            catalog_rows.append(target_row)
+
+        dependency_graph = dependency_graph_for_course(
+            course_number=str(course.course_number or ''),
+            course_title=str(course.title or ''),
+            prerequisite_text=course.prerequisite,
+            catalog_courses=catalog_rows,
+            completed_courses=completed_identifiers,
+            normalizer=normalize_course_code_for_prereqs,
+        )
+
+        prereq_status = _build_prerequisite_status(
+            course.prerequisite,
+            completed_identifiers,
+            major_name=major_name,
+            minor_name=minor_name,
+            prereq_title_lookup=_build_prereq_title_lookup(),
+        )
+
+        return jsonify(
+            {
+                'success': True,
+                'dataset_id': latest_dataset_id,
+                'course': {
+                    'id': int(course.id),
+                    'course_number': target_row.get('Course_Number'),
+                    'display_course_number': target_row.get('display_course_number'),
+                    'course_title': target_row.get('Course_Title'),
+                    'display_title': target_row.get('display_title'),
+                    'credits': target_row.get('Credits'),
+                    'instructor': _normalize_instructor(target_row.get('Instructor')) or 'TBA',
+                    'area_of_study': target_row.get('Area_of_Study'),
+                    'prerequisite': target_row.get('Prerequisite'),
+                },
+                'prerequisite_status': prereq_status,
+                'dependency_graph': {
+                    'direct_requirements': dependency_graph.get('direct_requirements', []),
+                    'direct_requirement_count': len(dependency_graph.get('direct_requirements', [])),
+                    'direct_requirements_expression': dependency_graph.get('direct_requirements_expression', ''),
+                    'direct_requirements_is_conditional': bool(dependency_graph.get('direct_requirements_is_conditional')),
+                    'direct_requirements_eligible_now': bool(dependency_graph.get('direct_requirements_eligible_now')),
+                    'dependent_unlockables': dependency_graph.get('dependent_unlockables', [])[:500],
+                    'dependent_unlockable_count': len(dependency_graph.get('dependent_unlockables', [])),
+                    'conditional_paths': dependency_graph.get('conditional_paths', [])[:500],
+                    'conditional_path_count': len(dependency_graph.get('conditional_paths', [])),
+                    'parse_errors': dependency_graph.get('parse_errors', []),
+                },
+            }
+        )
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.error('Course dependency graph lookup failed: %s', exc, exc_info=True)
+        return jsonify({'success': False, 'message': 'Could not load course dependency graph right now.'}), 500
 
 
 @student_bp.route('/courses')
