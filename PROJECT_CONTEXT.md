@@ -258,10 +258,25 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Local validation used an isolated SQLite DB harness to execute admin ingestion handlers directly.
 5. Migration rollout order requirement:
   - Identity write paths expect `schedule_courses` identity columns to exist. Deployments must run Alembic upgrade before serving write traffic.
+6. Beta 1.5.0 roadmap execution status:
+  - A new 4-phase architecture expansion roadmap is now documented (see Change Log entry dated 2026-04-09).
+  - Current status: planning only, no backend/frontend implementation has started for Phases 1-4 yet.
+7. Delivery protocol for upcoming phase work:
+  - Execute phase-by-phase in order (Phase 1 -> Phase 2 -> Phase 3 -> Phase 4).
+  - After each completed fix/feature: run validations, increment `VERSION`, update `README.md`, update `PROJECT_CONTEXT.md`, then commit and push.
 
 ---
 
 # 6. Change Log (Chronological)
+
+## 2026-04-09 — Beta 1.5.0-planning (multi-phase roadmap queued)
+
+- Added a planning-only roadmap for a stepwise architecture expansion; no implementation in this entry.
+- Documented Phase 1 scope: dynamic course metadata schema, dynamic ingestion utility, admin visibility controls, and dataset resolver compatibility constraint.
+- Documented Phase 2 scope: deterministic prerequisite reverse-mapping graph sets (direct requirements, dependent unlockables, conditional paths) and new student course-details graph endpoint.
+- Documented Phase 3 scope: data-driven student UI builder based on admin-configured visible metadata, dependency explorer UX, and security posture parity.
+- Documented Phase 4 scope: automated sync/health service with mocked external API polling, runtime smoke checks, and machine-readable sync failure alerts.
+- Added explicit delivery rule to commit/push and update version + docs after each completed fix/feature.
 
 ## 2026-03-24 — Beta 1.4.5 (action-log diagnostic detail)
 

@@ -11,9 +11,18 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.4.5**
+- Current version: **Beta 1.5.0-planning**
 
 ## Changelog
+
+### Beta 1.5.0-planning — 2026-04-09
+
+- Added a planning-only, stepwise 4-phase architecture roadmap (no implementation started yet in this entry).
+- Phase 1 planned: dynamic course metadata schema, dynamic CSV/API ingestion mapping, and admin visibility controls with resolver compatibility maintained.
+- Phase 2 planned: deterministic prerequisite reverse mapping and new student dependency-graph course details endpoint.
+- Phase 3 planned: data-driven student UI rendering from admin-controlled visible metadata and dependency explorer interactions.
+- Phase 4 planned: automated external sync service, runtime smoke checks, and machine-readable sync failure alerts.
+- Delivery protocol documented for upcoming work: complete one phase at a time, then validate, bump version, update docs, commit, and push.
 
 ### Beta 1.4.5 — 2026-03-24
 
