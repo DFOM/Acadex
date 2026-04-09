@@ -602,6 +602,12 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - **Template updates**: Removed year/period display, added semester badge on cards, multi-area display on card bottom row, semester badge in detail drawer badges.
 - **Data quality**: Bad area values (misaligned CSV columns like "1Year", instructor names) are filtered out during catalog building.
 
+### 2025-06-13b – Catalog cleanup, prereq title substitution, admin sidebar rework
+
+- **Catalog detail drawer cleanup**: Removed sections/instructor/days/periods from the detail drawer and API response. Catalog is now a pure reference tool showing: course name, semester, credits, areas, level, prerequisites, and dependency graph ("what this unlocks"). Removed sections-building code from `api_catalog_course_detail` endpoint. Added level badge to course cards.
+- **Prerequisite title substitution pre-processor**: CSV prerequisites use course TITLES (e.g. "Financial Management", "Research Design") not codes. Multi-word titles caused the AST parser to break (adjacent COURSE tokens → syntax error) and AND/OR inside titles (e.g. "Painting AND Sculpting 1") were incorrectly parsed as operators. New `_build_title_to_code_map()` + `_substitute_titles_in_prereq()` functions in `services/prereqs.py` replace known multi-word course titles with their course codes before parsing. Uses longest-match-first strategy. Applied to both `dependency_graph_for_course()` and `_split_prereq_terms()` in student routes.
+- **Admin sidebar restructure**: Removed fake "Settings" link (pointed back to dashboard), removed duplicate "Datasets" from System section, moved "Registration Fields" from System to People section, renamed "Users" section to "People", renamed "Landing Management" to "Landing Page". System section now only contains System Health + Landing Page.
+
 ---
 
 ## Coding conventions and style

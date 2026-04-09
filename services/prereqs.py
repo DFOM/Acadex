@@ -436,6 +436,55 @@ def _build_title_lookup(catalog_courses: Sequence[Dict[str, Any]], *, normalizer
     return lookup
 
 
+def _build_title_to_code_map(catalog_courses: Sequence[Dict[str, Any]]) -> Dict[str, str]:
+    """Build a mapping of course title (original case) → course code for pre-processing.
+
+    Used to replace multi-word titles in prerequisite text with single-token course codes
+    before parsing, so the AST parser can handle title-based prerequisites.
+    """
+    title_to_code: Dict[str, str] = {}
+    for row in catalog_courses:
+        number = _row_course_number(row)
+        title = _row_course_title(row)
+        if not number or not title:
+            continue
+        # Prefer shorter/canonical course codes; skip if already mapped
+        title_lower = title.lower().strip()
+        if title_lower and title_lower not in title_to_code:
+            # Use the raw course number (e.g., "ECON140") as the replacement token
+            title_to_code[title_lower] = number.strip().upper()
+    return title_to_code
+
+
+def _substitute_titles_in_prereq(prereq_text: str, title_to_code: Dict[str, str]) -> str:
+    """Replace known multi-word course titles in prerequisite text with course codes.
+
+    Uses longest-match-first to handle titles like "Painting AND Sculpting 1"
+    that contain AND/OR keywords. Only replaces multi-word titles (single words
+    are handled fine by the tokenizer already). Preserves AND/OR operators that
+    are actual operators (not embedded in titles) by doing case-insensitive
+    boundary-aware matching.
+    """
+    if not prereq_text or not title_to_code:
+        return prereq_text
+
+    # Sort by title length descending for greedy matching
+    sorted_titles = sorted(title_to_code.keys(), key=len, reverse=True)
+
+    result = prereq_text
+    for title_lower in sorted_titles:
+        # Only bother with multi-word titles (single words work fine in parser)
+        if ' ' not in title_lower:
+            continue
+        code = title_to_code[title_lower]
+        # Case-insensitive replacement with word boundaries
+        # Use re.escape to handle special chars in titles
+        pattern = re.compile(re.escape(title_lower), re.IGNORECASE)
+        result = pattern.sub(code, result)
+
+    return result
+
+
 def _text_contains_target(prereq_text: str, target_tokens: Set[str], *, normalizer: Callable[[str], str]) -> bool:
     """Check if any target token appears as a word boundary match in the text."""
     text_upper = prereq_text.upper()
@@ -507,6 +556,7 @@ def dependency_graph_for_course(
 
     completed_tokens = {normalizer(v) for v in completed_courses if str(v or '').strip()}
     title_lookup = _build_title_lookup(catalog_courses, normalizer=normalizer)
+    title_to_code = _build_title_to_code_map(catalog_courses)
 
     parse_errors: List[Dict[str, str]] = []
 
@@ -518,8 +568,10 @@ def dependency_graph_for_course(
     direct_eligible_now = True
 
     if cleaned_prereq:
+        # Pre-process: replace multi-word course titles with single-token codes
+        substituted_prereq = _substitute_titles_in_prereq(cleaned_prereq, title_to_code)
         try:
-            direct_expr = parse(cleaned_prereq)
+            direct_expr = parse(substituted_prereq)
         except PrereqSyntaxError as exc:
             parse_errors.append(
                 {
@@ -592,8 +644,11 @@ def dependency_graph_for_course(
         if row_number_token and row_number_token == target_course_number_normalized:
             continue
 
+        # Pre-process: replace multi-word course titles with codes before parsing
+        row_prereq_substituted = _substitute_titles_in_prereq(row_prereq, title_to_code)
+
         try:
-            row_expr = parse(row_prereq)
+            row_expr = parse(row_prereq_substituted)
         except PrereqSyntaxError as exc:
             parse_errors.append(
                 {

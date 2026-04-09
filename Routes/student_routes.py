@@ -24,7 +24,7 @@ from services.eligibility import normalize_course_code_for_prereqs
 from services.conflicts import parse_day_period_blocks
 from services.ai.recommendations import recommend_courses
 from services.ai.generator import generate_schedule_courses
-from services.prereqs import dependency_graph_for_course
+from services.prereqs import dependency_graph_for_course, _build_title_to_code_map, _substitute_titles_in_prereq
 from config.graduation_reqs import (
     get_general_requirements,
     get_major_requirements,
@@ -1345,10 +1345,15 @@ def _completed_passing_prereq_identifiers(user_id: int) -> Set[str]:
     return identifiers
 
 
-def _split_prereq_terms(prereq_str: str) -> list[str]:
+def _split_prereq_terms(prereq_str: str, title_to_code: Dict[str, str] | None = None) -> list[str]:
     text_value = str(prereq_str or '').strip()
     if not text_value:
         return []
+
+    # First: substitute known multi-word titles with course codes
+    # so that AND/OR inside titles (e.g. "Painting AND Sculpting 1") don't get split
+    if title_to_code:
+        text_value = _substitute_titles_in_prereq(text_value, title_to_code)
 
     standardized = re.sub(r'\bAND/OR\b', ' OR ', text_value, flags=re.IGNORECASE)
     standardized = re.sub(r'\s*&\s*', ' AND ', standardized)
@@ -1373,6 +1378,7 @@ def _build_prerequisite_status(
     major_name: str | None = None,
     minor_name: str | None = None,
     prereq_title_lookup: Dict[str, str] | None = None,
+    title_to_code: Dict[str, str] | None = None,
 ) -> Dict[str, Any]:
     prereq_raw = str(prereq_str or '').strip()
     none_like = prereq_raw.lower() in {'', 'none', 'n/a', 'na'}
@@ -1405,7 +1411,7 @@ def _build_prerequisite_status(
     missing_count = 0
     untrackable_count = 0
 
-    for term in _split_prereq_terms(prereq_raw):
+    for term in _split_prereq_terms(prereq_raw, title_to_code=title_to_code):
         term_lower = term.lower()
         if 'major' in term_lower:
             if major_norm:
@@ -2178,11 +2184,12 @@ def search_courses():
         return jsonify([])
 
 
-def _build_unlocks_for_course(catalog_rows: list[Dict[str, Any]], target_row: Dict[str, Any]) -> list[dict]:
+def _build_unlocks_for_course(catalog_rows: list[Dict[str, Any]], target_row: Dict[str, Any], title_to_code: Dict[str, str] | None = None) -> list[dict]:
     normalized_target_code = _normalize_course_number(target_row.get('Course_Number'))
     target_code_token = normalize_course_code_for_prereqs(target_row.get('Course_Number'))
     target_title_token = normalize_course_code_for_prereqs(target_row.get('Course_Title'))
     target_tokens = {v for v in [target_code_token, target_title_token] if v}
+    ttc = title_to_code or _build_title_to_code_map(catalog_rows)
 
     unlocks: list[dict] = []
     seen_unlocks: set[tuple[str, str]] = set()
@@ -2198,7 +2205,7 @@ def _build_unlocks_for_course(catalog_rows: list[Dict[str, Any]], target_row: Di
             continue
 
         is_unlocked = False
-        for term in _split_prereq_terms(prereq_value):
+        for term in _split_prereq_terms(prereq_value, title_to_code=ttc):
             if not _looks_like_trackable_course_term(term):
                 continue
             norm_term = normalize_course_code_for_prereqs(term)
@@ -2307,12 +2314,14 @@ def api_course_detail():
             major_name = user_areas.get('major') or ''
             minor_name = user_areas.get('minor') or ''
 
+        title_to_code_map = _build_title_to_code_map(catalog_rows)
         prereq_status = _build_prerequisite_status(
             target_row.get('Prerequisite'),
             completed_identifiers,
             major_name=major_name,
             minor_name=minor_name,
             prereq_title_lookup=_build_prereq_title_lookup(),
+            title_to_code=title_to_code_map,
         )
         latest_catalog_rows, latest_dataset_id = _load_scraped_catalog_for_term('', '')
         unlock_source_rows = latest_catalog_rows if latest_catalog_rows else catalog_rows
@@ -2389,12 +2398,14 @@ def api_course_details_graph():
             normalizer=normalize_course_code_for_prereqs,
         )
 
+        title_to_code_map = _build_title_to_code_map(catalog_rows)
         prereq_status = _build_prerequisite_status(
             course.prerequisite,
             completed_identifiers,
             major_name=major_name,
             minor_name=minor_name,
             prereq_title_lookup=_build_prereq_title_lookup(),
+            title_to_code=title_to_code_map,
         )
 
         return jsonify(
@@ -2467,12 +2478,14 @@ def api_catalog_course_detail():
         completed_identifiers = _completed_passing_prereq_identifiers(current_user.id)
         area_names = _resolve_user_area_names()
 
+        title_to_code_map = _build_title_to_code_map(catalog_for_graph)
         prereq_status = _build_prerequisite_status(
             target_row.get('Prerequisite'),
             completed_identifiers,
             major_name=area_names.get('major'),
             minor_name=area_names.get('minor'),
             prereq_title_lookup=_build_prereq_title_lookup(),
+            title_to_code=title_to_code_map,
         )
 
         # Use the full combined catalog for dependency scanning
@@ -2488,27 +2501,6 @@ def api_catalog_course_detail():
 
         # Areas — already derived in the combined catalog
         areas = target_row.get('areas') or _derive_areas_from_course_number(target_row.get('Course_Number'))
-
-        # Sections: collect ALL rows for this course across all datasets
-        all_course_rows = [
-            _manual_or_csv_course_to_catalog_row(r) for r in
-            Course.query.filter(func.upper(Course.course_number) == normalized_target).all()
-        ]
-        seen_sections: set[tuple[str, str]] = set()
-        sections = []
-        for s in all_course_rows:
-            inst = _normalize_instructor(s.get('Instructor')) or 'TBA'
-            dp = str(s.get('Day_and_Period') or 'TBA')
-            sem = _normalize_semester_label(s.get('semester'))
-            key = (dp.lower(), sem.lower())
-            if key in seen_sections:
-                continue
-            seen_sections.add(key)
-            sections.append({
-                'day_period': dp,
-                'instructor': inst,
-                'semester': sem,
-            })
 
         unlockables = dep_graph.get('dependent_unlockables', [])[:200]
         conditional_paths = dep_graph.get('conditional_paths', [])[:200]
@@ -2526,14 +2518,12 @@ def api_catalog_course_detail():
                 'course_title': target_row.get('Course_Title'),
                 'display_title': target_row.get('display_title'),
                 'credits': target_row.get('Credits'),
-                'instructor': target_row.get('Instructor'),
                 'area_of_study': target_row.get('Area_of_Study'),
                 'areas': areas,
                 'prerequisite': target_row.get('Prerequisite'),
                 'year_level': target_row.get('year_level'),
                 'semesters': target_row.get('semesters', ''),
             },
-            'sections': sections,
             'prerequisite_status': prereq_status,
             'dependency_graph': {
                 'direct_requirements': dep_graph.get('direct_requirements', []),
@@ -3491,6 +3481,7 @@ def api_recommendations_preview():
     )
 
     payload = [_add_display_fields(dict(r)) for r in recs]
+    title_to_code_map = _build_title_to_code_map(filtered_catalog)
     for row in payload:
         row['prerequisite_status'] = _build_prerequisite_status(
             row.get('Prerequisite'),
@@ -3498,6 +3489,7 @@ def api_recommendations_preview():
             major_name=area_names.get('major'),
             minor_name=area_names.get('minor'),
             prereq_title_lookup=prereq_title_lookup,
+            title_to_code=title_to_code_map,
         )
 
     log_ai_event_safe(
@@ -3680,12 +3672,15 @@ def add_course():
 
     user_areas = _resolve_user_area_names() if current_user.is_authenticated else {'major': '', 'minor': ''}
     prereq_title_lookup = _build_prereq_title_lookup()
+    add_catalog_rows, _ = _load_scraped_catalog_for_term(sched.year, sched.semester)
+    title_to_code_map = _build_title_to_code_map(add_catalog_rows) if add_catalog_rows else {}
     prereq_status = _build_prerequisite_status(
         prereq_str,
         completed_passing,
         major_name=user_areas.get('major'),
         minor_name=user_areas.get('minor'),
         prereq_title_lookup=prereq_title_lookup,
+        title_to_code=title_to_code_map,
     )
 
     # --- Conflict enforcement ---
@@ -3999,6 +3994,7 @@ def api_recommendations():
         print(f"Recommendation prereq parse error: {err}")
 
     recs = [_add_display_fields(dict(r)) for r in recs]
+    title_to_code_map = _build_title_to_code_map(catalog)
     for row in recs:
         row['prerequisite_status'] = _build_prerequisite_status(
             row.get('Prerequisite'),
@@ -4006,6 +4002,7 @@ def api_recommendations():
             major_name=area_names.get('major'),
             minor_name=area_names.get('minor'),
             prereq_title_lookup=prereq_title_lookup,
+            title_to_code=title_to_code_map,
         )
 
     log_ai_event_safe(

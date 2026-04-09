@@ -82,7 +82,7 @@
                 {% else %}
                 <span class="ax-cat-area">{{ c.Area_of_Study or 'General' }}</span>
                 {% endif %}
-                <span class="ax-cat-instructor">{{ c.Instructor or 'TBA' }}</span>
+                {% if c.year_level %}<span class="ax-cat-level">Level {{ c.year_level }}00</span>{% endif %}
             </div>
         </div>
         {% else %}
@@ -136,8 +136,8 @@
 .ax-cat-credits{font-size:.72rem;font-weight:600;color:var(--ax-text-dim);background:var(--ax-surface-2);padding:1px 7px;border-radius:99px;}
 .ax-cat-sem{font-size:.72rem;font-weight:500;color:var(--ax-muted);}
 .ax-cat-card-bottom{display:flex;justify-content:space-between;align-items:center;margin-top:6px;}
-.ax-cat-area{font-size:.74rem;color:var(--ax-muted);max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.ax-cat-instructor{font-size:.74rem;color:var(--ax-text-dim);}
+.ax-cat-area{font-size:.74rem;color:var(--ax-muted);max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ax-cat-level{font-size:.72rem;font-weight:600;color:var(--ax-c-cyan);}
 
 /* ── Drawer Empty / Loading ── */
 .ax-drawer-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:300px;padding:24px;}
@@ -185,10 +185,6 @@
 .ax-unlock-tag.tag-or{color:#F59E0B;background:color-mix(in srgb,#F59E0B 12%,transparent);}
 .ax-unlock-alts{font-size:.72rem;color:var(--ax-text-dim);margin-top:4px;line-height:1.5;}
 .ax-unlock-alts .badge{font-size:.68rem;font-weight:500;background:var(--ax-surface-3);color:var(--ax-text-dim);border:1px solid var(--ax-border);border-radius:99px;padding:1px 7px;}
-
-/* sections list */
-.ax-section-row{display:flex;justify-content:space-between;font-size:.78rem;padding:5px 0;border-bottom:1px solid var(--ax-border);}
-.ax-section-row:last-child{border-bottom:none;}
 
 /* areas pills */
 .ax-areas-wrap{display:flex;flex-wrap:wrap;gap:5px;}
@@ -312,7 +308,6 @@
         const c = data.course || {};
         const ps = data.prerequisite_status || {};
         const dg = data.dependency_graph || {};
-        const sections = data.sections || [];
 
         let html = '';
 
@@ -331,8 +326,8 @@
 
         /* ─ info grid ─ */
         html += `<dl class="ax-detail-info">
-            <dt>Instructor</dt><dd>${esc(c.instructor || 'TBA')}</dd>
             ${c.semesters ? `<dt>Semester</dt><dd>${esc(c.semesters)}</dd>` : ''}
+            ${c.credits != null ? `<dt>Credits</dt><dd>${esc(String(c.credits))}</dd>` : ''}
         </dl>`;
 
         /* ─ areas of study (multi-area) ─ */
@@ -343,21 +338,6 @@
                     Areas of Study (${areas.length})
                 </div>
                 <div class="ax-areas-wrap">${areas.map(a => `<span class="ax-area-pill">${esc(a)}</span>`).join('')}</div>
-            </div>`;
-        }
-
-        /* ─ sections ─ */
-        if (sections.length > 0) {
-            html += `<div class="ax-detail-section">
-                <div class="ax-detail-section-title">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>
-                    Sections (${sections.length})
-                </div>
-                ${sections.map(s => `<div class="ax-section-row">
-                    <span>${esc(s.day_period || 'TBA')}</span>
-                    <span style="color:var(--ax-text-dim);">${esc(s.instructor || 'TBA')}</span>
-                    ${s.semester ? `<span class="badge" style="font-size:.68rem;background:var(--ax-surface-2);color:var(--ax-muted);">${esc(s.semester)}</span>` : ''}
-                </div>`).join('')}
             </div>`;
         }
 
@@ -430,7 +410,7 @@
                 html += `</div>`;
             }
         } else {
-            html += `<div class="small" style="color:var(--ax-muted);">No courses in this dataset depend on this course as a prerequisite.</div>`;
+            html += `<div class="small" style="color:var(--ax-muted);">No courses depend on this course as a prerequisite.</div>`;
         }
         html += `</div>`;
 
