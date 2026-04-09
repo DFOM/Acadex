@@ -25,6 +25,13 @@ from services.conflicts import parse_day_period_blocks
 from services.ai.recommendations import recommend_courses
 from services.ai.generator import generate_schedule_courses
 from services.prereqs import dependency_graph_for_course
+from config.graduation_reqs import (
+    get_general_requirements,
+    get_major_requirements,
+    get_minor_requirements,
+    PATHWAY_TITLE_TO_AREA,
+    MINOR_REQUIREMENTS,
+)
 
 student_bp = Blueprint('student', __name__)
 
@@ -1443,6 +1450,393 @@ def _degree_progress_context(user_id: int) -> Dict[str, Any]:
     }
 
 
+def _graduation_requirements_context(user_id: int) -> Dict[str, Any]:
+    """Build a comprehensive graduation requirements checklist for the dashboard."""
+    metadata = _build_course_metadata_index()
+    user_areas = _resolve_user_area_names()
+    major_name = (user_areas.get('major') or '').strip()
+    minor_name = (user_areas.get('minor') or '').strip()
+
+    # Determine entry year from user's expected_graduation or default to 2025
+    user = User.query.get(user_id)
+    expected_grad = getattr(user, 'expected_graduation', None) if user else None
+    if expected_grad and expected_grad <= 2028:
+        entry_year = expected_grad - 4  # 4-year program
+    else:
+        entry_year = 2025
+
+    # ── Completed courses with grades ──
+    rows = db.session.execute(
+        text('''
+            SELECT sc.course_number, sc.grade
+            FROM schedule_courses sc
+            JOIN schedules s ON s.id = sc.schedule_id
+            WHERE s.user_id = :uid
+              AND s.schedule_type = 'past'
+              AND sc.grade IS NOT NULL
+              AND sc.grade != ''
+        '''),
+        {'uid': user_id},
+    ).fetchall()
+
+    completed = {}          # course_number -> grade (best)
+    completed_titles = {}   # title_lower -> (course_number, grade)
+    grade_rank = {'A+': 12, 'A': 11, 'A-': 10, 'B+': 9, 'B': 8, 'B-': 7,
+                  'C+': 6, 'C': 5, 'C-': 4, 'D+': 3, 'D': 2, 'D-': 1, 'F': 0}
+
+    for r in rows:
+        cnum = _normalize_course_number(r[0])
+        grade = (r[1] or '').strip().upper()
+        if not cnum or grade == 'F':
+            continue
+        existing = completed.get(cnum, '')
+        if grade_rank.get(grade, 0) > grade_rank.get(existing, 0):
+            completed[cnum] = grade
+        meta = metadata.get(cnum, {})
+        title = (meta.get('title') or '').strip().lower()
+        if title:
+            completed_titles[title] = (cnum, grade)
+
+    # ── Planned courses (future schedules) ──
+    future_rows = db.session.execute(
+        text('''
+            SELECT sc.course_number, sc.grade
+            FROM schedule_courses sc
+            JOIN schedules s ON s.id = sc.schedule_id
+            WHERE s.user_id = :uid
+              AND s.schedule_type = 'future'
+        '''),
+        {'uid': user_id},
+    ).fetchall()
+    planned = set()
+    planned_titles = set()
+    for r in future_rows:
+        cnum = _normalize_course_number(r[0])
+        if cnum:
+            planned.add(cnum)
+            meta = metadata.get(cnum, {})
+            title = (meta.get('title') or '').strip().lower()
+            if title:
+                planned_titles.add(title)
+
+    def _is_completed_title(title):
+        return title.strip().lower() in completed_titles
+
+    def _is_planned_title(title):
+        return title.strip().lower() in planned_titles
+
+    def _grade_for_title(title):
+        entry = completed_titles.get(title.strip().lower())
+        return entry[1] if entry else None
+
+    def _is_grade_b_or_higher(grade_str):
+        return grade_rank.get((grade_str or '').strip().upper(), 0) >= grade_rank.get('B', 8)
+
+    # ── Build general requirements checklist ──
+    general_reqs = get_general_requirements(entry_year)
+    checklist = []
+
+    for req in general_reqs:
+        key = req['key']
+        item = {
+            'key': key,
+            'label': req['label'],
+            'note': req['note'],
+            'status': 'not_started',   # not_started / in_progress / completed
+            'courses': [],              # [{title, status, grade?}]
+        }
+
+        if key == 'english':
+            # Check if any EAE B course is completed
+            eae_courses = [
+                (cnum, meta) for cnum, meta in metadata.items()
+                if (meta.get('area') or '').startswith('English for Academic Excellence')
+            ]
+            earned_eae = 0.0
+            for cnum, meta in eae_courses:
+                title = (meta.get('title') or '').strip()
+                credits = float(meta.get('credits') or 0.0)
+                if cnum in completed:
+                    earned_eae += credits
+                    item['courses'].append({'title': title, 'status': 'completed', 'grade': completed[cnum]})
+                elif cnum in planned:
+                    item['courses'].append({'title': title, 'status': 'planned', 'grade': None})
+            if earned_eae >= 15:
+                item['status'] = 'completed'
+            elif earned_eae > 0 or any(c['status'] == 'planned' for c in item['courses']):
+                item['status'] = 'in_progress'
+
+        elif key == 'japanese':
+            for title in req['courses']:
+                if _is_completed_title(title):
+                    item['courses'].append({'title': title, 'status': 'completed', 'grade': _grade_for_title(title)})
+                elif _is_planned_title(title):
+                    item['courses'].append({'title': title, 'status': 'planned', 'grade': None})
+                else:
+                    item['courses'].append({'title': title, 'status': 'missing', 'grade': None})
+            if any(c['status'] == 'completed' for c in item['courses']):
+                item['status'] = 'completed'
+            elif any(c['status'] == 'planned' for c in item['courses']):
+                item['status'] = 'in_progress'
+
+        elif key == 'foundation':
+            foundation_required = ['Foundation for College Success']
+            writing_path_a = ['Composition 1', 'Composition 2', 'Academic Reading Across Disciplines']
+            writing_path_b = ['Expository Research Writing']
+
+            for title in foundation_required:
+                if _is_completed_title(title):
+                    item['courses'].append({'title': title, 'status': 'completed', 'grade': _grade_for_title(title)})
+                elif _is_planned_title(title):
+                    item['courses'].append({'title': title, 'status': 'planned', 'grade': None})
+                else:
+                    item['courses'].append({'title': title, 'status': 'missing', 'grade': None})
+
+            # Check which writing path the student is on
+            path_a_done = sum(1 for t in writing_path_a if _is_completed_title(t))
+            path_a_planned = sum(1 for t in writing_path_a if _is_planned_title(t))
+            path_b_done = sum(1 for t in writing_path_b if _is_completed_title(t))
+            path_b_planned = sum(1 for t in writing_path_b if _is_planned_title(t))
+
+            if path_b_done > 0 or (path_b_planned > 0 and path_a_done == 0):
+                for title in writing_path_b:
+                    if _is_completed_title(title):
+                        item['courses'].append({'title': title, 'status': 'completed', 'grade': _grade_for_title(title)})
+                    elif _is_planned_title(title):
+                        item['courses'].append({'title': title, 'status': 'planned', 'grade': None})
+                    else:
+                        item['courses'].append({'title': title, 'status': 'missing', 'grade': None})
+            else:
+                for title in writing_path_a:
+                    if _is_completed_title(title):
+                        item['courses'].append({'title': title, 'status': 'completed', 'grade': _grade_for_title(title)})
+                    elif _is_planned_title(title):
+                        item['courses'].append({'title': title, 'status': 'planned', 'grade': None})
+                    else:
+                        item['courses'].append({'title': title, 'status': 'missing', 'grade': None})
+
+            all_done = all(c['status'] == 'completed' for c in item['courses'])
+            any_prog = any(c['status'] in ('completed', 'planned') for c in item['courses'])
+            item['status'] = 'completed' if all_done else ('in_progress' if any_prog else 'not_started')
+
+        elif key == 'pathway':
+            # Need 3 pathways from 3 different areas
+            completed_areas = set()
+            planned_areas = set()
+            for title_lower, area in PATHWAY_TITLE_TO_AREA.items():
+                title_display = title_lower.title()
+                # Find original-case title
+                for _cnum, _meta in metadata.items():
+                    if (_meta.get('title') or '').strip().lower() == title_lower:
+                        title_display = (_meta.get('title') or '').strip()
+                        break
+                if _is_completed_title(title_display):
+                    if area not in completed_areas:
+                        item['courses'].append({'title': title_display, 'status': 'completed', 'grade': _grade_for_title(title_display), 'area': area})
+                        completed_areas.add(area)
+                elif _is_planned_title(title_display):
+                    if area not in completed_areas and area not in planned_areas:
+                        item['courses'].append({'title': title_display, 'status': 'planned', 'grade': None, 'area': area})
+                        planned_areas.add(area)
+
+            total_ok = len(completed_areas)
+            total_prog = len(completed_areas) + len(planned_areas)
+            if total_ok >= 3:
+                item['status'] = 'completed'
+            elif total_prog > 0:
+                item['status'] = 'in_progress'
+
+        elif key == 'quantitative':
+            for title in req['courses']:
+                if _is_completed_title(title):
+                    item['courses'].append({'title': title, 'status': 'completed', 'grade': _grade_for_title(title)})
+                elif _is_planned_title(title):
+                    item['courses'].append({'title': title, 'status': 'planned', 'grade': None})
+                else:
+                    item['courses'].append({'title': title, 'status': 'missing', 'grade': None})
+            if any(c['status'] == 'completed' for c in item['courses']):
+                item['status'] = 'completed'
+            elif any(c['status'] == 'planned' for c in item['courses']):
+                item['status'] = 'in_progress'
+
+        elif key == 'major':
+            # Handled below in major-specific section
+            pass
+
+        elif key == 'total_credits':
+            # Sum total earned + in-progress credits
+            total_earned = sum(
+                float(metadata.get(c, {}).get('credits') or 0)
+                for c in completed
+            )
+            total_planned = sum(
+                float(metadata.get(c, {}).get('credits') or 0)
+                for c in planned
+            )
+            item['note'] = f'{round(total_earned, 1)} earned + {round(total_planned, 1)} planned of {req["credits"]} required.'
+            if total_earned >= req['credits']:
+                item['status'] = 'completed'
+            elif total_earned + total_planned > 0:
+                item['status'] = 'in_progress'
+            item['earned'] = round(total_earned, 1)
+            item['planned'] = round(total_planned, 1)
+            item['required'] = req['credits']
+
+        checklist.append(item)
+
+    # ── Major-specific requirements ──
+    major_checklist = None
+    if major_name:
+        major_reqs = get_major_requirements(major_name, entry_year)
+        if major_reqs:
+            # Count earned credits in major area
+            major_area_courses = [
+                (cnum, meta) for cnum, meta in metadata.items()
+                if _area_matches_major(meta.get('area', ''), major_name)
+            ]
+            earned_major = 0.0
+            planned_major = 0.0
+            for cnum, meta in major_area_courses:
+                credits = float(meta.get('credits') or 0.0)
+                if cnum in completed:
+                    earned_major += credits
+                elif cnum in planned:
+                    planned_major += credits
+
+            designated_items = []
+            for title in major_reqs.get('designated', []):
+                if _is_completed_title(title):
+                    designated_items.append({'title': title, 'status': 'completed', 'grade': _grade_for_title(title)})
+                elif _is_planned_title(title):
+                    designated_items.append({'title': title, 'status': 'planned', 'grade': None})
+                else:
+                    designated_items.append({'title': title, 'status': 'missing', 'grade': None})
+
+            ds_completed = sum(1 for d in designated_items if d['status'] == 'completed')
+            ds_total = len(designated_items)
+
+            major_checklist = {
+                'name': major_name,
+                'total_credits': major_reqs['total_credits'],
+                'earned_credits': round(earned_major, 1),
+                'planned_credits': round(planned_major, 1),
+                'designated': designated_items,
+                'designated_completed': ds_completed,
+                'designated_total': ds_total,
+                'other_credits': major_reqs.get('other_credits', major_reqs['total_credits'] - major_reqs.get('designated_credits', 0)),
+                'other_note': major_reqs.get('other_note', ''),
+                'other_pick_from': major_reqs.get('other_pick_from', []),
+                'status': 'completed' if earned_major >= major_reqs['total_credits'] and ds_completed >= ds_total
+                          else ('in_progress' if earned_major + planned_major > 0 else 'not_started'),
+            }
+
+            # Update the major entry in general checklist
+            for item in checklist:
+                if item['key'] == 'major':
+                    item['note'] = f'{major_name}: {round(earned_major, 1)} earned + {round(planned_major, 1)} planned of {major_reqs["total_credits"]} required.'
+                    item['status'] = major_checklist['status']
+
+    # ── Minor-specific requirements ──
+    minor_checklist = None
+    if minor_name:
+        minor_reqs = get_minor_requirements(minor_name)
+        if minor_reqs:
+            eligible = set(c.upper().replace(' ', '') for c in minor_reqs.get('eligible_course_numbers', []))
+            level_dist = minor_reqs.get('level_distribution', {})
+            grade_b_min = minor_reqs.get('grade_b_minimum', 0)
+            total_needed = minor_reqs.get('total_courses', 6)
+
+            minor_courses = []
+            by_level = {}  # level -> [{cnum, title, status, grade}]
+            grade_b_count = 0
+
+            for cnum_raw in minor_reqs.get('eligible_course_numbers', []):
+                cnum = _normalize_course_number(cnum_raw)
+                meta = metadata.get(cnum, {})
+                title = (meta.get('title') or cnum_raw).strip()
+                # Determine level from course number
+                level_match = re.search(r'(\d)', cnum_raw)
+                level = int(level_match.group(1)) * 100 if level_match else 0
+
+                if cnum in completed:
+                    grade = completed[cnum]
+                    status = 'completed'
+                    if _is_grade_b_or_higher(grade):
+                        grade_b_count += 1
+                elif cnum in planned:
+                    status = 'planned'
+                    grade = None
+                else:
+                    status = 'missing'
+                    grade = None
+
+                entry = {'course_number': cnum_raw, 'title': title, 'status': status, 'grade': grade, 'level': level}
+                minor_courses.append(entry)
+                by_level.setdefault(level, []).append(entry)
+
+            completed_count = sum(1 for c in minor_courses if c['status'] == 'completed')
+            planned_count = sum(1 for c in minor_courses if c['status'] == 'planned')
+
+            # Check level distribution
+            level_status = {}
+            for level, needed in level_dist.items():
+                done = sum(1 for c in by_level.get(level, []) if c['status'] == 'completed')
+                prog = sum(1 for c in by_level.get(level, []) if c['status'] == 'planned')
+                level_status[level] = {
+                    'needed': needed,
+                    'completed': done,
+                    'planned': prog,
+                    'met': done >= needed,
+                }
+
+            minor_checklist = {
+                'name': minor_name,
+                'total_courses': total_needed,
+                'completed_courses': completed_count,
+                'planned_courses': planned_count,
+                'courses': minor_courses,
+                'level_status': level_status,
+                'grade_b_minimum': grade_b_min,
+                'grade_b_count': grade_b_count,
+                'status': 'completed' if (completed_count >= total_needed
+                                          and grade_b_count >= grade_b_min
+                                          and all(ls['met'] for ls in level_status.values()))
+                          else ('in_progress' if completed_count + planned_count > 0 else 'not_started'),
+            }
+
+    return {
+        'checklist': checklist,
+        'major_checklist': major_checklist,
+        'minor_checklist': minor_checklist,
+        'major_name': major_name,
+        'minor_name': minor_name,
+        'entry_year': entry_year,
+    }
+
+
+def _area_matches_major(area_name, major_name):
+    """Check if a course's area matches the student's major (fuzzy)."""
+    if not area_name or not major_name:
+        return False
+    a = area_name.strip().lower()
+    m = major_name.strip().lower()
+    # Direct match
+    if a == m:
+        return True
+    # Area starts with major name (e.g., 'Psychology' matches 'Psychology - ...')
+    if a.startswith(m) or m.startswith(a):
+        return True
+    # Data Science majors: courses in Data Science area
+    if 'data science' in m and 'data science' in a:
+        return True
+    # Handle sub-areas (e.g., 'Interdisciplinary Arts - Language Arts' for 'Interdisciplinary Arts')
+    if ' - ' in a:
+        parent = a.split(' - ')[0].strip()
+        if parent == m:
+            return True
+    return False
+
+
 def _load_catalog_for_term(year: int, semester: str) -> tuple[list[Dict[str, Any]], str | None]:
     rows, dataset_id = _load_scraped_catalog_for_term(year, semester)
     if not rows:
@@ -2140,6 +2534,14 @@ def user_dashboard():
         credits_r = float(meta_r.get('credits') or 0.0)
         in_progress_by_area[area_r] = in_progress_by_area.get(area_r, 0.0) + credits_r
 
+    # Total available credits per area (all courses in catalog)
+    total_available_by_area: Dict[str, float] = {}
+    for _cnum, _meta in metadata_index.items():
+        _area = str(_meta.get('area') or '').strip()
+        if _area:
+            _cr = float(_meta.get('credits') or 0.0)
+            total_available_by_area[_area] = total_available_by_area.get(_area, 0.0) + _cr
+
     # Only show required/remaining for user's declared major/minor areas
     user_area_names = _resolve_user_area_names()
     major_area_name = (user_area_names.get('major') or '').strip()
@@ -2155,6 +2557,7 @@ def user_dashboard():
     for area_name in sorted(all_area_names):
         earned_a = area_credits.get(area_name, 0.0)
         in_prog_a = in_progress_by_area.get(area_name, 0.0)
+        total_avail = total_available_by_area.get(area_name, 0.0)
         req_a = 0.0
         if area_name in requirement_areas:
             for a_key, a_val in progress.get('missing_by_area', {}).items():
@@ -2174,11 +2577,15 @@ def user_dashboard():
             'name': area_name,
             'earned': round(earned_a, 1),
             'in_progress': round(in_prog_a, 1),
+            'total_available': round(total_avail, 1),
             'required': round(req_a, 1) if area_name in requirement_areas else 0.0,
             'remaining': round(max(0.0, req_a - earned_a - in_prog_a), 1) if area_name in requirement_areas and req_a > 0 else 0.0,
             'is_major': area_name == major_area_name,
             'is_minor': area_name == minor_area_name,
         })
+
+    # ── Graduation requirements checklist ──
+    grad_reqs = _graduation_requirements_context(current_user.id)
 
     return render_template('Student/dashboard.html', 
                            schedules=schedules, 
@@ -2200,7 +2607,8 @@ def user_dashboard():
                            dataset_years=dataset_years,
                            dashboard_mini_schedules=dashboard_mini_schedules,
                            notifications=notifications,
-                           unread_notifications_count=unread_notifications_count)
+                           unread_notifications_count=unread_notifications_count,
+                           grad_reqs=grad_reqs)
 
 
 @student_bp.route('/profile', methods=['GET', 'POST'])

@@ -183,6 +183,8 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Course detail API now returns a cleaner student payload (title/area/credits/faculty/prerequisites/unlocks) and unlock analysis uses latest active dataset when available.
 - Schedule editor is grid-only and includes inline grade selection chips (A/B/C/D/F) with tooltip guidance, plus PNG export.
 - Dashboard with GPA/progress, notifications, and mini schedule overview cards.
+- Graduation requirements dashboard: dynamic checklist tracking general requirements (English, Japanese, Foundation, Pathway, QR, Major, Total Credits), major-specific designated courses (Psychology, Data Science variants), and minor-specific requirements with level distribution and grade thresholds.
+- Area progress bars show earned, planned, total available, and required (for major/minor) credits.
 - AI recommendation preview and generation flows (feature-gated)
 
 ## Admin-facing
@@ -514,6 +516,36 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Added editor-side PNG export for the schedule grid.
 - Hardened admin dataset delete API transaction flow and added explicit success/failure logging with registry-row cleanup fallback.
 - Simplified student course detail and courses view presentation by removing non-essential day/period emphasis in detail/unlock surfaces.
+
+## 2026-07-21 — Beta 1.4 (dashboard fixes)
+
+- Area progress bars now only show required/remaining credits for user's declared major/minor areas (not all areas).
+- Fixed mini schedule deduplication: courses no longer doubled from multi-period time slots.
+- Converted mini schedule from HTML tables to compact card grid layout with flex-wrap.
+
+## 2026-07-21 — Beta 1.5 (graduation requirements dashboard)
+
+- New `config/graduation_reqs.py`: encodes iCLA graduation requirements from official 2024AY and 2025AY documents.
+  - General requirements: English Language, Japanese Language, Foundation, Pathway, QR & Natural Sciences, Major, Total Credits (124).
+  - Major-specific designated courses for Psychology (7 courses), Data Science variants (PolEcon, Psychology, Finance).
+  - Minor-specific requirements with level distribution and grade B thresholds (Psychology minor).
+  - Pathway courses mapped by subject area for area-diversity tracking.
+- New `_graduation_requirements_context()` helper in `student_routes.py`:
+  - Builds comprehensive checklist evaluating each graduation category against user's completed/planned courses.
+  - Auto-detects entry year from expected graduation to select appropriate requirement set.
+  - Foundation: auto-detects writing path (Composition track vs Expository Research Writing track).
+  - Pathway: tracks unique areas covered (need 3 courses from 3 different subject areas).
+  - Major: credit progress with designated course tracking for Psychology and Data Science majors.
+  - Minor: level distribution tracking, grade B threshold tracking.
+- New Graduation Requirements dashboard section in `dashboard.html`:
+  - General requirements checklist with status icons (completed/in-progress/not started).
+  - Course chips colored by completion status.
+  - Major section with credit progress bar, designated course chips, and other-credits note.
+  - Minor section with per-level progress, grade B counter, and eligible course chips.
+  - Prompts user to set major/minor in profile when not declared.
+- Area progress bars now display total available credits per area (from catalog) as additional metric.
+- Added `check-circle` and `minus-circle` SVG icons to the heroicons partial.
+- New `_area_matches_major()` fuzzy matcher for area name → major name matching (handles sub-areas like "Interdisciplinary Arts - Language Arts").
 
 ---
 
