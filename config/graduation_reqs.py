@@ -88,6 +88,8 @@ MAJOR_DESIGNATED = {
             'Econometrics',
         ],
         'designated_credits': 27,
+        'other_credits_2024_opt1': 3,   # 1 from list only
+        'other_credits_2024_opt2': 6,   # other including 1 from list
         'other_credits_2025': 9,
         'other_pick_from': [
             'Political Economy of Development',
@@ -107,6 +109,8 @@ MAJOR_DESIGNATED = {
             'Machine Learning',
         ],
         'designated_credits': 24,
+        'other_credits_2024_opt1': 6,   # 2 from list only
+        'other_credits_2024_opt2': 9,   # other including 2 from list
         'other_credits_2025': 12,
         'other_pick_from': [
             'Cyberpsychology',
@@ -129,6 +133,8 @@ MAJOR_DESIGNATED = {
             'Econometrics',
         ],
         'designated_credits': 27,
+        'other_credits_2024_opt1': 3,   # 1 from list only
+        'other_credits_2024_opt2': 6,   # other including 1 from list
         'other_credits_2025': 9,
         'other_pick_from': [
             'Investment',
@@ -250,7 +256,7 @@ def get_general_requirements(entry_year=2025):
     if entry_year >= 2025:
         major_credits = 36
     else:
-        major_credits = 30  # default for Option 1; Option 2 is 33 lectures only
+        major_credits = 33  # both options total 33 for ≤2024
     reqs.append({
         'key': 'major',
         'label': 'Major Area',
@@ -275,19 +281,24 @@ def get_general_requirements(entry_year=2025):
     return reqs
 
 
-def get_major_requirements(major_name, entry_year=2025):
-    """Return major-specific requirement details or None."""
+def get_major_requirements(major_name, entry_year=2025, major_option=1):
+    """Return major-specific requirement details or None.
+
+    For ≤2024AY, every major offers two options:
+      Option 1: 30 lecture credits + Seminar (1cr) + Graduation Research Project (2cr) = 33
+      Option 2: 33 lecture credits only = 33
+    For 2025AY+, all majors are 36 lecture credits with no options.
+    """
     if not major_name:
         return None
 
-    # Check Data Science sub-majors
+    # Check Data Science sub-majors and other designated-course majors
     major_lower = major_name.strip().lower()
     ds_match = None
     for ds_key in MAJOR_DESIGNATED:
         if ds_key.lower() == major_lower:
             ds_match = ds_key
             break
-    # Also check if the major is one of the areas with designated courses
     if not ds_match:
         for ds_key in MAJOR_DESIGNATED:
             if ds_key.lower() in major_lower or major_lower in ds_key.lower():
@@ -296,14 +307,28 @@ def get_major_requirements(major_name, entry_year=2025):
 
     if entry_year >= 2025:
         total = 36
+        lecture_credits = 36
+        has_options = False
+        seminar_required = False
     else:
-        total = 30  # Option 1 default
+        total = 33  # both options total 33
+        has_options = True
+        if major_option == 2:
+            lecture_credits = 33
+            seminar_required = False
+        else:  # option 1
+            lecture_credits = 30
+            seminar_required = True
 
     result = {
         'total_credits': total,
+        'lecture_credits': lecture_credits,
+        'has_options': has_options,
+        'major_option': major_option if has_options else None,
+        'seminar_required': seminar_required,
         'designated': [],
         'designated_credits': 0,
-        'other_credits': total,
+        'other_credits': lecture_credits,
         'other_note': '',
         'other_pick_from': [],
     }
@@ -313,9 +338,11 @@ def get_major_requirements(major_name, entry_year=2025):
         result['designated'] = info['designated']
         result['designated_credits'] = info['designated_credits']
         if entry_year >= 2025:
-            result['other_credits'] = info.get('other_credits_2025', total - info['designated_credits'])
+            result['other_credits'] = info.get('other_credits_2025', lecture_credits - info['designated_credits'])
+        elif major_option == 2:
+            result['other_credits'] = info.get('other_credits_2024_opt2', lecture_credits - info['designated_credits'])
         else:
-            result['other_credits'] = info.get('other_credits_2024_opt1', total - info['designated_credits'])
+            result['other_credits'] = info.get('other_credits_2024_opt1', lecture_credits - info['designated_credits'])
         result['other_note'] = info.get('other_note', '')
         result['other_pick_from'] = info.get('other_pick_from', [])
 

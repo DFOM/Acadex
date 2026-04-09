@@ -555,9 +555,19 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - **Feature: Entry year toggle** – Dashboard now includes ≤2024AY / 2025AY+ toggle buttons in the Graduation Requirements header. User can override auto-detected entry year via `?req_year=` query parameter. `_graduation_requirements_context()` accepts `entry_year_override` parameter.
 - **Template update** – Minor section now renders grade B requirements per level-group instead of a flat counter.
 
----
+### 2025-06-10b – Major Option 1 / Option 2 toggle (Seminar+GRP vs courses only)
 
-# 7. Developer Notes (AI Self-Guide)
+- **For ≤2024AY entry**: every major offers two options (both total 33 credits):
+  - **Option 1**: 30 lecture credits + Seminar (1cr) + Graduation Research Project (2cr)
+  - **Option 2**: 33 lecture credits only
+- Updated `MAJOR_DESIGNATED` with `other_credits_2024_opt1` and `other_credits_2024_opt2` for all Data Science variants.
+- `get_major_requirements()` now accepts `major_option` parameter; returns `has_options`, `major_option`, `lecture_credits`, `seminar_required`.
+- `_graduation_requirements_context()` passes `major_option` through; tracks Seminar and Graduation Research Project completion status.
+- Dashboard major section shows Option 1 / Option 2 toggle (only for ≤2024AY), option description, and Seminar+GRP status checklist items.
+- `?major_option=1|2` query parameter added to dashboard route alongside existing `?req_year=`.
+- For 2025AY+: 36 credits, no options, no toggle shown.
+
+---
 
 ## Coding conventions and style
 

@@ -1450,7 +1450,8 @@ def _degree_progress_context(user_id: int) -> Dict[str, Any]:
     }
 
 
-def _graduation_requirements_context(user_id: int, entry_year_override: int | None = None) -> Dict[str, Any]:
+def _graduation_requirements_context(user_id: int, entry_year_override: int | None = None,
+                                     major_option: int = 1) -> Dict[str, Any]:
     """Build a comprehensive graduation requirements checklist for the dashboard."""
     metadata = _build_course_metadata_index()
     user_areas = _resolve_user_area_names()
@@ -1700,7 +1701,7 @@ def _graduation_requirements_context(user_id: int, entry_year_override: int | No
     # ── Major-specific requirements ──
     major_checklist = None
     if major_name:
-        major_reqs = get_major_requirements(major_name, entry_year)
+        major_reqs = get_major_requirements(major_name, entry_year, major_option=major_option)
         if major_reqs:
             major_area_courses = [
                 (cnum, meta) for cnum, meta in metadata.items()
@@ -1728,17 +1729,32 @@ def _graduation_requirements_context(user_id: int, entry_year_override: int | No
             ds_completed = sum(1 for d in designated_items if d['status'] == 'completed')
             ds_total = len(designated_items)
 
+            # Seminar + GRP status (Option 1, ≤2024 only)
+            seminar_status = None
+            grp_status = None
+            if major_reqs.get('seminar_required'):
+                sem_match = _match_completed_title('Seminar')
+                grp_match = _match_completed_title('Graduation Research Project')
+                seminar_status = 'completed' if sem_match else ('planned' if _match_planned_title('Seminar') else 'missing')
+                grp_status = 'completed' if grp_match else ('planned' if _match_planned_title('Graduation Research Project') else 'missing')
+
             major_checklist = {
                 'name': major_name,
                 'total_credits': major_reqs['total_credits'],
+                'lecture_credits': major_reqs['lecture_credits'],
                 'earned_credits': round(earned_major, 1),
                 'planned_credits': round(planned_major, 1),
                 'designated': designated_items,
                 'designated_completed': ds_completed,
                 'designated_total': ds_total,
-                'other_credits': major_reqs.get('other_credits', major_reqs['total_credits'] - major_reqs.get('designated_credits', 0)),
+                'other_credits': major_reqs.get('other_credits', major_reqs['lecture_credits'] - major_reqs.get('designated_credits', 0)),
                 'other_note': major_reqs.get('other_note', ''),
                 'other_pick_from': major_reqs.get('other_pick_from', []),
+                'has_options': major_reqs.get('has_options', False),
+                'major_option': major_reqs.get('major_option'),
+                'seminar_required': major_reqs.get('seminar_required', False),
+                'seminar_status': seminar_status,
+                'grp_status': grp_status,
                 'status': 'completed' if earned_major >= major_reqs['total_credits'] and ds_completed >= ds_total
                           else ('in_progress' if earned_major + planned_major > 0 else 'not_started'),
             }
@@ -1836,6 +1852,7 @@ def _graduation_requirements_context(user_id: int, entry_year_override: int | No
         'major_name': major_name,
         'minor_name': minor_name,
         'entry_year': entry_year,
+        'major_option': major_option,
     }
 
 
@@ -2611,7 +2628,12 @@ def user_dashboard():
 
     # ── Graduation requirements checklist ──
     req_year_param = request.args.get('req_year', type=int)
-    grad_reqs = _graduation_requirements_context(current_user.id, entry_year_override=req_year_param)
+    major_option_param = request.args.get('major_option', default=1, type=int)
+    if major_option_param not in (1, 2):
+        major_option_param = 1
+    grad_reqs = _graduation_requirements_context(current_user.id,
+                                                 entry_year_override=req_year_param,
+                                                 major_option=major_option_param)
 
     return render_template('Student/dashboard.html', 
                            schedules=schedules, 
