@@ -420,9 +420,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!cells.length) return;
         cells.forEach(c => (c.innerHTML = ''));
 
+        const unscheduledPanel = document.getElementById('unscheduledCoursesPanel');
+        const unscheduledList = document.getElementById('unscheduledCoursesList');
+        const unscheduledCount = document.getElementById('unscheduledCount');
+        const unscheduledCourses = [];
+
         courses.forEach((course, index) => {
             const blocks = parseDayPeriodBlocks(course.Day_and_Period);
-            if (!blocks.length) return;
+            if (!blocks.length) {
+                unscheduledCourses.push(course);
+                return;
+            }
 
             const title = getDisplayTitle(course) || '(Untitled)';
             const instructor = cleanInstructorDisplay(course.Instructor);
@@ -470,6 +478,41 @@ document.addEventListener('DOMContentLoaded', () => {
                 cell.appendChild(wrapper);
             });
         });
+
+        // Render unscheduled/TBA courses panel
+        if (unscheduledPanel && unscheduledList) {
+            if (unscheduledCourses.length > 0) {
+                unscheduledPanel.style.display = '';
+                if (unscheduledCount) unscheduledCount.textContent = unscheduledCourses.length;
+                const isAuthed = Boolean(window.IS_AUTHENTICATED);
+                unscheduledList.innerHTML = unscheduledCourses.map((course) => {
+                    const title = getDisplayTitle(course) || '(Untitled)';
+                    const displayCode = getDisplayCourseNumber(course);
+                    const credits = course.Credits ?? '';
+                    const gradeValue = String(course.grade || '').toUpperCase();
+                    const gradeChips = ['A', 'B', 'C', 'D', 'F']
+                        .map((g) => {
+                            const isActive = gradeValue === g;
+                            return `<button type="button" class="grade-chip ${isActive ? 'grade-active' : ''}" data-entry-id="${course.entry_id}" data-grade="${g}" ${isAuthed ? '' : 'disabled'}>${g}</button>`;
+                        }).join('');
+                    return `<div class="ax-card p-2 d-flex align-items-center gap-2" style="min-width:220px;max-width:340px;background:var(--ax-surface);border:1px solid var(--ax-border);">
+                        <div class="flex-grow-1" style="min-width:0;">
+                            <div class="fw-bold text-truncate" style="font-size:.82rem;color:var(--ax-text);">${escapeHtml(title)}</div>
+                            <div class="d-flex align-items-center gap-1 mt-1">
+                                <span class="badge bg-light text-dark border" style="font-size:.65rem;">${escapeHtml(displayCode)}</span>
+                                <span class="badge bg-primary-subtle text-primary border border-primary-subtle" style="font-size:.65rem;">${credits} CR</span>
+                                <span class="badge bg-warning-subtle text-warning border border-warning-subtle" style="font-size:.65rem;">TBA</span>
+                            </div>
+                            <div class="d-flex flex-wrap gap-1 mt-1">${gradeChips}</div>
+                        </div>
+                        <button class="btn btn-sm btn-link text-danger p-0 remove-course-btn" data-entry-id="${course.entry_id}" style="font-size:.8rem;text-decoration:none;">✖</button>
+                    </div>`;
+                }).join('');
+            } else {
+                unscheduledPanel.style.display = 'none';
+                unscheduledList.innerHTML = '';
+            }
+        }
 
         initPopovers();
         initTooltips();

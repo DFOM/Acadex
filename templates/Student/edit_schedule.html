@@ -150,6 +150,15 @@
             </div>
             
             <div class="card-body p-0">
+                {# ── Unscheduled / TBA courses ribbon ── #}
+                <div id="unscheduledCoursesPanel" class="border-bottom px-3 py-2" style="display:none; background: color-mix(in srgb, var(--ax-surface) 94%, var(--ax-bg));">
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <span class="fw-bold small text-muted text-uppercase" style="letter-spacing:.04em;">Unscheduled / TBA Courses</span>
+                        <span id="unscheduledCount" class="badge rounded-pill bg-warning text-dark" style="font-size:.68rem;">0</span>
+                    </div>
+                    <div id="unscheduledCoursesList" class="d-flex flex-wrap gap-2"></div>
+                </div>
+
                 <div class="p-2 h-100" id="grid-view" role="tabpanel">
                         <div class="ax-grid-wrap h-100">
                             <table class="table table-bordered mb-0 text-center ax-grid-table" style="table-layout: fixed; min-width: 500px;">

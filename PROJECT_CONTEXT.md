@@ -276,6 +276,10 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Dataset deletion fix: `_delete_registry_dataset_row` and `api_force_delete_dataset` now clear `course_faculty` FK join rows before deleting courses. Added missing imports for `ScheduleCourse`, `AIEvent`, `BehaviorEvent`, `course_faculty`. Removed premature `db.session.commit()` inside `_safe_drop_table_if_exists`.
   - Dataset management UI reworked: cleaner layout, "Delete All Datasets" button, orphan/invalid cleanup consolidated into Danger Zone section.
   - Nuclear system reset endpoint: `POST /admin/api/system-reset` wipes all datasets, courses, schedules, events, notifications, users and creates fresh admin account. Requires `{"confirm":"RESET"}` payload. Double-confirmation in UI (confirm dialog + type "RESET"). Clears `faculty_advisor_area` FK before Faculty delete. Script moved to `extra_scripts` block so it loads after Bootstrap JS.
+  - TBA/unscheduled courses: courses without a specific period now render in an "Unscheduled / TBA Courses" ribbon above the grid with grade chips + remove button. Previously invisible.
+  - Auto-complete schedules: `update_app_settings_route` now flips `future` schedules to `past` when their (year,semester) is before the newly set current year/semester.
+  - Per-schedule GPA & cumulative GPA: dashboard shows semester GPA, cumulative GPA, credits, and course count for each schedule independently (all schedules, not just top 3).
+  - Interactive credit progress bars: overall credit progress bar in stat card + per-area progress bars showing earned (green), planned/in-progress (purple), and remaining (grey) segments.
   - Local validation passed (`56 passed`), awaiting Render/live confirmation.
 
 ---

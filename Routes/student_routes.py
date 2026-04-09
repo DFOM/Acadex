@@ -2076,12 +2076,50 @@ def user_dashboard():
         except Exception:
             db.session.rollback()
 
+    # ── Per-schedule GPA + credits breakdown ──
+    schedule_grade_data: dict[int, list[dict]] = {int(s.id): [] for s in schedules}
+    if schedule_ids:
+        try:
+            grade_rows = db.session.execute(
+                text(
+                    '''
+                    SELECT sc.schedule_id, sc.course_number, sc.grade
+                    FROM schedule_courses sc
+                    WHERE sc.schedule_id IN :sids
+                    '''
+                ),
+                {'sids': tuple(schedule_ids)},
+            ).fetchall()
+            for row in grade_rows:
+                sid = int(row.schedule_id)
+                code = _normalize_course_number(row.course_number)
+                meta = metadata_index.get(code, {})
+                credits_val = float(meta.get('credits') or 0.0)
+                schedule_grade_data.setdefault(sid, []).append({
+                    'grade': str(row.grade or '').strip(),
+                    'Credits': credits_val,
+                })
+        except Exception:
+            db.session.rollback()
+
     dashboard_mini_schedules: list[dict[str, Any]] = []
-    for sched in schedules[:3]:
+    cumulative_courses: list[dict] = []
+    for sched in schedules:
         slot_rows = sorted(
             schedule_courses_by_schedule.get(int(sched.id), []),
             key=lambda item: (item.get('day') or '', str(item.get('period') or '')),
         )
+        sched_courses = schedule_grade_data.get(int(sched.id), [])
+        sched_gpa = calculate_gpa(sched_courses) if sched_courses else 0.0
+        sched_credits = sum(
+            c['Credits'] for c in sched_courses
+            if c.get('grade') and c['grade'].upper() != 'F'
+        )
+        # Cumulative GPA up to this schedule (chronological, past first)
+        if sched.schedule_type == 'past':
+            cumulative_courses.extend(sched_courses)
+        cumulative_gpa = calculate_gpa(cumulative_courses) if cumulative_courses else 0.0
+
         dashboard_mini_schedules.append(
             {
                 'id': sched.id,
@@ -2090,8 +2128,44 @@ def user_dashboard():
                 'year': sched.year,
                 'schedule_type': sched.schedule_type,
                 'slots': slot_rows[:25],
+                'gpa': round(sched_gpa, 2),
+                'credits': round(sched_credits, 1),
+                'cumulative_gpa': round(cumulative_gpa, 2),
+                'course_count': len(sched_courses),
             }
         )
+
+    # ── Build area progress data for interactive bars ──
+    in_progress_by_area: Dict[str, float] = {}
+    for row in joined_rows:
+        schedule_type_r = str(row.schedule_type or '').strip().lower()
+        if schedule_type_r != 'future':
+            continue
+        cnum_r = _normalize_course_number(row.course_number)
+        meta_r = metadata_index.get(cnum_r, {})
+        area_r = str(meta_r.get('area') or '').strip() or 'Unspecified'
+        credits_r = float(meta_r.get('credits') or 0.0)
+        in_progress_by_area[area_r] = in_progress_by_area.get(area_r, 0.0) + credits_r
+
+    area_progress = []
+    all_area_names = set(area_credits.keys()) | set(in_progress_by_area.keys()) | set(progress.get('missing_by_area', {}).keys())
+    for area_name in sorted(all_area_names):
+        earned_a = area_credits.get(area_name, 0.0)
+        in_prog_a = in_progress_by_area.get(area_name, 0.0)
+        req_a = 0.0
+        for a_key, a_val in progress.get('missing_by_area', {}).items():
+            if a_key == area_name:
+                req_a = earned_a + a_val
+                break
+        if req_a <= 0:
+            req_a = earned_a + in_prog_a
+        area_progress.append({
+            'name': area_name,
+            'earned': round(earned_a, 1),
+            'in_progress': round(in_prog_a, 1),
+            'required': round(req_a, 1),
+            'remaining': round(max(0.0, req_a - earned_a - in_prog_a), 1),
+        })
 
     return render_template('Student/dashboard.html', 
                            schedules=schedules, 
@@ -2102,6 +2176,7 @@ def user_dashboard():
                            graduation_required_credits=graduation_required_credits,
                            remaining_to_graduate=remaining_to_graduate,
                            area_credits=area_credits,
+                           area_progress=area_progress,
                            overall_gpa=overall_gpa,
                            predictive_gpa=predictive_gpa,
                            favorite_faculty=favorite_faculty,

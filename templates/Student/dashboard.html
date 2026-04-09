@@ -46,6 +46,18 @@
                     {% if current_user.expected_graduation %}
                     <div class="ax-stat-sub" style="color:var(--ax-c-emerald);">Class of {{ current_user.expected_graduation }}</div>
                     {% endif %}
+                    {# ── Overall credit progress bar ── #}
+                    {% set pct_earned = ((total_credits / graduation_required_credits) * 100) if graduation_required_credits > 0 else 0 %}
+                    {% set pct_inprog = ((in_progress_credits / graduation_required_credits) * 100) if graduation_required_credits > 0 else 0 %}
+                    <div class="progress mt-2" style="height:10px;border-radius:6px;overflow:hidden;background:var(--ax-border);" title="Earned: {{ total_credits }} · In Progress: {{ in_progress_credits }} · Remaining: {{ remaining_to_graduate }}">
+                        <div class="progress-bar bg-success" style="width:{{ [pct_earned, 100]|min }}%"></div>
+                        <div class="progress-bar" style="width:{{ [pct_inprog, 100 - [pct_earned, 100]|min]|min }}%;background:#818CF8;opacity:.6;"></div>
+                    </div>
+                    <div class="d-flex gap-2 mt-1" style="font-size:.68rem;color:var(--ax-muted);">
+                        <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22C55E;"></span> Earned</span>
+                        <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#818CF8;opacity:.6;"></span> In Progress</span>
+                        <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ax-border);"></span> Remaining</span>
+                    </div>
                 </div>
             </div>
             <div class="col-md-6">
@@ -70,18 +82,38 @@
             </div>
         </div>
 
-        {# Credits by area #}
+        {# ── Credits by Area – Interactive Progress Bars ── #}
         <div class="mb-1 d-flex align-items-center justify-content-between" style="border-bottom:1px solid var(--ax-border);padding-bottom:.6rem;">
             <h4 class="fw-bold mb-0" style="font-size:1rem;">Credits by Area of Study</h4>
         </div>
-        <div class="ax-card mt-3">
-            {% if area_credits %}
-                {% for area, credits in area_credits.items() %}
-                <div class="ax-area-row">
-                    <span class="fw-semibold" style="font-size:.88rem;">{{ area }}</span>
-                    <span class="ax-badge" style="background:var(--ax-grad-subtle);color:#818CF8;border:1px solid rgba(99,102,241,.2);">{{ credits }} cr</span>
+        <div class="ax-card mt-3 p-3">
+            {% if area_progress %}
+                {% for ap in area_progress %}
+                {% set bar_max = [ap.required, ap.earned + ap.in_progress, 1]|max %}
+                {% set pct_e = ((ap.earned / bar_max) * 100) %}
+                {% set pct_i = ((ap.in_progress / bar_max) * 100) %}
+                <div class="mb-3">
+                    <div class="d-flex justify-content-between align-items-baseline mb-1">
+                        <span class="fw-semibold" style="font-size:.85rem;">{{ ap.name }}</span>
+                        <span style="font-size:.72rem;color:var(--ax-muted);">
+                            <span style="color:var(--ax-text);font-weight:600;">{{ ap.earned }}</span> earned
+                            {% if ap.in_progress > 0 %} · <span style="color:#818CF8;font-weight:600;">{{ ap.in_progress }}</span> planned{% endif %}
+                            {% if ap.remaining > 0 %} · <span style="color:var(--ax-muted);">{{ ap.remaining }}</span> left{% endif %}
+                            {% if ap.required > 0 %} / {{ ap.required }} req{% endif %}
+                        </span>
+                    </div>
+                    <div class="progress" style="height:8px;border-radius:5px;overflow:hidden;background:var(--ax-border);"
+                         title="Earned: {{ ap.earned }} · In Progress: {{ ap.in_progress }} · Remaining: {{ ap.remaining }}">
+                        <div class="progress-bar bg-success" style="width:{{ [pct_e, 100]|min }}%"></div>
+                        <div class="progress-bar" style="width:{{ [pct_i, 100 - [pct_e, 100]|min]|min }}%;background:#818CF8;opacity:.6;"></div>
+                    </div>
                 </div>
                 {% endfor %}
+                <div class="d-flex gap-3 pt-1" style="font-size:.68rem;color:var(--ax-muted);border-top:1px solid var(--ax-border);padding-top:.5rem;">
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22C55E;"></span> Earned</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#818CF8;opacity:.6;"></span> Planned / In Progress</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ax-border);"></span> Remaining</span>
+                </div>
             {% else %}
             <div class="p-4 text-center" style="color:var(--ax-muted);font-size:.88rem;">
                 No credits have been assigned to specific study areas yet. Ensure your past schedules have grades!
@@ -89,20 +121,51 @@
             {% endif %}
         </div>
 
+        {# ── Schedule Breakdown – Each independent ── #}
         <div class="mb-1 mt-4 d-flex align-items-center justify-content-between" style="border-bottom:1px solid var(--ax-border);padding-bottom:.6rem;">
-            <h4 class="fw-bold mb-0" style="font-size:1rem;">Mini Schedule Overview</h4>
+            <h4 class="fw-bold mb-0" style="font-size:1rem;">Schedule Performance</h4>
         </div>
         <div class="d-flex flex-column gap-3 mt-3">
             {% if dashboard_mini_schedules %}
                 {% for mini in dashboard_mini_schedules %}
                 <div class="ax-card p-3">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
                         <div>
                             <div class="fw-bold" style="font-size:.9rem;color:var(--ax-text);">{{ mini.name }}</div>
-                            <div style="font-size:.76rem;color:var(--ax-muted);">{{ mini.semester }} {{ mini.year }}</div>
+                            <div class="d-flex align-items-center gap-2 mt-1">
+                                <span style="font-size:.76rem;color:var(--ax-muted);">{{ mini.semester }} {{ mini.year }}</span>
+                                {% if mini.schedule_type == 'past' %}
+                                <span class="badge" style="font-size:.62rem;background:rgba(100,116,139,.15);color:#94A3B8;border:1px solid rgba(100,116,139,.2);">Completed</span>
+                                {% else %}
+                                <span class="badge" style="font-size:.62rem;background:rgba(6,182,212,.12);color:#06B6D4;border:1px solid rgba(6,182,212,.25);">Future</span>
+                                {% endif %}
+                            </div>
                         </div>
                         <a href="{{ url_for('student.edit_schedule', schedule_id=mini.id) }}" class="btn btn-sm btn-outline-primary">View Full Schedule</a>
                     </div>
+
+                    {# ── Per-schedule stats ── #}
+                    <div class="d-flex flex-wrap gap-3 mb-2 pb-2" style="border-bottom:1px solid var(--ax-border);">
+                        <div>
+                            <div style="font-size:.65rem;color:var(--ax-muted);text-transform:uppercase;letter-spacing:.04em;">Semester GPA</div>
+                            <div class="fw-bold" style="font-size:1.1rem;color:var(--ax-text);">{{ "%.2f"|format(mini.gpa) }}</div>
+                        </div>
+                        {% if mini.schedule_type == 'past' %}
+                        <div>
+                            <div style="font-size:.65rem;color:var(--ax-muted);text-transform:uppercase;letter-spacing:.04em;">Cumulative GPA</div>
+                            <div class="fw-bold" style="font-size:1.1rem;color:#818CF8;">{{ "%.2f"|format(mini.cumulative_gpa) }}</div>
+                        </div>
+                        {% endif %}
+                        <div>
+                            <div style="font-size:.65rem;color:var(--ax-muted);text-transform:uppercase;letter-spacing:.04em;">Credits</div>
+                            <div class="fw-bold" style="font-size:1.1rem;color:var(--ax-text);">{{ mini.credits }}</div>
+                        </div>
+                        <div>
+                            <div style="font-size:.65rem;color:var(--ax-muted);text-transform:uppercase;letter-spacing:.04em;">Courses</div>
+                            <div class="fw-bold" style="font-size:1.1rem;color:var(--ax-text);">{{ mini.course_count }}</div>
+                        </div>
+                    </div>
+
                     {% if mini.slots %}
                     <div class="table-responsive">
                         <table class="table table-sm align-middle mb-0">

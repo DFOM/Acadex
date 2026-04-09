@@ -2518,6 +2518,27 @@ def update_app_settings_route():
     update_app_setting('ai_enabled', 'true' if ai_enabled else 'false')
     update_app_setting('ai_data_collection_enabled', 'true' if ai_data_collection_enabled else 'false')
 
+    # ── Auto-transition future schedules that are now in the past ──
+    try:
+        new_year = int(request.form.get('current_year_setting') or 0)
+        new_sem = (request.form.get('current_semester_setting') or '').strip()
+        sem_order = {'spring': 0, 'fall': 1, 'full_year': 2}
+        new_sem_rank = sem_order.get(new_sem.lower().replace(' ', '_'), 0)
+        if new_year > 0:
+            future_schedules = Schedule.query.filter_by(schedule_type='future').all()
+            flipped = 0
+            for sched in future_schedules:
+                sched_year = int(sched.year or 0)
+                sched_sem = (sched.semester or '').strip().lower().replace(' ', '_')
+                sched_sem_rank = sem_order.get(sched_sem, 0)
+                if sched_year < new_year or (sched_year == new_year and sched_sem_rank < new_sem_rank):
+                    sched.schedule_type = 'past'
+                    flipped += 1
+            if flipped:
+                db.session.commit()
+    except Exception:
+        db.session.rollback()
+
     flash("System settings updated.", "success")
     return redirect(url_for('admin.index'))
 
