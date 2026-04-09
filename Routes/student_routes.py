@@ -2062,17 +2062,13 @@ def user_dashboard():
                 day_period = str(meta.get('day_and_period') or '').strip()
                 instructor = _normalize_instructor(meta.get('instructor') or '') or 'TBA'
                 title = str(meta.get('title') or row.course_number or '').strip()
-                if not day_period:
-                    continue
-                for day, period_name in _day_period_structured_blocks(day_period):
-                    schedule_courses_by_schedule.setdefault(sid, []).append(
-                        {
-                            'day': day,
-                            'period': period_name,
-                            'title': title,
-                            'faculty': instructor,
-                        }
-                    )
+                schedule_courses_by_schedule.setdefault(sid, []).append(
+                    {
+                        'day_period': day_period,
+                        'title': title,
+                        'faculty': instructor,
+                    }
+                )
         except Exception:
             db.session.rollback()
 
@@ -2105,10 +2101,7 @@ def user_dashboard():
     dashboard_mini_schedules: list[dict[str, Any]] = []
     cumulative_courses: list[dict] = []
     for sched in schedules:
-        slot_rows = sorted(
-            schedule_courses_by_schedule.get(int(sched.id), []),
-            key=lambda item: (item.get('day') or '', str(item.get('period') or '')),
-        )
+        slot_rows = schedule_courses_by_schedule.get(int(sched.id), [])
         sched_courses = schedule_grade_data.get(int(sched.id), [])
         sched_gpa = calculate_gpa(sched_courses) if sched_courses else 0.0
         sched_credits = sum(
@@ -2147,24 +2140,44 @@ def user_dashboard():
         credits_r = float(meta_r.get('credits') or 0.0)
         in_progress_by_area[area_r] = in_progress_by_area.get(area_r, 0.0) + credits_r
 
+    # Only show required/remaining for user's declared major/minor areas
+    user_area_names = _resolve_user_area_names()
+    major_area_name = (user_area_names.get('major') or '').strip()
+    minor_area_name = (user_area_names.get('minor') or '').strip()
+    requirement_areas = set()
+    if major_area_name:
+        requirement_areas.add(major_area_name)
+    if minor_area_name:
+        requirement_areas.add(minor_area_name)
+
     area_progress = []
     all_area_names = set(area_credits.keys()) | set(in_progress_by_area.keys()) | set(progress.get('missing_by_area', {}).keys())
     for area_name in sorted(all_area_names):
         earned_a = area_credits.get(area_name, 0.0)
         in_prog_a = in_progress_by_area.get(area_name, 0.0)
         req_a = 0.0
-        for a_key, a_val in progress.get('missing_by_area', {}).items():
-            if a_key == area_name:
-                req_a = earned_a + a_val
-                break
-        if req_a <= 0:
-            req_a = earned_a + in_prog_a
+        if area_name in requirement_areas:
+            for a_key, a_val in progress.get('missing_by_area', {}).items():
+                if a_key == area_name:
+                    req_a = earned_a + a_val
+                    break
+            if req_a <= 0:
+                active = _active_subject_areas()
+                area_lower = area_name.strip().lower()
+                if area_lower in active:
+                    sa = active[area_lower]
+                    if area_name == major_area_name:
+                        req_a = float(getattr(sa, 'min_major_credits', 0.0) or 0.0)
+                    elif area_name == minor_area_name:
+                        req_a = float(getattr(sa, 'min_minor_credits', 0.0) or 0.0)
         area_progress.append({
             'name': area_name,
             'earned': round(earned_a, 1),
             'in_progress': round(in_prog_a, 1),
-            'required': round(req_a, 1),
-            'remaining': round(max(0.0, req_a - earned_a - in_prog_a), 1),
+            'required': round(req_a, 1) if area_name in requirement_areas else 0.0,
+            'remaining': round(max(0.0, req_a - earned_a - in_prog_a), 1) if area_name in requirement_areas and req_a > 0 else 0.0,
+            'is_major': area_name == major_area_name,
+            'is_minor': area_name == minor_area_name,
         })
 
     return render_template('Student/dashboard.html', 

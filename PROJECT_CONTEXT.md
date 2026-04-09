@@ -286,6 +286,14 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 # 6. Change Log (Chronological)
 
+## 2026-04-09 — Dashboard area progress + mini schedule fixes
+
+- Area credit progress bars now only show required/remaining for areas where user has declared major or minor. Other areas display earned and planned credits without a requirement target.
+- Added Major/Minor badges next to area names in progress bars for clarity.
+- Fixed doubled courses in dashboard mini schedules caused by `_day_period_structured_blocks()` creating separate entries per day-period pair. Each course now appears once with its full day/period string.
+- Converted mini schedule display from table rows to compact card grid layout.
+- Read iCLA graduation requirement PDFs (2024AY and 2025AY) to inform area requirement logic.
+
 ## 2026-04-09 — Validation Candidate (Phase 2 + courses click fix, pending live confirmation)
 
 - Added deterministic prerequisite dependency graph service sets:
