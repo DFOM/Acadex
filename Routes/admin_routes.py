@@ -4954,6 +4954,7 @@ def api_system_reset():
         db.session.rollback()
         current_app.logger.error('System reset failed: %s', exc, exc_info=True)
         g._system_action_detail = {'event': 'system_reset', 'error': str(exc)}
+        return jsonify({'success': False, 'message': f'Reset failed: {exc}'}), 500
 
 
 # ==========================================================================
@@ -5046,4 +5047,3 @@ def api_activity_log():
         'pages': max(1, (total + per_page - 1) // per_page),
         'event_types': sorted(all_event_types),
     })
-        return jsonify({'success': False, 'message': f'Reset failed: {exc}'}), 500

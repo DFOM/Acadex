@@ -619,6 +619,11 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - **User search/filter on manage_users**: Complete template modernization to match admin design system (`ax-admin-card`, `admin-table`, `ax-page-header`). Added real-time client-side search by username/email/name, role dropdown filter, and graduation year filter. Live counter badge shows "N of M" during filtering. Reset button clears all filters.
 - **Sidebar**: Added "Activity Log" link under System section (requires `manage_users` permission).
 
+### 2026-04-09 – Hotfix: IndentationError in admin_routes.py on deploy
+
+- **Bug**: When the Activity Log routes were appended after the system_reset `except` block, the `return jsonify(...)` line from the except handler was accidentally displaced below the new code, leaving it orphaned outside any function. This caused an `IndentationError` at line 5049 preventing Render deploy.
+- **Fix**: Removed the stray duplicate return and restored the missing `return` inside the system_reset except block.
+
 ---
 
 ## Coding conventions and style
