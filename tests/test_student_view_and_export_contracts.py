@@ -15,7 +15,6 @@ class TestStudentViewAndExportContracts(unittest.TestCase):
         self.assertIn('def courses_view():', content)
         self.assertIn('try:', content)
         self.assertIn("current_app.logger.error('courses_view failed: %s', exc, exc_info=True)", content)
-        self.assertIn('filtered_rows = []', content)
 
     def test_schedule_hydration_sets_identity_fields(self):
         content = self.student_routes
@@ -31,10 +30,11 @@ class TestStudentViewAndExportContracts(unittest.TestCase):
         self.assertIn("el.style.fontWeight = '800'", content)
         self.assertIn("el.style.color = '#ffffff'", content)
 
-    def test_courses_template_uses_prereq_items_key_not_dict_method(self):
+    def test_courses_template_uses_ajax_detail_loading(self):
         content = self.student_courses_template
-        self.assertIn("{% set prereq_items = selected_prereq_status.get('items', []) %}", content)
-        self.assertIn("{% for item in prereq_items %}", content)
+        self.assertIn('/student/api/catalog_course_detail', content)
+        self.assertIn('renderDetail', content)
+        self.assertIn('ax-prereq-pill', content)
 
 
 if __name__ == '__main__':

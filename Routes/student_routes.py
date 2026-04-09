@@ -2280,108 +2280,152 @@ def api_course_details_graph():
         return jsonify({'success': False, 'message': 'Could not load course dependency graph right now.'}), 500
 
 
+@student_bp.route('/api/catalog_course_detail', methods=['GET'])
+@login_required
+def api_catalog_course_detail():
+    """Full course detail for the catalog browser — includes dependency graph."""
+    try:
+        course_number_raw = str(request.args.get('course_number') or '').strip()
+        day_period_raw = str(request.args.get('day_and_period') or '').strip().lower()
+
+        if not course_number_raw:
+            return jsonify({'success': False, 'message': 'course_number is required.'}), 400
+
+        catalog_rows, dataset_id = _load_scraped_catalog_for_term('', '')
+        if not catalog_rows:
+            return jsonify({'success': False, 'message': 'No course data available.'}), 404
+
+        normalized_target = _normalize_course_number(course_number_raw)
+        matches = [r for r in catalog_rows if _normalize_course_number(r.get('Course_Number')) == normalized_target]
+        if not matches:
+            return jsonify({'success': False, 'message': 'Course not found in catalog.'}), 404
+
+        target = matches[0]
+        if day_period_raw:
+            for row in matches:
+                if str(row.get('Day_and_Period') or '').strip().lower() == day_period_raw:
+                    target = row
+                    break
+
+        target_row = _add_display_fields(dict(target))
+        metadata = _build_course_metadata_index().get(normalized_target, {})
+        if not target_row.get('Course_Title'):
+            target_row['Course_Title'] = metadata.get('title') or normalized_target
+        if target_row.get('Credits') in (None, ''):
+            target_row['Credits'] = metadata.get('credits', 0.0)
+        target_row['Instructor'] = _normalize_instructor(target_row.get('Instructor') or metadata.get('instructor')) or 'TBA'
+
+        completed_identifiers = _completed_passing_prereq_identifiers(current_user.id)
+        area_names = _resolve_user_area_names()
+
+        prereq_status = _build_prerequisite_status(
+            target_row.get('Prerequisite'),
+            completed_identifiers,
+            major_name=area_names.get('major'),
+            minor_name=area_names.get('minor'),
+            prereq_title_lookup=_build_prereq_title_lookup(),
+        )
+
+        catalog_for_graph = _catalog_rows_with_local_course_ids(catalog_rows)
+        dep_graph = dependency_graph_for_course(
+            course_number=str(target_row.get('Course_Number') or ''),
+            course_title=str(target_row.get('Course_Title') or ''),
+            prerequisite_text=target_row.get('Prerequisite'),
+            catalog_courses=catalog_for_graph,
+            completed_courses=completed_identifiers,
+            normalizer=normalize_course_code_for_prereqs,
+        )
+
+        # Build all sections the course covers
+        all_sections = [
+            r for r in catalog_rows
+            if _normalize_course_number(r.get('Course_Number')) == normalized_target
+        ]
+        sections = []
+        for s in all_sections:
+            sections.append({
+                'day_period': str(s.get('Day_and_Period') or 'TBA'),
+                'instructor': _normalize_instructor(s.get('Instructor')) or 'TBA',
+                'semester': str(s.get('semester') or ''),
+                'year': str(s.get('year') or ''),
+            })
+
+        # Collect all subject areas this course appears under
+        areas_set = sorted({
+            str(r.get('Area_of_Study') or '').strip()
+            for r in all_sections
+            if str(r.get('Area_of_Study') or '').strip()
+        })
+
+        unlockables = dep_graph.get('dependent_unlockables', [])[:200]
+        conditional_paths = dep_graph.get('conditional_paths', [])[:200]
+        conditional_lookup = {}
+        for cp in conditional_paths:
+            key = str(cp.get('unlock_course_number') or '').upper()
+            if key and key not in conditional_lookup:
+                conditional_lookup[key] = cp
+
+        return jsonify({
+            'success': True,
+            'course': {
+                'course_number': target_row.get('Course_Number'),
+                'display_course_number': target_row.get('display_course_number'),
+                'course_title': target_row.get('Course_Title'),
+                'display_title': target_row.get('display_title'),
+                'credits': target_row.get('Credits'),
+                'instructor': target_row.get('Instructor'),
+                'area_of_study': target_row.get('Area_of_Study'),
+                'areas': areas_set,
+                'prerequisite': target_row.get('Prerequisite'),
+                'day_period': str(target_row.get('Day_and_Period') or 'TBA'),
+                'year_level': target_row.get('year_level'),
+                'semester': str(target_row.get('semester') or ''),
+                'year': str(target_row.get('year') or ''),
+            },
+            'sections': sections,
+            'prerequisite_status': prereq_status,
+            'dependency_graph': {
+                'direct_requirements': dep_graph.get('direct_requirements', []),
+                'expression': dep_graph.get('direct_requirements_expression', ''),
+                'is_conditional': bool(dep_graph.get('direct_requirements_is_conditional')),
+                'eligible_now': bool(dep_graph.get('direct_requirements_eligible_now')),
+                'unlockables': unlockables,
+                'unlock_count': len(dep_graph.get('dependent_unlockables', [])),
+                'conditional_paths': conditional_paths,
+                'conditional_lookup': conditional_lookup,
+            },
+        })
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.error('catalog_course_detail failed: %s', exc, exc_info=True)
+        return jsonify({'success': False, 'message': 'Could not load course details right now.'}), 500
+
+
 @student_bp.route('/courses')
 @login_required
 def courses_view():
-    selected_year = str(request.args.get('year') or '').strip()
-    selected_semester = str(request.args.get('semester') or '').strip()
-    selected_subject = str(request.args.get('subject_area') or '').strip()
-    selected_course_number = str(request.args.get('course_number') or '').strip()
-    selected_day_period = str(request.args.get('day_and_period') or '').strip()
-
     resolved_dataset_name = ''
-    filtered_rows: list[dict] = []
-    year_options: list[str] = []
-    semester_options: list[str] = []
+    all_rows: list[dict] = []
     subject_options: list[str] = []
-    selected_detail = None
-    selected_prereq_status = None
-    selected_unlocks: list[dict] = []
-    selected_dep_graph: dict = {}
-    conditional_path_lookup: dict = {}
+    year_level_options: list[int] = []
 
     try:
         resolved_dataset_name = _resolve_contextual_dataset_name('', '')
         catalog_rows, _dataset_id = _load_scraped_catalog_for_term('', '')
-        rows = [_add_display_fields(dict(r)) for r in catalog_rows]
+        all_rows = [_add_display_fields(dict(r)) for r in catalog_rows]
 
-        year_options = sorted({str(r.get('year') or '').strip() for r in rows if str(r.get('year') or '').strip()}, reverse=True)
-        semester_options = sorted({str(r.get('semester') or '').strip() for r in rows if str(r.get('semester') or '').strip()})
-        subject_options = sorted({str(r.get('Area_of_Study') or '').strip() for r in rows if str(r.get('Area_of_Study') or '').strip()})
-
-        filtered_rows = rows
-        if selected_year:
-            filtered_rows = [r for r in filtered_rows if str(r.get('year') or '').strip() == selected_year]
-        if selected_semester:
-            filtered_rows = [r for r in filtered_rows if str(r.get('semester') or '').strip().lower() == selected_semester.lower()]
-        if selected_subject:
-            filtered_rows = [r for r in filtered_rows if str(r.get('Area_of_Study') or '').strip().lower() == selected_subject.lower()]
-
-        latest_catalog_rows, _latest_dataset_id = _load_scraped_catalog_for_term('', '')
-
-        if selected_course_number:
-            matches = [
-                r for r in rows
-                if _normalize_course_number(r.get('Course_Number')) == _normalize_course_number(selected_course_number)
-            ]
-            if selected_day_period:
-                matches = [m for m in matches if str(m.get('Day_and_Period') or '').strip().lower() == selected_day_period.lower()]
-
-            if matches:
-                selected_detail = _add_display_fields(dict(matches[0]))
-                completed_identifiers: Iterable[str] = _completed_passing_prereq_identifiers(current_user.id)
-                area_names = _resolve_user_area_names()
-                selected_prereq_status = _build_prerequisite_status(
-                    selected_detail.get('Prerequisite'),
-                    completed_identifiers,
-                    major_name=area_names.get('major'),
-                    minor_name=area_names.get('minor'),
-                    prereq_title_lookup=_build_prereq_title_lookup(),
-                )
-                catalog_for_graph = _catalog_rows_with_local_course_ids(latest_catalog_rows if latest_catalog_rows else rows)
-                selected_dep_graph = dependency_graph_for_course(
-                    course_number=str(selected_detail.get('Course_Number') or ''),
-                    course_title=str(selected_detail.get('Course_Title') or ''),
-                    prerequisite_text=selected_detail.get('Prerequisite'),
-                    catalog_courses=catalog_for_graph,
-                    completed_courses=completed_identifiers,
-                    normalizer=normalize_course_code_for_prereqs,
-                )
-                selected_unlocks = selected_dep_graph.get('dependent_unlockables', [])
-                for cp in selected_dep_graph.get('conditional_paths', []):
-                    key = str(cp.get('unlock_course_number') or '').upper()
-                    if key and key not in conditional_path_lookup:
-                        conditional_path_lookup[key] = cp
+        subject_options = sorted({str(r.get('Area_of_Study') or '').strip() for r in all_rows if str(r.get('Area_of_Study') or '').strip()})
+        year_level_options = sorted({int(r.get('year_level') or 0) for r in all_rows if r.get('year_level')})
     except Exception as exc:
         db.session.rollback()
         current_app.logger.error('courses_view failed: %s', exc, exc_info=True)
-        filtered_rows = []
-        year_options = []
-        semester_options = []
-        subject_options = []
-        selected_detail = None
-        selected_prereq_status = None
-        selected_unlocks = []
-        selected_dep_graph = {}
-        conditional_path_lookup = {}
 
     return render_template(
         'Student/courses.html',
         resolved_dataset_name=resolved_dataset_name,
-        courses=filtered_rows,
-        year_options=year_options,
-        semester_options=semester_options,
+        courses=all_rows,
         subject_options=subject_options,
-        selected_year=selected_year,
-        selected_semester=selected_semester,
-        selected_subject=selected_subject,
-        selected_course_number=selected_course_number,
-        selected_day_period=selected_day_period,
-        selected_detail=selected_detail,
-        selected_prereq_status=selected_prereq_status,
-        selected_unlocks=selected_unlocks,
-        selected_dep_graph=selected_dep_graph,
-        conditional_path_lookup=conditional_path_lookup,
+        year_level_options=year_level_options,
     )
 
 # --- Premium Dashboard Logic ---

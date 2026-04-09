@@ -3,163 +3,398 @@
 {% block title %}Courses{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-3">
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-3">
     <div>
-        <h1 class="fw-bold mb-1" style="font-size:1.5rem;letter-spacing:-.02em;">Courses</h1>
-        <p style="color:var(--ax-muted);font-size:.88rem;margin:0;">Browsing resolved dataset: <strong>{{ resolved_dataset_name or 'Auto (contextual latest)' }}</strong></p>
+        <h1 class="fw-bold mb-1" style="font-size:1.5rem;letter-spacing:-.02em;">Course Catalog</h1>
+        <p style="color:var(--ax-muted);font-size:.85rem;margin:0;">{{ courses|length }} course{{ 's' if courses|length != 1 else '' }} · <strong>{{ resolved_dataset_name or 'Auto (contextual latest)' }}</strong></p>
     </div>
 </div>
 
-<form method="get" class="ax-card p-3 mb-4">
-    <div class="row g-2 align-items-end">
-        <div class="col-md-3">
-            <label class="form-label small">Year</label>
-            <select name="year" class="form-select form-select-sm">
-                <option value="">All years</option>
-                {% for y in year_options %}
-                <option value="{{ y }}" {{ 'selected' if selected_year == y else '' }}>{{ y }}</option>
-                {% endfor %}
-            </select>
+{# ── Search + Filters ── #}
+<div class="ax-card p-3 mb-4">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+        <div class="position-relative flex-grow-1" style="min-width:220px;max-width:420px;">
+            <input type="text" id="courseSearch" class="form-control form-control-sm ps-4"
+                   placeholder="Search by title, code, or instructor..."
+                   autocomplete="off" style="background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);">
+            <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--ax-muted);" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
         </div>
-        <div class="col-md-3">
-            <label class="form-label small">Semester</label>
-            <select name="semester" class="form-select form-select-sm">
-                <option value="">All semesters</option>
-                {% for s in semester_options %}
-                <option value="{{ s }}" {{ 'selected' if selected_semester == s else '' }}>{{ s }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="col-md-4">
-            <label class="form-label small">Subject Area</label>
-            <select name="subject_area" class="form-select form-select-sm">
-                <option value="">All areas</option>
-                {% for s in subject_options %}
-                <option value="{{ s }}" {{ 'selected' if selected_subject == s else '' }}>{{ s }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="col-md-2 d-grid">
-            <button type="submit" class="btn btn-primary btn-sm">Apply</button>
-        </div>
+        <select id="filterArea" class="form-select form-select-sm" style="width:auto;min-width:160px;background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);">
+            <option value="">All Areas</option>
+            {% for s in subject_options %}
+            <option value="{{ s }}">{{ s }}</option>
+            {% endfor %}
+        </select>
+        <select id="filterLevel" class="form-select form-select-sm" style="width:auto;min-width:130px;background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);">
+            <option value="">All Levels</option>
+            {% for lvl in year_level_options %}
+            <option value="{{ lvl }}">Level {{ lvl }}00</option>
+            {% endfor %}
+        </select>
+        <span id="filterCount" class="small" style="color:var(--ax-muted);white-space:nowrap;"></span>
     </div>
-</form>
+</div>
 
-<div class="row g-4">
-    <div class="col-lg-7">
-        <div class="ax-card p-0 overflow-hidden">
-            <div class="p-3 border-bottom" style="border-color:var(--ax-border)!important;">
-                <h5 class="fw-bold mb-0" style="font-size:.95rem;">Course List</h5>
-            </div>
-            <div class="table-responsive" style="max-height:560px;">
-                <table class="table table-hover align-middle mb-0">
-                    <thead>
-                        <tr>
-                            <th>Course Title</th>
-                            <th>Credits</th>
-                            <th>Instructor</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for c in courses %}
-                        <tr>
-                            <td>
-                                <div class="fw-semibold">{{ c.display_title or c.Course_Title }}</div>
-                                <div class="small text-muted">{{ c.display_course_number or c.Course_Number }}</div>
-                            </td>
-                            <td>{{ c.Credits }}</td>
-                            <td>{{ c.Instructor or 'TBA' }}</td>
-                            <td class="text-end">
-                                <a class="btn btn-sm btn-outline-primary"
-                                   href="{{ url_for('student.courses_view', year=selected_year, semester=selected_semester, subject_area=selected_subject, course_number=c.Course_Number, day_and_period=c.Day_and_Period) }}">
-                                    View
-                                </a>
-                            </td>
-                        </tr>
-                        {% else %}
-                        <tr>
-                            <td colspan="4" class="text-center text-muted py-4">Currently there are no courses for this selection.</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <div class="col-lg-5">
-        <div class="ax-card p-3">
-            <h5 class="fw-bold mb-3" style="font-size:.95rem;">Course Detail</h5>
-            {% if selected_detail %}
-            <div class="mb-2">
-                <div class="fw-semibold">{{ selected_detail.display_title or selected_detail.Course_Title }}</div>
-                <div class="small text-muted">{{ selected_detail.display_course_number or selected_detail.Course_Number }}</div>
-            </div>
-            <div class="small mb-3" style="color:var(--ax-text-dim);">
-                <div><strong>Credits:</strong> {{ selected_detail.Credits }}</div>
-                <div><strong>Instructor(s):</strong> {{ selected_detail.Instructor or 'TBA' }}</div>
-                <div><strong>Subject Area:</strong> {{ selected_detail.Area_of_Study or 'General' }}</div>
-            </div>
-
-            <div class="mb-3">
-                <div class="fw-semibold mb-1">Prerequisites</div>
-                {% set raw_prereq = (selected_detail.Prerequisite or '')|trim %}
-                {% if selected_prereq_status and selected_prereq_status.get('has_prerequisites') %}
-                {% set prereq_summary = selected_prereq_status.get('summary', 'No prerequisites.') %}
-                {% set prereq_items = selected_prereq_status.get('items', []) %}
-                {% if raw_prereq and raw_prereq|lower not in ['none', 'n/a', 'na'] %}
-                <div class="small mb-2" style="color:var(--ax-text-dim);font-style:italic;">{{ raw_prereq }}</div>
-                {% endif %}
-                <div class="small text-muted mb-1">{{ prereq_summary }}</div>
-                <div class="d-flex flex-wrap gap-1">
-                    {% for item in prereq_items %}
-                    <span class="badge rounded-pill {{ 'bg-success-subtle text-success border border-success-subtle' if item.status == 'satisfied' else 'bg-danger-subtle text-danger border border-danger-subtle' if item.status == 'missing' else 'bg-secondary-subtle text-secondary border border-secondary-subtle' }}" title="{{ item.reason }}">{{ item.term }}</span>
-                    {% endfor %}
+{# ── Main Layout: List + Detail Drawer ── #}
+<div class="ax-catalog-layout">
+    {# ── Course List ── #}
+    <div class="ax-catalog-list" id="catalogList">
+        {% for c in courses %}
+        <div class="ax-cat-card"
+             data-cn="{{ c.Course_Number or '' }}"
+             data-dp="{{ c.Day_and_Period or '' }}"
+             data-title="{{ (c.display_title or c.Course_Title or '')|lower }}"
+             data-code="{{ (c.display_course_number or c.Course_Number or '')|lower }}"
+             data-instructor="{{ (c.Instructor or '')|lower }}"
+             data-area="{{ (c.Area_of_Study or '')|lower }}"
+             data-level="{{ c.year_level or '' }}">
+            <div class="ax-cat-card-top">
+                <div class="ax-cat-card-title">{{ c.display_title or c.Course_Title }}</div>
+                <div class="ax-cat-card-meta">
+                    <span class="ax-cat-code">{{ c.display_course_number or c.Course_Number }}</span>
+                    {% if c.Credits %}<span class="ax-cat-credits">{{ c.Credits }} CR</span>{% endif %}
                 </div>
-                {% else %}
-                <div class="small text-muted">No prerequisites.</div>
-                {% endif %}
             </div>
+            <div class="ax-cat-card-bottom">
+                <span class="ax-cat-area">{{ c.Area_of_Study or 'General' }}</span>
+                <span class="ax-cat-instructor">{{ c.Instructor or 'TBA' }}</span>
+            </div>
+        </div>
+        {% else %}
+        <div class="text-center py-5" style="color:var(--ax-muted);">No courses available in this dataset.</div>
+        {% endfor %}
+    </div>
 
-            <div>
-                <div class="fw-semibold mb-1">What This Course Unlocks</div>
-                {% if selected_unlocks %}
-                <ul class="list-group list-group-flush">
-                    {% for row in selected_unlocks %}
-                    {% set cp = conditional_path_lookup.get((row.course_number or '')|upper) %}
-                    <li class="list-group-item px-0" style="background:transparent;">
-                        <div class="fw-semibold">{{ row.course_title }}</div>
-                        <div class="small text-muted">{{ row.course_number }}</div>
-                        {% if row.is_conditional %}
-                        <div class="small mt-1" style="color:var(--ax-text-dim);">
-                            <span class="badge bg-warning-subtle text-warning border border-warning-subtle rounded-pill me-1">OR</span>
-                            This course is <strong>one of several options</strong> that can help unlock this course.
-                            {% if cp and cp.alternative_branches %}
-                            <div class="mt-1">Alternatives: 
-                                {% for alt in cp.alternative_branches %}
-                                <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle rounded-pill">{{ alt }}</span>{{ '' if loop.last else ' ' }}
-                                {% endfor %}
-                            </div>
-                            {% endif %}
-                        </div>
-                        {% else %}
-                        <div class="small mt-1" style="color:var(--ax-text-dim);">
-                            <span class="badge bg-primary-subtle text-primary border border-primary-subtle rounded-pill me-1">Required</span>
-                            This course is a <strong>required prerequisite</strong> — no alternatives.
-                        </div>
-                        {% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% else %}
-                <div class="small text-muted">No reverse dependencies found in this active dataset.</div>
-                {% endif %}
-            </div>
-            {% else %}
-            <div class="small text-muted">Select a course from the list to view full details, prerequisites, and unlock dependencies.</div>
-            {% endif %}
+    {# ── Detail Drawer ── #}
+    <div class="ax-catalog-drawer" id="catalogDrawer">
+        <div class="ax-drawer-empty" id="drawerEmpty">
+            <svg style="width:48px;height:48px;color:var(--ax-muted);opacity:.5;margin-bottom:12px;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"/></svg>
+            <div class="fw-semibold mb-1" style="font-size:.92rem;">Select a Course</div>
+            <div class="small" style="color:var(--ax-muted);">Click any course to view its full details, prerequisites, and dependencies.</div>
+        </div>
+
+        <div class="ax-drawer-loading d-none" id="drawerLoading">
+            <div class="ax-skeleton" style="height:24px;width:70%;margin-bottom:12px;border-radius:6px;"></div>
+            <div class="ax-skeleton" style="height:16px;width:50%;margin-bottom:20px;border-radius:6px;"></div>
+            <div class="ax-skeleton" style="height:14px;width:90%;margin-bottom:8px;border-radius:6px;"></div>
+            <div class="ax-skeleton" style="height:14px;width:80%;margin-bottom:8px;border-radius:6px;"></div>
+            <div class="ax-skeleton" style="height:14px;width:60%;margin-bottom:20px;border-radius:6px;"></div>
+            <div class="ax-skeleton" style="height:14px;width:85%;margin-bottom:8px;border-radius:6px;"></div>
+            <div class="ax-skeleton" style="height:14px;width:70%;border-radius:6px;"></div>
+        </div>
+
+        <div class="ax-drawer-content d-none" id="drawerContent">
+            {# Populated by JS #}
         </div>
     </div>
 </div>
+
+<style>
+/* ── Catalog Layout ── */
+.ax-catalog-layout{display:flex;gap:20px;min-height:500px;}
+.ax-catalog-list{flex:1 1 0;min-width:0;max-height:calc(100vh - 240px);overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding-right:6px;}
+.ax-catalog-list::-webkit-scrollbar{width:5px;}
+.ax-catalog-list::-webkit-scrollbar-thumb{background:var(--ax-border);border-radius:99px;}
+.ax-catalog-drawer{width:420px;flex-shrink:0;position:sticky;top:80px;max-height:calc(100vh - 180px);overflow-y:auto;padding:20px;background:var(--ax-surface);border:1px solid var(--ax-border);border-radius:var(--ax-radius-sm);transition:box-shadow var(--ax-transition) var(--ax-ease);}
+.ax-catalog-drawer::-webkit-scrollbar{width:5px;}
+.ax-catalog-drawer::-webkit-scrollbar-thumb{background:var(--ax-border);border-radius:99px;}
+.ax-catalog-drawer.ax-drawer-active{box-shadow:var(--ax-shadow-md);}
+
+/* ── Course Cards ── */
+.ax-cat-card{padding:12px 14px;border-radius:var(--ax-radius-xs);border:1px solid var(--ax-border);background:var(--ax-surface);cursor:pointer;transition:all var(--ax-transition) var(--ax-ease);position:relative;}
+.ax-cat-card:hover{border-color:var(--ax-c-blue);transform:translateX(3px);}
+.ax-cat-card.ax-cat-selected{border-color:var(--ax-c-blue);background:color-mix(in srgb,var(--ax-c-blue) 6%,var(--ax-surface));box-shadow:inset 3px 0 0 var(--ax-c-blue);}
+.ax-cat-card.ax-cat-hidden{display:none;}
+.ax-cat-card-title{font-weight:600;font-size:.88rem;color:var(--ax-text);line-height:1.3;margin-bottom:4px;}
+.ax-cat-card-meta{display:flex;gap:8px;align-items:center;}
+.ax-cat-code{font-size:.76rem;font-weight:500;color:var(--ax-c-blue);font-family:'DM Mono',monospace;}
+.ax-cat-credits{font-size:.72rem;font-weight:600;color:var(--ax-text-dim);background:var(--ax-surface-2);padding:1px 7px;border-radius:99px;}
+.ax-cat-card-bottom{display:flex;justify-content:space-between;align-items:center;margin-top:6px;}
+.ax-cat-area{font-size:.74rem;color:var(--ax-muted);max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ax-cat-instructor{font-size:.74rem;color:var(--ax-text-dim);}
+
+/* ── Drawer Empty / Loading ── */
+.ax-drawer-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:300px;padding:24px;}
+.ax-drawer-loading{padding:8px 0;}
+
+/* ── Drawer Content sections ── */
+.ax-detail-header{margin-bottom:16px;}
+.ax-detail-title{font-weight:700;font-size:1.05rem;color:var(--ax-text);line-height:1.3;margin-bottom:4px;}
+.ax-detail-code{font-size:.82rem;font-weight:500;color:var(--ax-c-blue);font-family:'DM Mono',monospace;}
+.ax-detail-badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
+.ax-detail-badge{font-size:.72rem;font-weight:600;padding:3px 10px;border-radius:99px;border:1px solid;white-space:nowrap;}
+.ax-detail-badge.badge-credits{color:var(--ax-c-blue);border-color:color-mix(in srgb,var(--ax-c-blue) 30%,transparent);background:color-mix(in srgb,var(--ax-c-blue) 8%,transparent);}
+.ax-detail-badge.badge-area{color:var(--ax-c-violet);border-color:color-mix(in srgb,var(--ax-c-violet) 30%,transparent);background:color-mix(in srgb,var(--ax-c-violet) 8%,transparent);}
+.ax-detail-badge.badge-level{color:var(--ax-c-cyan);border-color:color-mix(in srgb,var(--ax-c-cyan) 30%,transparent);background:color-mix(in srgb,var(--ax-c-cyan) 8%,transparent);}
+.ax-detail-info{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:.82rem;margin-bottom:16px;padding:12px;background:var(--ax-surface-2);border-radius:var(--ax-radius-xs);}
+.ax-detail-info dt{color:var(--ax-muted);font-weight:500;}
+.ax-detail-info dd{color:var(--ax-text);margin:0;font-weight:500;}
+
+.ax-detail-section{margin-bottom:16px;}
+.ax-detail-section-title{font-weight:700;font-size:.82rem;color:var(--ax-text);margin-bottom:8px;display:flex;align-items:center;gap:6px;text-transform:uppercase;letter-spacing:.04em;}
+.ax-detail-section-title svg{width:16px;height:16px;color:var(--ax-muted);}
+
+/* prereq badges */
+.ax-prereq-raw{font-size:.78rem;color:var(--ax-text-dim);font-style:italic;margin-bottom:8px;line-height:1.5;}
+.ax-prereq-summary{font-size:.78rem;color:var(--ax-muted);margin-bottom:6px;}
+.ax-prereq-pills{display:flex;flex-wrap:wrap;gap:5px;}
+.ax-prereq-pill{font-size:.72rem;font-weight:600;padding:3px 9px;border-radius:99px;border:1px solid;white-space:nowrap;}
+.ax-prereq-pill.pill-satisfied{color:var(--ax-c-emerald);border-color:color-mix(in srgb,var(--ax-c-emerald) 30%,transparent);background:color-mix(in srgb,var(--ax-c-emerald) 8%,transparent);}
+.ax-prereq-pill.pill-missing{color:#EF4444;border-color:color-mix(in srgb,#EF4444 30%,transparent);background:color-mix(in srgb,#EF4444 8%,transparent);}
+.ax-prereq-pill.pill-untrackable{color:var(--ax-muted);border-color:var(--ax-border);background:var(--ax-surface-2);}
+
+/* eligible banner */
+.ax-eligible-banner{font-size:.78rem;padding:8px 12px;border-radius:var(--ax-radius-xs);margin-bottom:12px;display:flex;align-items:center;gap:8px;font-weight:600;}
+.ax-eligible-banner.banner-yes{color:var(--ax-c-emerald);background:color-mix(in srgb,var(--ax-c-emerald) 8%,transparent);border:1px solid color-mix(in srgb,var(--ax-c-emerald) 25%,transparent);}
+.ax-eligible-banner.banner-no{color:#EF4444;background:color-mix(in srgb,#EF4444 8%,transparent);border:1px solid color-mix(in srgb,#EF4444 25%,transparent);}
+
+/* unlock list */
+.ax-unlock-item{padding:8px 0;border-bottom:1px solid var(--ax-border);}
+.ax-unlock-item:last-child{border-bottom:none;}
+.ax-unlock-title{font-weight:600;font-size:.82rem;color:var(--ax-text);}
+.ax-unlock-code{font-size:.74rem;color:var(--ax-muted);font-family:'DM Mono',monospace;}
+.ax-unlock-tag{font-size:.68rem;font-weight:700;padding:2px 7px;border-radius:99px;text-transform:uppercase;letter-spacing:.03em;}
+.ax-unlock-tag.tag-required{color:var(--ax-c-blue);background:color-mix(in srgb,var(--ax-c-blue) 12%,transparent);}
+.ax-unlock-tag.tag-or{color:#F59E0B;background:color-mix(in srgb,#F59E0B 12%,transparent);}
+.ax-unlock-alts{font-size:.72rem;color:var(--ax-text-dim);margin-top:4px;line-height:1.5;}
+.ax-unlock-alts .badge{font-size:.68rem;font-weight:500;background:var(--ax-surface-3);color:var(--ax-text-dim);border:1px solid var(--ax-border);border-radius:99px;padding:1px 7px;}
+
+/* sections list */
+.ax-section-row{display:flex;justify-content:space-between;font-size:.78rem;padding:5px 0;border-bottom:1px solid var(--ax-border);}
+.ax-section-row:last-child{border-bottom:none;}
+
+/* areas pills */
+.ax-areas-wrap{display:flex;flex-wrap:wrap;gap:5px;}
+.ax-area-pill{font-size:.72rem;font-weight:600;padding:3px 10px;border-radius:99px;color:var(--ax-c-violet);border:1px solid color-mix(in srgb,var(--ax-c-violet) 30%,transparent);background:color-mix(in srgb,var(--ax-c-violet) 8%,transparent);}
+
+/* ── Responsive ── */
+@media(max-width:992px){
+    .ax-catalog-layout{flex-direction:column;}
+    .ax-catalog-drawer{width:100%;position:static;max-height:none;}
+    .ax-catalog-list{max-height:400px;}
+}
+</style>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function(){
+    'use strict';
+
+    /* ── refs ── */
+    const listEl = document.getElementById('catalogList');
+    const drawerEl = document.getElementById('catalogDrawer');
+    const emptyEl = document.getElementById('drawerEmpty');
+    const loadingEl = document.getElementById('drawerLoading');
+    const contentEl = document.getElementById('drawerContent');
+    const searchEl = document.getElementById('courseSearch');
+    const filterAreaEl = document.getElementById('filterArea');
+    const filterLevelEl = document.getElementById('filterLevel');
+    const countEl = document.getElementById('filterCount');
+    const allCards = Array.from(listEl.querySelectorAll('.ax-cat-card'));
+
+    let activeCard = null;
+    let abortCtrl = null;
+
+    /* ── helpers ── */
+    const esc = (s) => {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    };
+
+    /* ── filter / search ── */
+    function applyFilters() {
+        const q = (searchEl.value || '').trim().toLowerCase();
+        const area = (filterAreaEl.value || '').toLowerCase();
+        const level = filterLevelEl.value || '';
+        let visible = 0;
+
+        for (const card of allCards) {
+            const matchQ = !q || card.dataset.title.includes(q) || card.dataset.code.includes(q) || card.dataset.instructor.includes(q);
+            const matchA = !area || card.dataset.area === area;
+            const matchL = !level || card.dataset.level === level;
+            const show = matchQ && matchA && matchL;
+            card.classList.toggle('ax-cat-hidden', !show);
+            if (show) visible++;
+        }
+        countEl.textContent = visible === allCards.length ? '' : `${visible} of ${allCards.length}`;
+    }
+
+    searchEl.addEventListener('input', applyFilters);
+    filterAreaEl.addEventListener('change', applyFilters);
+    filterLevelEl.addEventListener('change', applyFilters);
+
+    /* ── card click → load detail ── */
+    listEl.addEventListener('click', async (e) => {
+        const card = e.target.closest('.ax-cat-card');
+        if (!card) return;
+
+        /* highlight */
+        if (activeCard) activeCard.classList.remove('ax-cat-selected');
+        card.classList.add('ax-cat-selected');
+        activeCard = card;
+
+        const cn = card.dataset.cn;
+        const dp = card.dataset.dp;
+
+        /* show loading */
+        emptyEl.classList.add('d-none');
+        contentEl.classList.add('d-none');
+        loadingEl.classList.remove('d-none');
+        drawerEl.classList.add('ax-drawer-active');
+
+        /* abort previous */
+        if (abortCtrl) abortCtrl.abort();
+        abortCtrl = new AbortController();
+
+        try {
+            const params = new URLSearchParams({course_number: cn, day_and_period: dp});
+            const res = await fetch(`/student/api/catalog_course_detail?${params}`, {signal: abortCtrl.signal});
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.message || 'Failed');
+
+            renderDetail(data);
+            loadingEl.classList.add('d-none');
+            contentEl.classList.remove('d-none');
+            drawerEl.scrollTop = 0;
+        } catch (err) {
+            if (err.name === 'AbortError') return;
+            loadingEl.classList.add('d-none');
+            contentEl.innerHTML = `<div class="alert alert-warning mb-0" style="font-size:.82rem;">${esc(err.message || 'Unable to load course detail.')}</div>`;
+            contentEl.classList.remove('d-none');
+        }
+    });
+
+    /* ── render detail ── */
+    function renderDetail(data) {
+        const c = data.course || {};
+        const ps = data.prerequisite_status || {};
+        const dg = data.dependency_graph || {};
+        const sections = data.sections || [];
+
+        let html = '';
+
+        /* ─ header ─ */
+        html += `<div class="ax-detail-header">
+            <div class="ax-detail-title">${esc(c.display_title || c.course_title || 'Untitled')}</div>
+            <div class="ax-detail-code">${esc(c.display_course_number || c.course_number || '')}</div>
+            <div class="ax-detail-badges">
+                ${c.credits != null ? `<span class="ax-detail-badge badge-credits">${esc(String(c.credits))} Credits</span>` : ''}
+                ${c.area_of_study ? `<span class="ax-detail-badge badge-area">${esc(c.area_of_study)}</span>` : ''}
+                ${c.year_level ? `<span class="ax-detail-badge badge-level">Level ${esc(String(c.year_level))}00</span>` : ''}
+            </div>
+        </div>`;
+
+        /* ─ info grid ─ */
+        html += `<dl class="ax-detail-info">
+            <dt>Instructor</dt><dd>${esc(c.instructor || 'TBA')}</dd>
+            <dt>Schedule</dt><dd>${esc(c.day_period || 'TBA')}</dd>
+            ${c.semester ? `<dt>Semester</dt><dd>${esc(c.semester)}</dd>` : ''}
+            ${c.year ? `<dt>Year</dt><dd>${esc(c.year)}</dd>` : ''}
+        </dl>`;
+
+        /* ─ areas of study ─ */
+        const areas = Array.isArray(c.areas) ? c.areas : [];
+        if (areas.length > 1) {
+            html += `<div class="ax-detail-section">
+                <div class="ax-detail-section-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z"/><path d="M6 6h.008v.008H6V6z"/></svg>
+                    Areas of Study
+                </div>
+                <div class="ax-areas-wrap">${areas.map(a => `<span class="ax-area-pill">${esc(a)}</span>`).join('')}</div>
+            </div>`;
+        }
+
+        /* ─ sections ─ */
+        if (sections.length > 1) {
+            html += `<div class="ax-detail-section">
+                <div class="ax-detail-section-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>
+                    Sections (${sections.length})
+                </div>
+                ${sections.map(s => `<div class="ax-section-row">
+                    <span>${esc(s.day_period || 'TBA')}</span>
+                    <span style="color:var(--ax-text-dim);">${esc(s.instructor || 'TBA')}</span>
+                </div>`).join('')}
+            </div>`;
+        }
+
+        /* ─ prerequisites ─ */
+        html += `<div class="ax-detail-section">
+            <div class="ax-detail-section-title">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                Prerequisites
+            </div>`;
+
+        if (ps.has_prerequisites) {
+            const rawPrereq = (c.prerequisite || '').trim();
+            const noneLike = ['', 'none', 'n/a', 'na'];
+            if (rawPrereq && !noneLike.includes(rawPrereq.toLowerCase())) {
+                html += `<div class="ax-prereq-raw">${esc(rawPrereq)}</div>`;
+            }
+
+            /* eligible banner */
+            const eligible = dg.eligible_now;
+            if (typeof eligible === 'boolean') {
+                html += `<div class="ax-eligible-banner ${eligible ? 'banner-yes' : 'banner-no'}">
+                    ${eligible
+                        ? '<svg style="width:16px;height:16px;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> You meet all prerequisites'
+                        : '<svg style="width:16px;height:16px;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg> Some prerequisites not met'}
+                </div>`;
+            }
+
+            html += `<div class="ax-prereq-summary">${esc(ps.summary || '')}</div>`;
+
+            const items = Array.isArray(ps.items) ? ps.items : [];
+            if (items.length) {
+                html += `<div class="ax-prereq-pills">`;
+                for (const item of items) {
+                    const cls = item.status === 'satisfied' ? 'pill-satisfied' : item.status === 'missing' ? 'pill-missing' : 'pill-untrackable';
+                    html += `<span class="ax-prereq-pill ${cls}" title="${esc(item.reason || '')}">${esc(item.term)}</span>`;
+                }
+                html += `</div>`;
+            }
+        } else {
+            html += `<div class="small" style="color:var(--ax-muted);">No prerequisites — open enrollment.</div>`;
+        }
+        html += `</div>`;
+
+        /* ─ dependencies (what this course unlocks) ─ */
+        const unlockables = Array.isArray(dg.unlockables) ? dg.unlockables : [];
+        const unlockCount = dg.unlock_count || unlockables.length;
+        const condLookup = dg.conditional_lookup || {};
+
+        html += `<div class="ax-detail-section">
+            <div class="ax-detail-section-title">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M13.5 10.5V6.75a4.5 4.5 0 119 0v3.75M3.75 21.75h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H3.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
+                What This Unlocks ${unlockCount ? `(${unlockCount})` : ''}
+            </div>`;
+
+        if (unlockables.length) {
+            for (const u of unlockables) {
+                const cp = condLookup[String(u.course_number || '').toUpperCase()];
+                const isOr = u.is_conditional;
+                html += `<div class="ax-unlock-item">
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="ax-unlock-tag ${isOr ? 'tag-or' : 'tag-required'}">${isOr ? 'OR' : 'Required'}</span>
+                        <div>
+                            <div class="ax-unlock-title">${esc(u.course_title)}</div>
+                            <div class="ax-unlock-code">${esc(u.course_number)}</div>
+                        </div>
+                    </div>`;
+                if (isOr && cp && Array.isArray(cp.alternative_branches) && cp.alternative_branches.length) {
+                    html += `<div class="ax-unlock-alts">Alternatives: ${cp.alternative_branches.map(a => `<span class="badge">${esc(a)}</span>`).join(' ')}</div>`;
+                }
+                html += `</div>`;
+            }
+        } else {
+            html += `<div class="small" style="color:var(--ax-muted);">No courses in this dataset depend on this course as a prerequisite.</div>`;
+        }
+        html += `</div>`;
+
+        contentEl.innerHTML = html;
+    }
+})();
+</script>
 {% endblock %}

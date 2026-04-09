@@ -176,6 +176,7 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Create-schedule year/semester options are now driven strictly by `DatasetRegistry` availability (no free-form term selection).
 - Future planning supports fallback to the nearest available registry term within `current_year + 5` and surfaces warning messages.
 - Search/browse courses by contextual dataset resolution with optional future-plan level scope toggle (`my level` vs `all levels`).
+- **Course Catalog browser**: Card-based list with instant text search, area/level filters, and AJAX-powered detail drawer showing prerequisites (satisfied/missing/untrackable), full dependency graph (Required/OR with alternatives), areas of study coverage, and multiple sections.
 - Add/remove schedule courses with:
   - real time-overlap conflict detection using Period start/end windows
   - prerequisite status checks
@@ -575,6 +576,21 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Added calendar icon in card header and total count badge.
 - Empty state improved with large faded icon and smaller CTA button.
 - New CSS classes: `.ax-sched-row`, `.ax-sched-link`, `.ax-sched-dot`, `.ax-sched-delete`.
+
+### 2025-06-12 – Full redesign of Courses tab (student catalog browser)
+
+- **Layout**: Replaced old table+sidebar with card-based course list + sticky detail drawer.
+- **Instant search**: Text search filters by title, course code, or instructor without page reloads.
+- **Filter pills**: Dropdown filters for Subject Area and Year Level, with live match counter.
+- **AJAX detail loading**: Clicking a course card fetches full detail via new `/student/api/catalog_course_detail` endpoint — no more full-page reloads.
+- **Prerequisite status**: Color-coded pills (green=satisfied, red=missing, grey=untrackable) plus eligibility banner ("You meet all prerequisites" / "Some prerequisites not met").
+- **Dependency graph**: "What This Unlocks" section with Required/OR classification, alternative branches shown as badge pills. Uses full `dependency_graph_for_course()` AST-based analysis (AND/OR logic).
+- **Areas of study**: When a course appears under multiple subject areas, all are shown as violet area pills.
+- **Sections**: If multiple sections exist for a course, they're listed with day/period and instructor.
+- **Loading skeleton**: Shimmer skeleton placeholders during AJAX loading.
+- **Responsive**: Stacks to single column on mobile (≤992px).
+- **Route simplification**: `courses_view()` now only loads the catalog list; all detail logic moved to the API endpoint.
+- **New CSS classes**: `.ax-catalog-layout`, `.ax-catalog-list`, `.ax-catalog-drawer`, `.ax-cat-card`, `.ax-detail-*`, `.ax-prereq-*`, `.ax-unlock-*`, `.ax-area-pill`, `.ax-eligible-banner`.
 
 ---
 
