@@ -6,7 +6,7 @@
 <div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-3">
     <div>
         <h1 class="fw-bold mb-1" style="font-size:1.5rem;letter-spacing:-.02em;">Course Catalog</h1>
-        <p style="color:var(--ax-muted);font-size:.85rem;margin:0;">{{ courses|length }} course{{ 's' if courses|length != 1 else '' }} · <strong>{{ resolved_dataset_name or 'Auto (contextual latest)' }}</strong></p>
+        <p style="color:var(--ax-muted);font-size:.85rem;margin:0;">{{ courses|length }} unique course{{ 's' if courses|length != 1 else '' }} across all datasets</p>
     </div>
 </div>
 
@@ -25,11 +25,28 @@
             <option value="{{ s }}">{{ s }}</option>
             {% endfor %}
         </select>
-        <select id="filterLevel" class="form-select form-select-sm" style="width:auto;min-width:130px;background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);">
+        <select id="filterLevel" class="form-select form-select-sm" style="width:auto;min-width:110px;background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);">
             <option value="">All Levels</option>
             {% for lvl in year_level_options %}
             <option value="{{ lvl }}">Level {{ lvl }}00</option>
             {% endfor %}
+        </select>
+        <select id="filterSemester" class="form-select form-select-sm" style="width:auto;min-width:110px;background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);">
+            <option value="">All Semesters</option>
+            {% for s in semester_options %}
+            <option value="{{ s }}">{{ s }}</option>
+            {% endfor %}
+        </select>
+        <select id="filterCredits" class="form-select form-select-sm" style="width:auto;min-width:100px;background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);">
+            <option value="">All Credits</option>
+            {% for cr in credit_options %}
+            <option value="{{ cr }}">{{ cr }} CR</option>
+            {% endfor %}
+        </select>
+        <select id="filterPrereq" class="form-select form-select-sm" style="width:auto;min-width:130px;background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);">
+            <option value="">Prerequisites</option>
+            <option value="none">No Prerequisites</option>
+            <option value="has">Has Prerequisites</option>
         </select>
         <span id="filterCount" class="small" style="color:var(--ax-muted);white-space:nowrap;"></span>
     </div>
@@ -42,26 +59,34 @@
         {% for c in courses %}
         <div class="ax-cat-card"
              data-cn="{{ c.Course_Number or '' }}"
-             data-dp="{{ c.Day_and_Period or '' }}"
              data-title="{{ (c.display_title or c.Course_Title or '')|lower }}"
              data-code="{{ (c.display_course_number or c.Course_Number or '')|lower }}"
              data-instructor="{{ (c.Instructor or '')|lower }}"
              data-area="{{ (c.Area_of_Study or '')|lower }}"
-             data-level="{{ c.year_level or '' }}">
+             data-areas="{{ (c.areas or [])|join('|')|lower }}"
+             data-level="{{ c.year_level or '' }}"
+             data-semester="{{ (c.semesters or '')|lower }}"
+             data-credits="{{ c.Credits or '' }}"
+             data-prereq="{{ c.Prerequisite or '' }}">
             <div class="ax-cat-card-top">
                 <div class="ax-cat-card-title">{{ c.display_title or c.Course_Title }}</div>
                 <div class="ax-cat-card-meta">
                     <span class="ax-cat-code">{{ c.display_course_number or c.Course_Number }}</span>
                     {% if c.Credits %}<span class="ax-cat-credits">{{ c.Credits }} CR</span>{% endif %}
+                    {% if c.semesters %}<span class="ax-cat-sem">{{ c.semesters }}</span>{% endif %}
                 </div>
             </div>
             <div class="ax-cat-card-bottom">
+                {% if c.areas and c.areas|length > 1 %}
+                <span class="ax-cat-area" title="{{ c.areas|join(', ') }}">{{ c.areas|join(' · ') }}</span>
+                {% else %}
                 <span class="ax-cat-area">{{ c.Area_of_Study or 'General' }}</span>
+                {% endif %}
                 <span class="ax-cat-instructor">{{ c.Instructor or 'TBA' }}</span>
             </div>
         </div>
         {% else %}
-        <div class="text-center py-5" style="color:var(--ax-muted);">No courses available in this dataset.</div>
+        <div class="text-center py-5" style="color:var(--ax-muted);">No courses available.</div>
         {% endfor %}
     </div>
 
@@ -109,6 +134,7 @@
 .ax-cat-card-meta{display:flex;gap:8px;align-items:center;}
 .ax-cat-code{font-size:.76rem;font-weight:500;color:var(--ax-c-blue);font-family:'DM Mono',monospace;}
 .ax-cat-credits{font-size:.72rem;font-weight:600;color:var(--ax-text-dim);background:var(--ax-surface-2);padding:1px 7px;border-radius:99px;}
+.ax-cat-sem{font-size:.72rem;font-weight:500;color:var(--ax-muted);}
 .ax-cat-card-bottom{display:flex;justify-content:space-between;align-items:center;margin-top:6px;}
 .ax-cat-area{font-size:.74rem;color:var(--ax-muted);max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .ax-cat-instructor{font-size:.74rem;color:var(--ax-text-dim);}
@@ -126,6 +152,7 @@
 .ax-detail-badge.badge-credits{color:var(--ax-c-blue);border-color:color-mix(in srgb,var(--ax-c-blue) 30%,transparent);background:color-mix(in srgb,var(--ax-c-blue) 8%,transparent);}
 .ax-detail-badge.badge-area{color:var(--ax-c-violet);border-color:color-mix(in srgb,var(--ax-c-violet) 30%,transparent);background:color-mix(in srgb,var(--ax-c-violet) 8%,transparent);}
 .ax-detail-badge.badge-level{color:var(--ax-c-cyan);border-color:color-mix(in srgb,var(--ax-c-cyan) 30%,transparent);background:color-mix(in srgb,var(--ax-c-cyan) 8%,transparent);}
+.ax-detail-badge.badge-sem{color:var(--ax-c-amber,#d97706);border-color:color-mix(in srgb,var(--ax-c-amber,#d97706) 30%,transparent);background:color-mix(in srgb,var(--ax-c-amber,#d97706) 8%,transparent);}
 .ax-detail-info{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:.82rem;margin-bottom:16px;padding:12px;background:var(--ax-surface-2);border-radius:var(--ax-radius-xs);}
 .ax-detail-info dt{color:var(--ax-muted);font-weight:500;}
 .ax-detail-info dd{color:var(--ax-text);margin:0;font-weight:500;}
@@ -204,17 +231,29 @@
     };
 
     /* ── filter / search ── */
+    const filterSemEl = document.getElementById('filterSemester');
+    const filterCredEl = document.getElementById('filterCredits');
+    const filterPrereqEl = document.getElementById('filterPrereq');
+
     function applyFilters() {
         const q = (searchEl.value || '').trim().toLowerCase();
         const area = (filterAreaEl.value || '').toLowerCase();
         const level = filterLevelEl.value || '';
+        const sem = (filterSemEl.value || '').toLowerCase();
+        const cred = filterCredEl.value || '';
+        const prereqMode = filterPrereqEl.value || '';
         let visible = 0;
 
         for (const card of allCards) {
             const matchQ = !q || card.dataset.title.includes(q) || card.dataset.code.includes(q) || card.dataset.instructor.includes(q);
-            const matchA = !area || card.dataset.area === area;
+            /* area: check both primary area and all areas (pipe-separated) */
+            const matchA = !area || card.dataset.area === area || (card.dataset.areas || '').split('|').some(a => a === area);
             const matchL = !level || card.dataset.level === level;
-            const show = matchQ && matchA && matchL;
+            const matchS = !sem || card.dataset.semester === sem || card.dataset.semester === 'both';
+            const matchC = !cred || String(parseFloat(card.dataset.credits || 0)) === String(parseFloat(cred));
+            const hasPrereq = !!(card.dataset.prereq || '').trim();
+            const matchP = !prereqMode || (prereqMode === 'has' && hasPrereq) || (prereqMode === 'none' && !hasPrereq);
+            const show = matchQ && matchA && matchL && matchS && matchC && matchP;
             card.classList.toggle('ax-cat-hidden', !show);
             if (show) visible++;
         }
@@ -224,6 +263,9 @@
     searchEl.addEventListener('input', applyFilters);
     filterAreaEl.addEventListener('change', applyFilters);
     filterLevelEl.addEventListener('change', applyFilters);
+    filterSemEl.addEventListener('change', applyFilters);
+    filterCredEl.addEventListener('change', applyFilters);
+    filterPrereqEl.addEventListener('change', applyFilters);
 
     /* ── card click → load detail ── */
     listEl.addEventListener('click', async (e) => {
@@ -236,7 +278,6 @@
         activeCard = card;
 
         const cn = card.dataset.cn;
-        const dp = card.dataset.dp;
 
         /* show loading */
         emptyEl.classList.add('d-none');
@@ -249,7 +290,7 @@
         abortCtrl = new AbortController();
 
         try {
-            const params = new URLSearchParams({course_number: cn, day_and_period: dp});
+            const params = new URLSearchParams({course_number: cn});
             const res = await fetch(`/student/api/catalog_course_detail?${params}`, {signal: abortCtrl.signal});
             const data = await res.json();
             if (!res.ok || !data.success) throw new Error(data.message || 'Failed');
@@ -276,38 +317,37 @@
         let html = '';
 
         /* ─ header ─ */
+        const areas = Array.isArray(c.areas) ? c.areas : [];
         html += `<div class="ax-detail-header">
             <div class="ax-detail-title">${esc(c.display_title || c.course_title || 'Untitled')}</div>
             <div class="ax-detail-code">${esc(c.display_course_number || c.course_number || '')}</div>
             <div class="ax-detail-badges">
                 ${c.credits != null ? `<span class="ax-detail-badge badge-credits">${esc(String(c.credits))} Credits</span>` : ''}
-                ${c.area_of_study ? `<span class="ax-detail-badge badge-area">${esc(c.area_of_study)}</span>` : ''}
+                ${areas.length === 1 ? `<span class="ax-detail-badge badge-area">${esc(areas[0])}</span>` : (c.area_of_study ? `<span class="ax-detail-badge badge-area">${esc(c.area_of_study)}</span>` : '')}
                 ${c.year_level ? `<span class="ax-detail-badge badge-level">Level ${esc(String(c.year_level))}00</span>` : ''}
+                ${c.semesters ? `<span class="ax-detail-badge badge-sem">${esc(c.semesters)}</span>` : ''}
             </div>
         </div>`;
 
         /* ─ info grid ─ */
         html += `<dl class="ax-detail-info">
             <dt>Instructor</dt><dd>${esc(c.instructor || 'TBA')}</dd>
-            <dt>Schedule</dt><dd>${esc(c.day_period || 'TBA')}</dd>
-            ${c.semester ? `<dt>Semester</dt><dd>${esc(c.semester)}</dd>` : ''}
-            ${c.year ? `<dt>Year</dt><dd>${esc(c.year)}</dd>` : ''}
+            ${c.semesters ? `<dt>Semester</dt><dd>${esc(c.semesters)}</dd>` : ''}
         </dl>`;
 
-        /* ─ areas of study ─ */
-        const areas = Array.isArray(c.areas) ? c.areas : [];
+        /* ─ areas of study (multi-area) ─ */
         if (areas.length > 1) {
             html += `<div class="ax-detail-section">
                 <div class="ax-detail-section-title">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z"/><path d="M6 6h.008v.008H6V6z"/></svg>
-                    Areas of Study
+                    Areas of Study (${areas.length})
                 </div>
                 <div class="ax-areas-wrap">${areas.map(a => `<span class="ax-area-pill">${esc(a)}</span>`).join('')}</div>
             </div>`;
         }
 
         /* ─ sections ─ */
-        if (sections.length > 1) {
+        if (sections.length > 0) {
             html += `<div class="ax-detail-section">
                 <div class="ax-detail-section-title">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>
@@ -316,6 +356,7 @@
                 ${sections.map(s => `<div class="ax-section-row">
                     <span>${esc(s.day_period || 'TBA')}</span>
                     <span style="color:var(--ax-text-dim);">${esc(s.instructor || 'TBA')}</span>
+                    ${s.semester ? `<span class="badge" style="font-size:.68rem;background:var(--ax-surface-2);color:var(--ax-muted);">${esc(s.semester)}</span>` : ''}
                 </div>`).join('')}
             </div>`;
         }

@@ -599,9 +599,157 @@ def _manual_or_csv_course_to_catalog_row(row: Course) -> Dict[str, Any]:
         'semester': str(row.semester or '').strip(),
         'year': str(row.year or '').strip(),
         'Year_Level': row.year_level,
+        'year_level': row.year_level,
         'source': str(row.source or '').strip().lower() or 'manual',
         'updated_ts': row.last_updated or row.updated_at or row.created_at,
     }
+
+
+# ─── Prefix → Subject Area mapping (for cross-listed courses) ───
+_PREFIX_TO_AREA: Dict[str, str] = {
+    'ARTS': 'Interdisciplinary Arts - Arts',
+    'DATA': 'Data Science',
+    'ECON': 'Global Business and Economics',
+    'EFAE': 'English for Academic Excellence',
+    'FNDN': 'Foundation Courses',
+    'HIST': 'Japan Studies - History',
+    'INTA': 'Interdisciplinary Arts - Interdisciplinary Arts',
+    'JPNA': 'Japan Studies - Japan Studies',
+    'JPNL': 'Japan Studies - Japanese Language',
+    'LANG': 'Interdisciplinary Arts - Language Arts',
+    'MUSC': 'Interdisciplinary Arts - Music',
+    'PART': 'Interdisciplinary Arts - Performing Arts',
+    'PSCI': 'Political Science',
+    'PSYC': 'Psychology',
+    'QREA': 'Quantitative Reasoning and Natural Sciences',
+    'SCNS': 'Quantitative Reasoning and Natural Sciences',
+    'SOCI': 'Sociology',
+    'SPRT': 'Health and Physical Education',
+}
+
+
+def _derive_areas_from_course_number(course_number: str) -> list[str]:
+    """Derive all subject areas from a course number's prefixes (e.g. ECON/DATA291 → GBE + Data Science)."""
+    raw = re.sub(r'[\d\s]', '', str(course_number or '')).strip().upper()
+    prefixes = [p.strip() for p in raw.split('/') if p.strip()]
+    areas: list[str] = []
+    seen: set[str] = set()
+    for prefix in prefixes:
+        area = _PREFIX_TO_AREA.get(prefix)
+        if area and area not in seen:
+            areas.append(area)
+            seen.add(area)
+    return areas
+
+
+def _normalize_semester_label(raw_semester: str) -> str:
+    """Extract Spring/Fall from semester strings like 'Spring Semester 2025'."""
+    s = str(raw_semester or '').strip().lower()
+    if 'spring' in s:
+        return 'Spring'
+    if 'fall' in s:
+        return 'Fall'
+    return ''
+
+
+def _build_combined_course_catalog() -> list[Dict[str, Any]]:
+    """Build a deduplicated course catalog from ALL datasets.
+
+    Groups by normalized course_number (ignoring semester/period), picks the
+    best row for display, collects all semesters into a 'semesters' label,
+    and derives subject areas from course number prefixes.
+    """
+    all_courses = Course.query.all()
+    candidates = [_manual_or_csv_course_to_catalog_row(r) for r in all_courses]
+
+    # Group by normalized course number
+    groups: Dict[str, list[Dict[str, Any]]] = {}
+    for row in candidates:
+        key = _normalize_course_number(row.get('Course_Number'))
+        if not key:
+            continue
+        groups.setdefault(key, []).append(row)
+
+    bad_areas = {'1year', '2year', '3year', '4year'}
+
+    combined: list[Dict[str, Any]] = []
+    for key, rows in groups.items():
+        # Pick the best row (latest, highest priority source)
+        rows.sort(
+            key=lambda r: (
+                _source_priority(r.get('source')),
+                r.get('updated_ts') or datetime.min,
+            ),
+            reverse=True,
+        )
+        # Pick a winner that has a valid instructor
+        winner = rows[0]
+        for r in rows:
+            inst = _normalize_instructor(r.get('Instructor'))
+            if inst:
+                winner = r
+                break
+
+        # Collect semesters
+        sem_set: set[str] = set()
+        for r in rows:
+            label = _normalize_semester_label(r.get('semester'))
+            if label:
+                sem_set.add(label)
+        if 'Spring' in sem_set and 'Fall' in sem_set:
+            semesters_label = 'Both'
+        elif 'Spring' in sem_set:
+            semesters_label = 'Spring'
+        elif 'Fall' in sem_set:
+            semesters_label = 'Fall'
+        else:
+            semesters_label = ''
+
+        # Collect all areas from CSV rows (ignoring bad/misaligned ones)
+        csv_areas: set[str] = set()
+        for r in rows:
+            area = str(r.get('Area_of_Study') or '').strip()
+            if area and area.lower() not in bad_areas and not re.match(r'^[A-Z]+\s[A-Za-z]+$', area):
+                csv_areas.add(area)
+
+        # Derive areas from course number prefixes
+        prefix_areas = _derive_areas_from_course_number(winner.get('Course_Number'))
+
+        # Merge: prefix-derived areas + CSV areas (prefix areas take priority for ordering)
+        all_areas: list[str] = list(prefix_areas)
+        for a in sorted(csv_areas):
+            if a not in all_areas:
+                all_areas.append(a)
+
+        primary_area = all_areas[0] if all_areas else str(winner.get('Area_of_Study') or 'General')
+
+        # Collect year level — pick from any row that has a valid one
+        year_level = None
+        for r in rows:
+            yl = r.get('Year_Level') or r.get('year_level')
+            if yl is not None:
+                try:
+                    year_level = int(yl)
+                    break
+                except (ValueError, TypeError):
+                    pass
+
+        entry = _add_display_fields(dict(winner))
+        entry['Area_of_Study'] = primary_area
+        entry['areas'] = all_areas
+        entry['semesters'] = semesters_label
+        entry['year_level'] = year_level
+        entry['Year_Level'] = year_level
+        entry['Instructor'] = _normalize_instructor(winner.get('Instructor')) or 'TBA'
+        combined.append(entry)
+
+    combined.sort(
+        key=lambda r: (
+            str(r.get('Area_of_Study') or ''),
+            str(r.get('Course_Number') or ''),
+        )
+    )
+    return combined
 
 
 def _active_subject_areas() -> Dict[str, SubjectArea]:
@@ -1301,10 +1449,15 @@ def _build_prerequisite_status(
                 untrackable_count += 1
             continue
 
-        if _looks_like_trackable_course_term(term):
+        # Check if this term is trackable — either looks like a course code (XX123)
+        # or matches a known course title in the catalog.
+        normalized_term = normalize_course_code_for_prereqs(term)
+        is_code_like = _looks_like_trackable_course_term(term)
+        is_known_title = bool(normalized_term and normalized_term in title_lookup)
+
+        if is_code_like or is_known_title:
             trackable_count += 1
-            normalized_term = normalize_course_code_for_prereqs(term)
-            display_term = title_lookup.get(normalized_term, 'Required course') if normalized_term else 'Required course'
+            display_term = title_lookup.get(normalized_term, term) if normalized_term else term
             if normalized_term and normalized_term in completed_set:
                 items.append(
                     {
@@ -2286,28 +2439,24 @@ def api_catalog_course_detail():
     """Full course detail for the catalog browser — includes dependency graph."""
     try:
         course_number_raw = str(request.args.get('course_number') or '').strip()
-        day_period_raw = str(request.args.get('day_and_period') or '').strip().lower()
 
         if not course_number_raw:
             return jsonify({'success': False, 'message': 'course_number is required.'}), 400
 
-        catalog_rows, dataset_id = _load_scraped_catalog_for_term('', '')
-        if not catalog_rows:
+        combined = _build_combined_course_catalog()
+        if not combined:
             return jsonify({'success': False, 'message': 'No course data available.'}), 404
 
         normalized_target = _normalize_course_number(course_number_raw)
-        matches = [r for r in catalog_rows if _normalize_course_number(r.get('Course_Number')) == normalized_target]
-        if not matches:
+        target_row = None
+        for r in combined:
+            if _normalize_course_number(r.get('Course_Number')) == normalized_target:
+                target_row = dict(r)
+                break
+        if not target_row:
             return jsonify({'success': False, 'message': 'Course not found in catalog.'}), 404
 
-        target = matches[0]
-        if day_period_raw:
-            for row in matches:
-                if str(row.get('Day_and_Period') or '').strip().lower() == day_period_raw:
-                    target = row
-                    break
-
-        target_row = _add_display_fields(dict(target))
+        target_row = _add_display_fields(target_row)
         metadata = _build_course_metadata_index().get(normalized_target, {})
         if not target_row.get('Course_Title'):
             target_row['Course_Title'] = metadata.get('title') or normalized_target
@@ -2326,7 +2475,8 @@ def api_catalog_course_detail():
             prereq_title_lookup=_build_prereq_title_lookup(),
         )
 
-        catalog_for_graph = _catalog_rows_with_local_course_ids(catalog_rows)
+        # Use the full combined catalog for dependency scanning
+        catalog_for_graph = _catalog_rows_with_local_course_ids(combined)
         dep_graph = dependency_graph_for_course(
             course_number=str(target_row.get('Course_Number') or ''),
             course_title=str(target_row.get('Course_Title') or ''),
@@ -2336,26 +2486,29 @@ def api_catalog_course_detail():
             normalizer=normalize_course_code_for_prereqs,
         )
 
-        # Build all sections the course covers
-        all_sections = [
-            r for r in catalog_rows
-            if _normalize_course_number(r.get('Course_Number')) == normalized_target
-        ]
-        sections = []
-        for s in all_sections:
-            sections.append({
-                'day_period': str(s.get('Day_and_Period') or 'TBA'),
-                'instructor': _normalize_instructor(s.get('Instructor')) or 'TBA',
-                'semester': str(s.get('semester') or ''),
-                'year': str(s.get('year') or ''),
-            })
+        # Areas — already derived in the combined catalog
+        areas = target_row.get('areas') or _derive_areas_from_course_number(target_row.get('Course_Number'))
 
-        # Collect all subject areas this course appears under
-        areas_set = sorted({
-            str(r.get('Area_of_Study') or '').strip()
-            for r in all_sections
-            if str(r.get('Area_of_Study') or '').strip()
-        })
+        # Sections: collect ALL rows for this course across all datasets
+        all_course_rows = [
+            _manual_or_csv_course_to_catalog_row(r) for r in
+            Course.query.filter(func.upper(Course.course_number) == normalized_target).all()
+        ]
+        seen_sections: set[tuple[str, str]] = set()
+        sections = []
+        for s in all_course_rows:
+            inst = _normalize_instructor(s.get('Instructor')) or 'TBA'
+            dp = str(s.get('Day_and_Period') or 'TBA')
+            sem = _normalize_semester_label(s.get('semester'))
+            key = (dp.lower(), sem.lower())
+            if key in seen_sections:
+                continue
+            seen_sections.add(key)
+            sections.append({
+                'day_period': dp,
+                'instructor': inst,
+                'semester': sem,
+            })
 
         unlockables = dep_graph.get('dependent_unlockables', [])[:200]
         conditional_paths = dep_graph.get('conditional_paths', [])[:200]
@@ -2375,12 +2528,10 @@ def api_catalog_course_detail():
                 'credits': target_row.get('Credits'),
                 'instructor': target_row.get('Instructor'),
                 'area_of_study': target_row.get('Area_of_Study'),
-                'areas': areas_set,
+                'areas': areas,
                 'prerequisite': target_row.get('Prerequisite'),
-                'day_period': str(target_row.get('Day_and_Period') or 'TBA'),
                 'year_level': target_row.get('year_level'),
-                'semester': str(target_row.get('semester') or ''),
-                'year': str(target_row.get('year') or ''),
+                'semesters': target_row.get('semesters', ''),
             },
             'sections': sections,
             'prerequisite_status': prereq_status,
@@ -2404,28 +2555,29 @@ def api_catalog_course_detail():
 @student_bp.route('/courses')
 @login_required
 def courses_view():
-    resolved_dataset_name = ''
     all_rows: list[dict] = []
     subject_options: list[str] = []
     year_level_options: list[int] = []
+    semester_options: list[str] = []
+    credit_options: list[float] = []
 
     try:
-        resolved_dataset_name = _resolve_contextual_dataset_name('', '')
-        catalog_rows, _dataset_id = _load_scraped_catalog_for_term('', '')
-        all_rows = [_add_display_fields(dict(r)) for r in catalog_rows]
-
+        all_rows = _build_combined_course_catalog()
         subject_options = sorted({str(r.get('Area_of_Study') or '').strip() for r in all_rows if str(r.get('Area_of_Study') or '').strip()})
         year_level_options = sorted({int(r.get('year_level') or 0) for r in all_rows if r.get('year_level')})
+        semester_options = sorted({str(r.get('semesters') or '').strip() for r in all_rows if str(r.get('semesters') or '').strip()})
+        credit_options = sorted({float(r.get('Credits') or 0) for r in all_rows if r.get('Credits')})
     except Exception as exc:
         db.session.rollback()
         current_app.logger.error('courses_view failed: %s', exc, exc_info=True)
 
     return render_template(
         'Student/courses.html',
-        resolved_dataset_name=resolved_dataset_name,
         courses=all_rows,
         subject_options=subject_options,
         year_level_options=year_level_options,
+        semester_options=semester_options,
+        credit_options=credit_options,
     )
 
 # --- Premium Dashboard Logic ---

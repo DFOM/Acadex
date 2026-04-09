@@ -176,7 +176,7 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - Create-schedule year/semester options are now driven strictly by `DatasetRegistry` availability (no free-form term selection).
 - Future planning supports fallback to the nearest available registry term within `current_year + 5` and surfaces warning messages.
 - Search/browse courses by contextual dataset resolution with optional future-plan level scope toggle (`my level` vs `all levels`).
-- **Course Catalog browser**: Card-based list with instant text search, area/level filters, and AJAX-powered detail drawer showing prerequisites (satisfied/missing/untrackable), full dependency graph (Required/OR with alternatives), areas of study coverage, and multiple sections.
+- **Course Catalog browser**: Combined deduplicated catalog across ALL datasets/years. Card-based list with search, area, level, semester (Spring/Fall/Both), credits, and has-prerequisites filters. AJAX-powered detail drawer with prerequisites (satisfied/missing/untrackable — now resolves title-based prereqs like "Statistics"), full dependency graph, multi-area display for cross-listed courses (derived from course number prefixes), and sections.
 - Add/remove schedule courses with:
   - real time-overlap conflict detection using Period start/end windows
   - prerequisite status checks
@@ -591,6 +591,16 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 - **Responsive**: Stacks to single column on mobile (≤992px).
 - **Route simplification**: `courses_view()` now only loads the catalog list; all detail logic moved to the API endpoint.
 - **New CSS classes**: `.ax-catalog-layout`, `.ax-catalog-list`, `.ax-catalog-drawer`, `.ax-cat-card`, `.ax-detail-*`, `.ax-prereq-*`, `.ax-unlock-*`, `.ax-area-pill`, `.ax-eligible-banner`.
+
+### 2025-06-13 – Course catalog: combined catalog, multi-area, prereq fix, more filters
+
+- **Combined catalog**: `_build_combined_course_catalog()` merges ALL datasets into a single deduplicated course list. Groups by normalized course number, picks best row, collects semester availability (Spring/Fall/Both).
+- **Multi-area fix**: Cross-listed courses (e.g. ECON/DATA291) now derive areas from course number prefixes via `_PREFIX_TO_AREA` mapping + `_derive_areas_from_course_number()`. Both areas shown as pills on cards and detail drawer.
+- **Prerequisite fix**: `_build_prerequisite_status()` now recognizes title-based prerequisites (e.g. "Statistics") by checking `prereq_title_lookup` before marking as untrackable. Previously only course code patterns (XX123) were trackable.
+- **Year_Level field fix**: Added lowercase `year_level` key alongside `Year_Level` in `_manual_or_csv_course_to_catalog_row()` to fix template/JS mismatch.
+- **New filters**: Semester (Spring/Fall/Both), Credits, and Has Prerequisites filters added to the course catalog filter bar.
+- **Template updates**: Removed year/period display, added semester badge on cards, multi-area display on card bottom row, semester badge in detail drawer badges.
+- **Data quality**: Bad area values (misaligned CSV columns like "1Year", instructor names) are filtered out during catalog building.
 
 ---
 
