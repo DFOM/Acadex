@@ -182,6 +182,62 @@ class TestDependencyGraphSets(unittest.TestCase):
         paths_c3 = graph_c3['conditional_paths']
         self.assertEqual(0, len(paths_c3))
 
+    def test_text_fallback_for_freetext_prerequisites(self):
+        """Real-world prerequisite text with commas/colons can't be parsed.
+
+        The graph engine should fall back to text-based matching and still
+        find unlockables + detect OR groups.
+        """
+        catalog = [
+            {
+                'Course_Number': 'EFAE010',
+                'Course_Title': 'English for Academic Excellence (EAE): A',
+                'Day_and_Period': 'Mon 1',
+                'Prerequisite': 'None',
+            },
+            {
+                'Course_Number': 'EFAE020',
+                'Course_Title': 'English for Academic Excellence (EAE): B',
+                'Day_and_Period': 'Mon 2',
+                # This has commas — parser will fail, text fallback should catch it
+                'Prerequisite': 'English for Academic Excellence (EFAE) : A OR equivalent',
+            },
+            {
+                'Course_Number': 'FNDN050',
+                'Course_Title': 'Composition Lab',
+                'Day_and_Period': 'Thu 6',
+                # Commas make this unparseable
+                'Prerequisite': 'EFAE020 English for Academic Excellence (EFAE) : B OR equivalent, AND Placement test',
+            },
+            {
+                'Course_Number': 'FNDN100',
+                'Course_Title': 'Academic Reading',
+                'Day_and_Period': 'Tue 2',
+                'Prerequisite': 'English for Academic Excellence (EFAE) : B',
+            },
+        ]
+
+        # From perspective of EFAE020 (a course referenced by others via title)
+        graph = dependency_graph_for_course(
+            course_number='EFAE020',
+            course_title='English for Academic Excellence (EAE): B',
+            prerequisite_text='English for Academic Excellence (EFAE) : A OR equivalent',
+            catalog_courses=catalog,
+            completed_courses=set(),
+        )
+
+        unlocks = graph['dependent_unlockables']
+        unlock_numbers = [u['course_number'] for u in unlocks]
+        # FNDN050 references EFAE020 explicitly, FNDN100 references the title
+        self.assertIn('FNDN050', unlock_numbers)
+
+        # The graph should have found at least one unlockable via text fallback
+        self.assertGreater(len(unlocks), 0)
+
+        # Direct requirements should have text-based fallback entries
+        direct = graph['direct_requirements']
+        self.assertGreater(len(direct), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

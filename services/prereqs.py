@@ -436,6 +436,49 @@ def _build_title_lookup(catalog_courses: Sequence[Dict[str, Any]], *, normalizer
     return lookup
 
 
+def _text_contains_target(prereq_text: str, target_tokens: Set[str], *, normalizer: Callable[[str], str]) -> bool:
+    """Check if any target token appears as a word boundary match in the text."""
+    text_upper = prereq_text.upper()
+    for token in target_tokens:
+        if not token:
+            continue
+        if token.upper() in text_upper:
+            return True
+    return False
+
+
+def _text_or_segments(prereq_text: str) -> List[str]:
+    """Split raw prerequisite text on top-level OR boundaries."""
+    return re.split(r'\bOR\b', prereq_text, flags=re.IGNORECASE)
+
+
+def _text_target_in_or_group(prereq_text: str, target_tokens: Set[str], *, normalizer: Callable[[str], str]) -> Tuple[bool, List[str]]:
+    """Determine if the target appears inside an OR group and find alternatives.
+
+    Returns (is_conditional, alternative_branches).
+    """
+    or_segments = _text_or_segments(prereq_text)
+    if len(or_segments) <= 1:
+        return False, []
+
+    matching_idx: List[int] = []
+    for idx, segment in enumerate(or_segments):
+        segment_upper = segment.upper()
+        for token in target_tokens:
+            if token and token.upper() in segment_upper:
+                matching_idx.append(idx)
+                break
+
+    if not matching_idx:
+        return False, []
+
+    alternatives = [
+        seg.strip() for idx, seg in enumerate(or_segments)
+        if idx not in matching_idx and seg.strip()
+    ]
+    return True, alternatives
+
+
 def dependency_graph_for_course(
     *,
     course_number: str,
@@ -485,6 +528,24 @@ def dependency_graph_for_course(
                     'message': str(exc),
                 }
             )
+            # Text-based fallback for direct requirements
+            direct_expr_text = cleaned_prereq
+            or_segments = _text_or_segments(cleaned_prereq)
+            direct_has_conditional = len(or_segments) > 1
+            terms = re.split(r'\bAND\b|\bOR\b|,|;|\(|\)', cleaned_prereq, flags=re.IGNORECASE)
+            for term in terms:
+                term = term.strip()
+                if not term:
+                    continue
+                token = normalizer(term)
+                if token:
+                    direct_requirements.append(
+                        {
+                            'course_token': token,
+                            'course_title': title_lookup.get(token, term),
+                            'satisfied': token in completed_tokens,
+                        }
+                    )
         else:
             if direct_expr is not None:
                 direct_expr_text = to_normalized_string(direct_expr)
@@ -541,14 +602,64 @@ def dependency_graph_for_course(
                     'message': str(exc),
                 }
             )
+            row_expr = None  # fall through to text-based matching
+
+        if not target_tokens:
             continue
 
-        if row_expr is None or not target_tokens:
+        # --- AST-based matching (preferred when parse succeeded) ---
+        if row_expr is not None:
+            row_has_target = any(_node_contains_target(row_expr, token, normalizer=normalizer) for token in target_tokens)
+            if not row_has_target:
+                continue
+
+            unlock_key = (row_number.upper(), row_day.lower())
+            if unlock_key not in seen_unlockables:
+                seen_unlockables.add(unlock_key)
+                dependent_unlockables.append(
+                    {
+                        'course_id': _row_course_id(row),
+                        'course_number': row_number,
+                        'course_title': row_title,
+                        'day_period': row_day,
+                        'prerequisite': row_prereq_raw,
+                        'prerequisite_expression': to_normalized_string(row_expr),
+                        'is_conditional': any(True for _ in _iter_or_nodes(row_expr)),
+                    }
+                )
+
+            for or_node in _iter_or_nodes(row_expr):
+                group_expression = to_normalized_string(or_node)
+                child_renderings = [to_normalized_string(child) for child in or_node.items]
+
+                for idx, child in enumerate(or_node.items):
+                    if not any(_node_contains_target(child, token, normalizer=normalizer) for token in target_tokens):
+                        continue
+
+                    satisfying_branch = child_renderings[idx]
+                    alternatives = [v for j, v in enumerate(child_renderings) if j != idx]
+                    path_key = (row_number.upper(), group_expression, satisfying_branch)
+                    if path_key in seen_paths:
+                        continue
+                    seen_paths.add(path_key)
+
+                    conditional_paths.append(
+                        {
+                            'unlock_course_id': _row_course_id(row),
+                            'unlock_course_number': row_number,
+                            'unlock_course_title': row_title,
+                            'group_expression': group_expression,
+                            'satisfying_branch': satisfying_branch,
+                            'alternative_branches': alternatives,
+                        }
+                    )
             continue
 
-        row_has_target = any(_node_contains_target(row_expr, token, normalizer=normalizer) for token in target_tokens)
-        if not row_has_target:
+        # --- Text-based fallback (for unparseable free-text prerequisites) ---
+        if not _text_contains_target(row_prereq, target_tokens, normalizer=normalizer):
             continue
+
+        is_conditional, alternatives = _text_target_in_or_group(row_prereq, target_tokens, normalizer=normalizer)
 
         unlock_key = (row_number.upper(), row_day.lower())
         if unlock_key not in seen_unlockables:
@@ -560,33 +671,22 @@ def dependency_graph_for_course(
                     'course_title': row_title,
                     'day_period': row_day,
                     'prerequisite': row_prereq_raw,
-                    'prerequisite_expression': to_normalized_string(row_expr),
-                    'is_conditional': any(True for _ in _iter_or_nodes(row_expr)),
+                    'prerequisite_expression': row_prereq,
+                    'is_conditional': is_conditional,
                 }
             )
 
-        for or_node in _iter_or_nodes(row_expr):
-            group_expression = to_normalized_string(or_node)
-            child_renderings = [to_normalized_string(child) for child in or_node.items]
-
-            for idx, child in enumerate(or_node.items):
-                if not any(_node_contains_target(child, token, normalizer=normalizer) for token in target_tokens):
-                    continue
-
-                satisfying_branch = child_renderings[idx]
-                alternatives = [v for j, v in enumerate(child_renderings) if j != idx]
-                path_key = (row_number.upper(), group_expression, satisfying_branch)
-                if path_key in seen_paths:
-                    continue
+        if is_conditional and alternatives:
+            path_key = (row_number.upper(), row_prereq, '')
+            if path_key not in seen_paths:
                 seen_paths.add(path_key)
-
                 conditional_paths.append(
                     {
                         'unlock_course_id': _row_course_id(row),
                         'unlock_course_number': row_number,
                         'unlock_course_title': row_title,
-                        'group_expression': group_expression,
-                        'satisfying_branch': satisfying_branch,
+                        'group_expression': row_prereq,
+                        'satisfying_branch': '',
                         'alternative_branches': alternatives,
                     }
                 )

@@ -271,7 +271,9 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Candidate patch deployed for `/student/courses` internal-server-error on course click (template prerequisite iteration guard). **Confirmed fixed.**
   - Phase 2 dependency-graph endpoint candidate deployed (`/api/student/course-details/<id>` alias + student blueprint path).
   - OR/AND dependency display: courses view now uses `dependency_graph_for_course` engine to distinguish hard (AND) prerequisites from conditional (OR) alternatives in the "What This Course Unlocks" panel.
-  - Local validation passed (`51 passed`), awaiting Render/live confirmation.
+  - Text-based fallback: graph engine now falls back to substring matching when free-text prerequisites (commas, colons, course titles) cannot be parsed by the strict AST parser. This ensures reverse dependency lookup works with real-world catalog data.
+  - Direct prerequisites panel now shows raw prerequisite text alongside status badges for transparency.
+  - Local validation passed (`52 passed`), awaiting Render/live confirmation.
 
 ---
 
