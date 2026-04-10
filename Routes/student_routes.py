@@ -23,6 +23,7 @@ from utils import (
     _strip_brackets_quotes,
     clean_display_name,
     strip_section_suffix,
+    current_dataset_names,
 )
 from services.eligibility import normalize_course_code_for_prereqs
 from services.conflicts import parse_day_period_blocks
@@ -2725,22 +2726,37 @@ def api_faculty_detail(faculty_id: int):
         if r:
             my_rating = {'score': r.score, 'comment': r.comment}
 
-    courses_taught = []
-    seen_titles = set()
+    _active_ds = current_dataset_names()
+
+    def _is_current(c) -> bool:
+        ds = (c.dataset_name or '').strip().lower()
+        if ds and ds in _active_ds:
+            return True
+        if (c.source or '').strip().lower() == 'manual' and not ds:
+            return True
+        return False
+
+    # Deduplicate by base title; active if ANY section is in current dataset
+    _course_map: dict[str, dict] = {}
     for c in (row.courses or []):
         title = (c.title or '').strip()
         if not title:
             title = c.course_number or 'Unknown'
         base_title = strip_section_suffix(title)
         base_key = base_title.lower()
-        if base_key in seen_titles:
-            continue
-        seen_titles.add(base_key)
-        courses_taught.append({
-            'course_number': c.course_number,
-            'title': base_title,
-            'area': getattr(c, 'Area_of_Study', None) or getattr(c, 'area_of_study', None),
-        })
+        cur = _is_current(c)
+        if base_key not in _course_map:
+            _course_map[base_key] = {
+                'course_number': c.course_number,
+                'title': base_title,
+                'area': getattr(c, 'Area_of_Study', None) or getattr(c, 'area_of_study', None),
+                'active': cur,
+            }
+        elif cur and not _course_map[base_key]['active']:
+            _course_map[base_key]['active'] = True
+
+    # Sort: active courses first, then alphabetical
+    courses_taught = sorted(_course_map.values(), key=lambda x: (not x['active'], x['title']))
 
     return jsonify({
         'success': True,

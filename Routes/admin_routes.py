@@ -38,6 +38,7 @@ from utils import (
     _strip_brackets_quotes,
     clean_display_name,
     strip_section_suffix,
+    current_dataset_names,
 )
 from flask import Response
 import json
@@ -487,24 +488,41 @@ def _merged_courses_for_admin() -> list[dict]:
     return rows
 
 
-def _serialize_faculty(row: Faculty) -> dict:
+def _serialize_faculty(row: Faculty, _active_ds: set[str] | None = None) -> dict:
+    if _active_ds is None:
+        _active_ds = current_dataset_names()
+
     def _ref_for_course(c: Course) -> str:
         src = str(getattr(c, 'source', 'manual') or 'manual').strip().lower()
         if src not in {'manual', 'csv'}:
             src = 'manual'
         return f'{src}:{c.id}'
 
-    # Deduplicate course labels by base title (strip section suffixes)
-    _seen_labels: set[str] = set()
-    _deduped_labels: list[str] = []
+    def _is_current(c: Course) -> bool:
+        ds = (c.dataset_name or '').strip().lower()
+        if ds and ds in _active_ds:
+            return True
+        # Manual courses with no dataset are always current
+        if (c.source or '').strip().lower() == 'manual' and not ds:
+            return True
+        return False
+
+    # Deduplicate by base title; mark active if ANY section is in current dataset
+    _course_map: dict[str, dict] = {}  # base_key → {label, active}
     for c in (row.courses or []):
         lbl = str(c.title or '').strip()
         if not lbl:
             continue
-        base = strip_section_suffix(lbl).lower()
-        if base not in _seen_labels:
-            _seen_labels.add(base)
-            _deduped_labels.append(strip_section_suffix(lbl))
+        base = strip_section_suffix(lbl)
+        base_key = base.lower()
+        cur = _is_current(c)
+        if base_key not in _course_map:
+            _course_map[base_key] = {'label': base, 'active': cur}
+        elif cur and not _course_map[base_key]['active']:
+            _course_map[base_key]['active'] = True
+
+    _deduped_labels = [v['label'] for v in _course_map.values()]
+    _course_active = [v['active'] for v in _course_map.values()]
 
     # Placeholder names that indicate a not-yet-assigned faculty
     _PLACEHOLDER_PATTERNS = {'新採用教員', 'new hire', 'new faculty', 'tbd', 'tba'}
@@ -521,8 +539,10 @@ def _serialize_faculty(row: Faculty) -> dict:
         'assigned_courses_count': len(row.courses or []),
         'assigned_course_refs': [_ref_for_course(c) for c in (row.courses or [])],
         'assigned_course_labels': list(_deduped_labels),
+        'assigned_course_active': list(_course_active),
         'course_refs': [_ref_for_course(c) for c in (row.courses or [])],
         'course_labels': list(_deduped_labels),
+        'course_active': list(_course_active),
         'advisor_area_ids': [a.id for a in (row.advisor_areas or [])],
         'advisor_area_names': [a.name for a in (row.advisor_areas or [])],
         'advisor_areas': [a.name for a in (row.advisor_areas or [])],
@@ -3318,10 +3338,11 @@ def api_faculty():
         rows = Faculty.query.order_by(Faculty.name.asc()).all()
         courses = _merged_courses_for_admin()
         areas = SubjectArea.query.order_by(SubjectArea.name.asc()).all()
+        _active_ds = current_dataset_names()
         return jsonify(
             {
                 'success': True,
-                'faculty': [_serialize_faculty(r) for r in rows],
+                'faculty': [_serialize_faculty(r, _active_ds) for r in rows],
                 'courses': courses,
                 'advisor_areas': [{'id': a.id, 'name': a.name} for a in areas],
             }

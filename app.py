@@ -21,7 +21,7 @@ from Routes.student_routes import student_bp
 from Routes.schedule_routes import schedule_bp
 from utils import clean_display_name as _clean_display_name
 
-VERSION = 'Beta 1.6.2'
+VERSION = 'Beta 1.6.3'
 APP_STARTED_AT = datetime.utcnow().replace(tzinfo=None).isoformat() + 'Z'
 
 app = Flask(__name__)

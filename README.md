@@ -11,9 +11,16 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.6.2**
+- Current version: **Beta 1.6.3**
 
 ## Changelog
+
+### Beta 1.6.3 — 2026-04-10
+
+- **Historical course highlighting**: Faculty course lists now show ALL courses ever taught across all datasets. Courses still present in the most recent dataset appear normally; discontinued courses appear greyed out (dashed border, italic, reduced opacity) with "no longer offered" tooltip.
+- Active/inactive status determined by comparing each course’s `dataset_name` against the latest `DatasetRegistry` year. Manual courses with no dataset default to active.
+- Courses sorted active-first, then alphabetical. Section header shows "Courses (N + M past)".
+- Admin faculty table shows inactive course labels with strikethrough.
 
 ### Beta 1.6.2 — 2026-04-10
 

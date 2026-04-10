@@ -621,6 +621,24 @@ def strip_section_suffix(title: str) -> str:
     ).strip()
 
 
+def current_dataset_names() -> set[str]:
+    """Return the lowercased dataset names considered 'current' (most recent year)."""
+    latest = DatasetRegistry.query.order_by(
+        DatasetRegistry.created_at.desc()
+    ).first()
+    if not latest:
+        return set()
+    latest_year = (latest.year or '').strip()
+    if not latest_year:
+        # No year info — just use the single most-recent dataset
+        return {(latest.name or '').strip().lower()}
+    # All datasets from the same year are current
+    rows = DatasetRegistry.query.filter(
+        DatasetRegistry.year == latest_year
+    ).all()
+    return {(r.name or '').strip().lower() for r in rows if r.name}
+
+
 def normalize_faculty_name(name: str) -> str:
     cleaned = _strip_brackets_quotes(str(name or ''))
     cleaned = re.sub(r'\s+', ' ', cleaned.strip())

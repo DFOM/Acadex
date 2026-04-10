@@ -299,6 +299,15 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 # 6. Change Log (Chronological)
 
+## 2026-04-10 — Beta 1.6.3 (Historical course highlighting)
+
+- Added `current_dataset_names()` in utils.py — returns the set of dataset names from the most recent year in DatasetRegistry.
+- `_serialize_faculty()` now accepts `_active_ds` parameter; adds `course_active` parallel array alongside `course_labels`.
+- `api_faculty_detail()` adds `active` boolean per course; deduplicates by base title with active-if-any-section-is-current logic.
+- Inactive courses: dashed border, italic, reduced opacity (`.ax-fac-course-inactive` CSS class).
+- Admin table: inactive course labels shown with strikethrough + opacity.
+- Courses sorted active-first in student detail drawer.
+
 ## 2026-04-10 — Beta 1.6.2 (Section dedup & display-name cleanup)
 
 - Added `strip_section_suffix()` util — removes trailing "Sec 1", "Section A" etc. for dedup comparison.

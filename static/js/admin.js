@@ -448,7 +448,17 @@ $(document).ready(function() {
                         <td>${nameHtml}</td>
                         <td>${escapeHtml(row.email || '—')}</td>
                         <td>${escapeHtml((row.advisor_area_names || []).join(', ') || '—')}</td>
-                        <td>${escapeHtml((row.course_labels || []).join(', ') || '—')}</td>
+                        <td>${(function(){
+                            const labels = row.course_labels || [];
+                            const active = row.course_active || [];
+                            if(!labels.length) return '—';
+                            return labels.map((lbl, i) => {
+                                const isActive = active[i] !== false;
+                                return isActive
+                                    ? escapeHtml(lbl)
+                                    : `<span style="opacity:.45;font-style:italic;text-decoration:line-through" title="No longer offered">${escapeHtml(lbl)}</span>`;
+                            }).join(', ');
+                        })()}</td>
                         <td>
                             <button class="btn btn-sm btn-primary edit-faculty-btn" data-id="${row.id}">Edit</button>
                             <button class="btn btn-sm btn-outline-danger ms-1 delete-faculty-btn" data-id="${row.id}">Delete</button>${reassignBtn}
