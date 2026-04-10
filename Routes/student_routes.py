@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Set, Iterable
 from werkzeug.utils import secure_filename
 from werkzeug.security import check_password_hash, generate_password_hash
-from models import db, User, Schedule, ScheduleCourse, Period, Setting, Announcement, AIEvent, BehaviorEvent, Notification, SubjectArea, Course, DatasetRegistry
+from models import db, User, Schedule, ScheduleCourse, Period, Setting, Announcement, AIEvent, BehaviorEvent, Notification, SubjectArea, Course, DatasetRegistry, Faculty, CourseRating, FacultyRating
 from utils import (
     get_available_dataset_years,
     calculate_gpa,
@@ -652,6 +652,60 @@ def _normalize_semester_label(raw_semester: str) -> str:
     return ''
 
 
+def _build_all_courses_as_catalog_rows() -> list[Dict[str, Any]]:
+    """Return ALL Course rows as catalog-format dicts — no deduplication.
+
+    Used for mega title/code maps and full-scan dependency graphs so that
+    historical prereq/faculty/title data across all datasets is available.
+    """
+    return [_manual_or_csv_course_to_catalog_row(r) for r in Course.query.all()]
+
+
+def _build_mega_title_to_code_map(all_rows: list[Dict[str, Any]] | None = None) -> Dict[str, str]:
+    """Build title→code map from ALL courses across ALL datasets.
+
+    Unlike the combined-catalog version, this includes historical titles from
+    older datasets so that prereqs referencing renamed/removed courses still
+    resolve correctly.
+    """
+    if all_rows is None:
+        all_rows = _build_all_courses_as_catalog_rows()
+    return _build_title_to_code_map(all_rows)
+
+
+def _build_mega_prereq_title_lookup(all_rows: list[Dict[str, Any]] | None = None) -> Dict[str, str]:
+    """Build normalized prereq-token → display-title lookup from ALL courses.
+
+    Includes every (course_number, title) pair across all datasets so that
+    historical prereqs referencing older course titles can be resolved.
+    """
+    if all_rows is None:
+        all_rows = _build_all_courses_as_catalog_rows()
+
+    lookup: Dict[str, str] = {}
+    # Process newest first so the latest title wins for any given code
+    sorted_rows = sorted(
+        all_rows,
+        key=lambda r: (
+            _source_priority(r.get('source')),
+            r.get('updated_ts') or datetime.min,
+        ),
+        reverse=True,
+    )
+    for row in sorted_rows:
+        number = _normalize_course_number(row.get('Course_Number'))
+        title = str(row.get('Course_Title') or '').strip()
+        if not title:
+            continue
+        norm_number = normalize_course_code_for_prereqs(number)
+        if norm_number and norm_number not in lookup:
+            lookup[norm_number] = title
+        norm_title = normalize_course_code_for_prereqs(title)
+        if norm_title and norm_title not in lookup:
+            lookup[norm_title] = title
+    return lookup
+
+
 def _build_combined_course_catalog() -> list[Dict[str, Any]]:
     """Build a deduplicated course catalog from ALL datasets.
 
@@ -734,7 +788,61 @@ def _build_combined_course_catalog() -> list[Dict[str, Any]]:
                 except (ValueError, TypeError):
                     pass
 
+        # ── Prerequisite history (across all datasets) ──
+        prereq_history: list[Dict[str, Any]] = []
+        seen_prereq_text: set[str] = set()
+        # Merge: pick the richest prereq text for the winner
+        best_prereq = str(winner.get('Prerequisite') or '').strip()
+        for r in rows:
+            ptxt = str(r.get('Prerequisite') or '').strip()
+            ptxt_lower = ptxt.lower()
+            if not ptxt or ptxt_lower in {'', 'none', 'n/a', 'na'}:
+                continue
+            if ptxt_lower not in seen_prereq_text:
+                seen_prereq_text.add(ptxt_lower)
+                prereq_history.append({
+                    'prereq_text': ptxt,
+                    'year': str(r.get('year') or '').strip(),
+                    'semester': str(r.get('semester') or '').strip(),
+                    'dataset_name': str(r.get('dataset_name') or '').strip(),
+                })
+            # Prefer the longest/most-detailed prereq text for the winner
+            if len(ptxt) > len(best_prereq):
+                best_prereq = ptxt
+
+        # Sort prereq history: most recent year/semester first
+        prereq_history.sort(key=lambda h: (h.get('year') or '', h.get('semester') or ''), reverse=True)
+
+        # ── Faculty history (across all datasets) ──
+        faculty_history: list[Dict[str, Any]] = []
+        seen_faculty_lower: set[str] = set()
+        latest_ts = datetime.min
+        latest_faculty = ''
+        for r in rows:
+            inst = _normalize_instructor(r.get('Instructor'))
+            if not inst:
+                continue
+            inst_lower = inst.lower()
+            row_ts = r.get('updated_ts') or datetime.min
+            if inst_lower not in seen_faculty_lower:
+                seen_faculty_lower.add(inst_lower)
+                faculty_history.append({
+                    'name': inst,
+                    'year': str(r.get('year') or '').strip(),
+                    'semester': str(r.get('semester') or '').strip(),
+                    'dataset_name': str(r.get('dataset_name') or '').strip(),
+                    'is_current': False,  # will be set below
+                })
+            if row_ts >= latest_ts and inst:
+                latest_ts = row_ts
+                latest_faculty = inst_lower
+        for fh in faculty_history:
+            fh['is_current'] = (fh['name'].lower() == latest_faculty)
+
         entry = _add_display_fields(dict(winner))
+        entry['Prerequisite'] = best_prereq  # Use richest prereq text
+        entry['prerequisite_history'] = prereq_history
+        entry['faculty_history'] = faculty_history
         entry['Area_of_Study'] = primary_area
         entry['areas'] = all_areas
         entry['semesters'] = semesters_label
@@ -2478,24 +2586,28 @@ def api_catalog_course_detail():
         completed_identifiers = _completed_passing_prereq_identifiers(current_user.id)
         area_names = _resolve_user_area_names()
 
-        # Use the full combined catalog for dependency scanning
-        catalog_for_graph = _catalog_rows_with_local_course_ids(combined)
+        # Use ALL courses (not just deduplicated catalog) for dependency scanning
+        # so historical prereqs and reverse dependencies are captured
+        all_rows = _build_all_courses_as_catalog_rows()
+        all_rows_with_ids = _catalog_rows_with_local_course_ids(all_rows)
 
-        title_to_code_map = _build_title_to_code_map(catalog_for_graph)
+        mega_title_to_code = _build_mega_title_to_code_map(all_rows)
+        mega_title_lookup = _build_mega_prereq_title_lookup(all_rows)
+
         prereq_status = _build_prerequisite_status(
             target_row.get('Prerequisite'),
             completed_identifiers,
             major_name=area_names.get('major'),
             minor_name=area_names.get('minor'),
-            prereq_title_lookup=_build_prereq_title_lookup(),
-            title_to_code=title_to_code_map,
+            prereq_title_lookup=mega_title_lookup,
+            title_to_code=mega_title_to_code,
         )
 
         dep_graph = dependency_graph_for_course(
             course_number=str(target_row.get('Course_Number') or ''),
             course_title=str(target_row.get('Course_Title') or ''),
             prerequisite_text=target_row.get('Prerequisite'),
-            catalog_courses=catalog_for_graph,
+            catalog_courses=all_rows_with_ids,
             completed_courses=completed_identifiers,
             normalizer=normalize_course_code_for_prereqs,
         )
@@ -2511,6 +2623,17 @@ def api_catalog_course_detail():
             if key and key not in conditional_lookup:
                 conditional_lookup[key] = cp
 
+        # Course rating aggregation
+        avg_cr = db.session.query(db.func.avg(CourseRating.score)).filter(
+            CourseRating.course_number == normalized_target
+        ).scalar()
+        cr_count = CourseRating.query.filter_by(course_number=normalized_target).count()
+        my_course_rating = None
+        if current_user.is_authenticated:
+            _cr = CourseRating.query.filter_by(user_id=current_user.id, course_number=normalized_target).first()
+            if _cr:
+                my_course_rating = {'score': _cr.score, 'comment': _cr.comment}
+
         return jsonify({
             'success': True,
             'course': {
@@ -2524,6 +2647,11 @@ def api_catalog_course_detail():
                 'prerequisite': target_row.get('Prerequisite'),
                 'year_level': target_row.get('year_level'),
                 'semesters': target_row.get('semesters', ''),
+                'faculty_history': target_row.get('faculty_history', []),
+                'prerequisite_history': target_row.get('prerequisite_history', []),
+                'avg_rating': round(float(avg_cr), 1) if avg_cr else None,
+                'rating_count': cr_count,
+                'my_rating': my_course_rating,
             },
             'prerequisite_status': prereq_status,
             'dependency_graph': {
@@ -2570,6 +2698,107 @@ def courses_view():
         semester_options=semester_options,
         credit_options=credit_options,
     )
+
+# ── Student Faculty Browser ──
+@student_bp.route('/faculty')
+@login_required
+def faculty_view():
+    rows = Faculty.query.order_by(Faculty.name.asc()).all()
+    departments = sorted({f.department for f in rows if f.department})
+    return render_template('Student/faculty.html', faculty=rows, departments=departments)
+
+
+@student_bp.route('/api/faculty/<int:faculty_id>')
+@login_required
+def api_faculty_detail(faculty_id: int):
+    row = Faculty.query.get_or_404(faculty_id)
+    avg_q = db.session.query(db.func.avg(FacultyRating.score)).filter(FacultyRating.faculty_id == row.id).scalar()
+    rating_count = FacultyRating.query.filter_by(faculty_id=row.id).count()
+    my_rating = None
+    if current_user.is_authenticated:
+        r = FacultyRating.query.filter_by(user_id=current_user.id, faculty_id=row.id).first()
+        if r:
+            my_rating = {'score': r.score, 'comment': r.comment}
+
+    courses_taught = []
+    for c in (row.courses or []):
+        courses_taught.append({
+            'course_number': c.course_number,
+            'title': c.title,
+            'area': getattr(c, 'Area_of_Study', None) or getattr(c, 'area_of_study', None),
+        })
+
+    return jsonify({
+        'success': True,
+        'faculty': {
+            'id': row.id,
+            'name': row.name,
+            'email': row.email,
+            'title': row.title,
+            'department': row.department,
+            'bio': row.bio,
+            'courses': courses_taught,
+            'advisor_areas': [a.name for a in (row.advisor_areas or [])],
+            'avg_rating': round(float(avg_q), 1) if avg_q else None,
+            'rating_count': rating_count,
+            'my_rating': my_rating,
+        },
+    })
+
+
+# ── Rating Submission Endpoints ──
+@student_bp.route('/api/rate/course', methods=['POST'])
+@login_required
+def api_rate_course():
+    payload = request.get_json(silent=True) or {}
+    course_number = str(payload.get('course_number') or '').strip()
+    score = payload.get('score')
+    comment = str(payload.get('comment') or '').strip() or None
+
+    if not course_number or not isinstance(score, int) or score < 1 or score > 5:
+        return jsonify({'success': False, 'message': 'Valid course_number and score (1-5) required.'}), 400
+
+    existing = CourseRating.query.filter_by(user_id=current_user.id, course_number=course_number).first()
+    if existing:
+        existing.score = score
+        existing.comment = comment
+    else:
+        existing = CourseRating(user_id=current_user.id, course_number=course_number, score=score, comment=comment)
+        db.session.add(existing)
+    db.session.commit()
+
+    avg_q = db.session.query(db.func.avg(CourseRating.score)).filter(CourseRating.course_number == course_number).scalar()
+    count = CourseRating.query.filter_by(course_number=course_number).count()
+    return jsonify({'success': True, 'avg_rating': round(float(avg_q), 1) if avg_q else None, 'rating_count': count})
+
+
+@student_bp.route('/api/rate/faculty', methods=['POST'])
+@login_required
+def api_rate_faculty():
+    payload = request.get_json(silent=True) or {}
+    faculty_id = payload.get('faculty_id')
+    score = payload.get('score')
+    comment = str(payload.get('comment') or '').strip() or None
+
+    if not isinstance(faculty_id, int) or not isinstance(score, int) or score < 1 or score > 5:
+        return jsonify({'success': False, 'message': 'Valid faculty_id and score (1-5) required.'}), 400
+
+    if not Faculty.query.get(faculty_id):
+        return jsonify({'success': False, 'message': 'Faculty not found.'}), 404
+
+    existing = FacultyRating.query.filter_by(user_id=current_user.id, faculty_id=faculty_id).first()
+    if existing:
+        existing.score = score
+        existing.comment = comment
+    else:
+        existing = FacultyRating(user_id=current_user.id, faculty_id=faculty_id, score=score, comment=comment)
+        db.session.add(existing)
+    db.session.commit()
+
+    avg_q = db.session.query(db.func.avg(FacultyRating.score)).filter(FacultyRating.faculty_id == faculty_id).scalar()
+    count = FacultyRating.query.filter_by(faculty_id=faculty_id).count()
+    return jsonify({'success': True, 'avg_rating': round(float(avg_q), 1) if avg_q else None, 'rating_count': count})
+
 
 # --- Premium Dashboard Logic ---
 @student_bp.route('/dashboard')

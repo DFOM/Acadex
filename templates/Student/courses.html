@@ -190,6 +190,28 @@
 .ax-areas-wrap{display:flex;flex-wrap:wrap;gap:5px;}
 .ax-area-pill{font-size:.72rem;font-weight:600;padding:3px 10px;border-radius:99px;color:var(--ax-c-violet);border:1px solid color-mix(in srgb,var(--ax-c-violet) 30%,transparent);background:color-mix(in srgb,var(--ax-c-violet) 8%,transparent);}
 
+/* faculty history pills */
+.ax-faculty-pill{font-size:.76rem;font-weight:600;padding:3px 10px;border-radius:99px;border:1px solid;white-space:nowrap;}
+.ax-fac-current{color:var(--ax-c-emerald);border-color:color-mix(in srgb,var(--ax-c-emerald) 35%,transparent);background:color-mix(in srgb,var(--ax-c-emerald) 10%,transparent);}
+.ax-fac-past{color:var(--ax-muted);border-color:var(--ax-border);background:var(--ax-surface-2);opacity:.7;}
+
+/* prerequisite history timeline */
+.ax-prereq-timeline{display:flex;flex-direction:column;gap:6px;}
+.ax-prereq-timeline-item{display:flex;gap:10px;align-items:baseline;font-size:.78rem;padding:6px 10px;border-radius:var(--ax-radius-xs);background:var(--ax-surface-2);border-left:3px solid var(--ax-border);}
+.ax-prereq-timeline-item.ax-timeline-current{border-left-color:var(--ax-c-blue);background:color-mix(in srgb,var(--ax-c-blue) 5%,var(--ax-surface-2));}
+.ax-timeline-label{font-weight:700;color:var(--ax-text-dim);white-space:nowrap;min-width:80px;}
+.ax-timeline-current .ax-timeline-label{color:var(--ax-c-blue);}
+.ax-timeline-text{color:var(--ax-text-dim);line-height:1.4;}
+
+/* star rating */
+.ax-star-group{display:inline-flex;gap:2px;cursor:pointer;}
+.ax-star-wrap{display:inline-flex;}
+.ax-star{width:20px;height:20px;color:var(--ax-border);transition:color .15s ease;}
+.ax-star.filled{color:#f59e0b;}
+.ax-star.hovered{color:#fbbf24;}
+.ax-rating-avg{font-size:.8rem;color:var(--ax-muted);margin-left:6px;}
+.ax-rating-section{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+
 /* ── Responsive ── */
 @media(max-width:992px){
     .ax-catalog-layout{flex-direction:column;}
@@ -330,6 +352,25 @@
             ${c.credits != null ? `<dt>Credits</dt><dd>${esc(String(c.credits))}</dd>` : ''}
         </dl>`;
 
+        /* ─ faculty history ─ */
+        const facHistory = Array.isArray(c.faculty_history) ? c.faculty_history : [];
+        if (facHistory.length) {
+            html += `<div class="ax-detail-section">
+                <div class="ax-detail-section-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
+                    Faculty
+                </div>
+                <div class="d-flex flex-wrap gap-2">`;
+            for (const fh of facHistory) {
+                if (fh.is_current) {
+                    html += `<span class="ax-faculty-pill ax-fac-current" title="Current (${esc(fh.dataset_name || fh.year || '')})">${esc(fh.name)}</span>`;
+                } else {
+                    html += `<span class="ax-faculty-pill ax-fac-past" title="${esc(fh.year || '')} ${esc(fh.semester || '')} — ${esc(fh.dataset_name || '')}">${esc(fh.name)}</span>`;
+                }
+            }
+            html += `</div></div>`;
+        }
+
         /* ─ areas of study (multi-area) ─ */
         if (areas.length > 1) {
             html += `<div class="ax-detail-section">
@@ -381,6 +422,27 @@
         }
         html += `</div>`;
 
+        /* ─ prerequisite history (changes across datasets) ─ */
+        const prereqHistory = Array.isArray(c.prerequisite_history) ? c.prerequisite_history : [];
+        if (prereqHistory.length > 1) {
+            html += `<div class="ax-detail-section">
+                <div class="ax-detail-section-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+                    Prerequisite History
+                </div>
+                <div class="ax-prereq-timeline">`;
+            for (let i = 0; i < prereqHistory.length; i++) {
+                const ph = prereqHistory[i];
+                const label = [ph.year, ph.semester].filter(Boolean).join(' ') || ph.dataset_name || 'Unknown';
+                const isMostRecent = (i === 0);
+                html += `<div class="ax-prereq-timeline-item${isMostRecent ? ' ax-timeline-current' : ''}">
+                    <span class="ax-timeline-label">${esc(label)}</span>
+                    <span class="ax-timeline-text">${esc(ph.prereq_text)}</span>
+                </div>`;
+            }
+            html += `</div></div>`;
+        }
+
         /* ─ dependencies (what this course unlocks) ─ */
         const unlockables = Array.isArray(dg.unlockables) ? dg.unlockables : [];
         const unlockCount = dg.unlock_count || unlockables.length;
@@ -414,7 +476,64 @@
         }
         html += `</div>`;
 
+        /* ─ course rating ─ */
+        html += `<div class="ax-detail-section">
+            <div class="ax-detail-section-title">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z"/></svg>
+                Rate this Course
+            </div>
+            <div class="ax-rating-section">
+                <div class="ax-star-group" id="courseStarGroup" data-cn="${esc(c.course_number||'')}">`;
+        for (let i = 1; i <= 5; i++) {
+            const filled = c.my_rating && c.my_rating.score >= i ? 'filled' : '';
+            html += `<span class="ax-star-wrap" data-val="${i}"><svg viewBox="0 0 24 24" fill="currentColor" class="ax-star ${filled}"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg></span>`;
+        }
+        html += `</div>`;
+        if (c.avg_rating != null) html += `<span class="ax-rating-avg">${c.avg_rating} / 5 (${c.rating_count})</span>`;
+        else html += `<span class="ax-rating-avg">No ratings yet</span>`;
+        html += `</div>`;
+        const existingCmt = (c.my_rating && c.my_rating.comment) || '';
+        html += `<textarea id="courseRateComment" class="form-control form-control-sm mt-2" rows="2" placeholder="Leave a comment (optional)..."
+                    style="background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);font-size:.8rem;">${esc(existingCmt)}</textarea>`;
+        html += `</div>`;
+
         contentEl.innerHTML = html;
+
+        /* ─ bind course star rating ─ */
+        (function(){
+            const group = document.getElementById('courseStarGroup');
+            if(!group) return;
+            const stars = group.querySelectorAll('.ax-star-wrap');
+            let selected = (c.my_rating && c.my_rating.score) || 0;
+
+            stars.forEach(wrap=>{
+                const val = parseInt(wrap.dataset.val);
+                wrap.style.cursor = 'pointer';
+                wrap.addEventListener('mouseenter', ()=>{
+                    stars.forEach(w=>{ w.querySelector('.ax-star').classList.toggle('hovered', parseInt(w.dataset.val)<=val); });
+                });
+                wrap.addEventListener('mouseleave', ()=>{
+                    stars.forEach(w=>{ w.querySelector('.ax-star').classList.remove('hovered'); });
+                });
+                wrap.addEventListener('click', ()=>{
+                    selected = val;
+                    stars.forEach(w=>{ w.querySelector('.ax-star').classList.toggle('filled', parseInt(w.dataset.val)<=val); });
+                    const comment = (document.getElementById('courseRateComment')||{}).value||'';
+                    fetch('/student/api/rate/course', {
+                        method:'POST',
+                        headers:{'Content-Type':'application/json'},
+                        body: JSON.stringify({course_number: c.course_number, score: val, comment: comment.trim()||null})
+                    })
+                    .then(r=>r.json())
+                    .then(data=>{
+                        if(data.success){
+                            const avgEl = contentEl.querySelector('.ax-rating-avg');
+                            if(avgEl) avgEl.textContent = data.avg_rating ? `${data.avg_rating} / 5 (${data.rating_count})` : 'No ratings yet';
+                        }
+                    });
+                });
+            });
+        })();
     }
 })();
 </script>

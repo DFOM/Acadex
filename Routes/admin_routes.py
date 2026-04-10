@@ -493,6 +493,9 @@ def _serialize_faculty(row: Faculty) -> dict:
         'id': row.id,
         'name': row.name,
         'email': row.email,
+        'title': row.title,
+        'department': row.department,
+        'bio': row.bio,
         'assigned_courses_count': len(row.courses or []),
         'assigned_course_refs': [_ref_for_course(c) for c in (row.courses or [])],
         'assigned_course_labels': [str(c.title or '').strip() for c in (row.courses or []) if str(c.title or '').strip()],
@@ -3307,7 +3310,13 @@ def api_faculty():
     if not name:
         return jsonify({'success': False, 'message': 'Faculty name is required.'}), 400
 
-    row = Faculty(name=name, email=str(payload.get('email') or '').strip() or None)
+    row = Faculty(
+        name=name,
+        email=str(payload.get('email') or '').strip() or None,
+        title=str(payload.get('title') or '').strip() or None,
+        department=str(payload.get('department') or '').strip() or None,
+        bio=str(payload.get('bio') or '').strip() or None,
+    )
 
     course_refs = payload.get('course_refs') or []
     advisor_area_ids = payload.get('advisor_area_ids') or []
@@ -3350,6 +3359,9 @@ def api_faculty_item(faculty_id: int):
         return jsonify({'success': False, 'message': 'Faculty name is required.'}), 400
     row.name = name
     row.email = str(payload.get('email') or '').strip() or None
+    row.title = str(payload.get('title') or '').strip() or None
+    row.department = str(payload.get('department') or '').strip() or None
+    row.bio = str(payload.get('bio') or '').strip() or None
 
     course_refs = payload.get('course_refs') or []
     advisor_area_ids = payload.get('advisor_area_ids') or []

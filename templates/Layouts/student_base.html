@@ -71,6 +71,12 @@
                             </a>
                         </li>
 
+                        <li class="nav-item">
+                            <a class="nav-link px-3" href="{{ url_for('student.faculty_view') }}" style="font-size:.88rem;font-weight:500;color:var(--ax-text-dim);">
+                                Faculty
+                            </a>
+                        </li>
+
                         {% if current_user.can_access_admin_panel() %}
                         <li class="nav-item">
                             <a class="nav-link px-3" href="{{ url_for('admin.index') }}"

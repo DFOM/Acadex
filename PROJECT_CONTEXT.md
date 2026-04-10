@@ -287,10 +287,26 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
   - Per-schedule GPA & cumulative GPA: dashboard shows semester GPA, cumulative GPA, credits, and course count for each schedule independently (all schedules, not just top 3).
   - Interactive credit progress bars: overall credit progress bar in stat card + per-area progress bars showing earned (green), planned/in-progress (purple), and remaining (grey) segments.
   - Local validation passed (`56 passed`), awaiting Render/live confirmation.
+9. Beta 2.0 multi-phase roadmap (queued 2026-04-10):
+  - **Phase 1 — Mega Prereq Data Layer**: Merge prereq text from ALL dataset rows per course into temporal history. Build mega title→code map from all Course rows across all datasets. Pass full course set (not just deduplicated catalog) to dependency graph for complete reverse scanning. Fix title lookup to include all historical titles.
+  - **Phase 2 — Faculty History on Courses**: Collect all faculty names per course across datasets with timestamps. Return faculty history in catalog detail API. Most recent = green, older = greyed out in UI.
+  - **Phase 3 — Faculty Tab (student-facing)**: Add Faculty bio/title/department fields (admin-editable). New student faculty browser page with detail view (courses taught with year history, areas, email, bio).
+  - **Phase 4 — Rating System**: New CourseRating and FacultyRating models. Students submit ratings (1-5 + comment). Average ratings in course/faculty detail. Admin moderation.
+  - **Phase 5 — Prereq History Display**: Show prereq changes over time in course detail drawer ("Since 2025: X AND Y" / "Before 2025: only X").
+  - Execution: phase-by-phase, commit/push after each phase completes.
 
 ---
 
 # 6. Change Log (Chronological)
+
+## 2026-04-10 — Beta 1.6.0 (Faculty tab, rating system, mega prereqs)
+
+- **Mega Prereq Data Layer**: `_build_all_courses_as_catalog_rows()`, `_build_mega_title_to_code_map()`, `_build_mega_prereq_title_lookup()` scan ALL Course rows across every dataset for prereq/dependency lookups.
+- **Faculty History**: Course detail shows faculty pills — green (current) / grey (past) — with dataset tooltips.
+- **Prerequisite History**: Timeline display when prereq text changes across dataset years.
+- **Faculty Model**: Added `title`, `department`, `bio` to Faculty. Alembic migration `f1a2b3c4d5e6`. Admin CRUD updated.
+- **Student Faculty Browser**: New `/student/faculty` route + template with card list, search, department filter, detail drawer with profile/courses/ratings.
+- **Rating System**: `CourseRating` and `FacultyRating` models (1-5 stars, optional comment, one per user per target). API endpoints `/student/api/rate/course` and `/student/api/rate/faculty`. Star rating UI in both course and faculty detail drawers.
 
 ## 2026-04-10 — Beta 1.5.2 (admin activity metadata modal fix)
 

@@ -1,0 +1,319 @@
+{% extends "Layouts/student_base.html" %}
+{% block title %}Faculty{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-3">
+    <div>
+        <h1 class="fw-bold mb-1" style="font-size:1.5rem;letter-spacing:-.02em;">Faculty Directory</h1>
+        <p style="color:var(--ax-muted);font-size:.85rem;margin:0;">{{ faculty|length }} faculty member{{ 's' if faculty|length != 1 else '' }}</p>
+    </div>
+</div>
+
+{# ── Search + Filters ── #}
+<div class="ax-card p-3 mb-4">
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+        <div class="position-relative flex-grow-1" style="min-width:220px;max-width:420px;">
+            <input type="text" id="facultySearch" class="form-control form-control-sm ps-4"
+                   placeholder="Search by name, department, or area..."
+                   autocomplete="off" style="background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);">
+            <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--ax-muted);" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        </div>
+        <select id="filterDept" class="form-select form-select-sm" style="width:auto;min-width:160px;background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);">
+            <option value="">All Departments</option>
+            {% for d in departments %}
+            <option value="{{ d }}">{{ d }}</option>
+            {% endfor %}
+        </select>
+    </div>
+</div>
+
+{# ── Main Layout: List + Detail Drawer ── #}
+<div class="ax-catalog-layout">
+    {# ── Faculty List ── #}
+    <div class="ax-catalog-list" id="facultyList">
+        {% for f in faculty %}
+        <div class="ax-fac-card"
+             data-fid="{{ f.id }}"
+             data-name="{{ f.name|lower }}"
+             data-dept="{{ (f.department or '')|lower }}"
+             data-areas="{{ (f.advisor_areas|map(attribute='name')|join('|'))|lower }}">
+            <div class="ax-fac-card-top">
+                <div class="ax-fac-avatar">{{ f.name[0].upper() if f.name else '?' }}</div>
+                <div>
+                    <div class="ax-fac-card-name">{{ f.name }}</div>
+                    <div class="ax-fac-card-meta">
+                        {% if f.title %}<span>{{ f.title }}</span>{% endif %}
+                        {% if f.department %}<span class="ax-fac-dept-badge">{{ f.department }}</span>{% endif %}
+                    </div>
+                </div>
+            </div>
+            <div class="ax-fac-card-bottom">
+                {% if f.advisor_areas %}
+                <span class="ax-fac-area">{{ f.advisor_areas|map(attribute='name')|join(' · ') }}</span>
+                {% endif %}
+                <span class="ax-fac-course-count">{{ f.courses|length }} course{{ 's' if f.courses|length != 1 else '' }}</span>
+            </div>
+        </div>
+        {% else %}
+        <div class="text-center py-5" style="color:var(--ax-muted);">No faculty available.</div>
+        {% endfor %}
+    </div>
+
+    {# ── Detail Drawer ── #}
+    <div class="ax-catalog-drawer" id="facultyDrawer">
+        <div class="ax-drawer-empty" id="drawerEmpty">
+            <svg style="width:48px;height:48px;color:var(--ax-muted);opacity:.5;margin-bottom:12px;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z"/></svg>
+            <div class="fw-semibold mb-1" style="font-size:.92rem;">Select a Faculty Member</div>
+            <div class="small" style="color:var(--ax-muted);">Click any faculty member to view their profile, courses, and ratings.</div>
+        </div>
+
+        <div class="ax-drawer-loading d-none" id="drawerLoading">
+            <div class="ax-skeleton" style="height:24px;width:70%;margin-bottom:12px;border-radius:6px;"></div>
+            <div class="ax-skeleton" style="height:16px;width:50%;margin-bottom:20px;border-radius:6px;"></div>
+            <div class="ax-skeleton" style="height:14px;width:90%;margin-bottom:8px;border-radius:6px;"></div>
+            <div class="ax-skeleton" style="height:14px;width:80%;margin-bottom:8px;border-radius:6px;"></div>
+            <div class="ax-skeleton" style="height:14px;width:60%;border-radius:6px;"></div>
+        </div>
+
+        <div class="ax-drawer-content d-none" id="drawerContent">
+            {# Populated by JS #}
+        </div>
+    </div>
+</div>
+
+<style>
+/* ── Reuse Catalog Layout ── */
+.ax-catalog-layout{display:flex;gap:20px;min-height:500px;}
+.ax-catalog-list{flex:1 1 0;min-width:0;max-height:calc(100vh - 240px);overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding-right:6px;}
+.ax-catalog-list::-webkit-scrollbar{width:5px;}
+.ax-catalog-list::-webkit-scrollbar-thumb{background:var(--ax-border);border-radius:99px;}
+.ax-catalog-drawer{width:420px;flex-shrink:0;position:sticky;top:80px;max-height:calc(100vh - 180px);overflow-y:auto;padding:20px;background:var(--ax-surface);border:1px solid var(--ax-border);border-radius:var(--ax-radius-sm);transition:box-shadow var(--ax-transition) var(--ax-ease);}
+.ax-catalog-drawer::-webkit-scrollbar{width:5px;}
+.ax-catalog-drawer::-webkit-scrollbar-thumb{background:var(--ax-border);border-radius:99px;}
+.ax-catalog-drawer.ax-drawer-active{box-shadow:var(--ax-shadow-md);}
+
+/* ── Faculty Cards ── */
+.ax-fac-card{padding:12px 14px;border-radius:var(--ax-radius-xs);border:1px solid var(--ax-border);background:var(--ax-surface);cursor:pointer;transition:all var(--ax-transition) var(--ax-ease);}
+.ax-fac-card:hover{border-color:var(--ax-c-blue);transform:translateX(3px);}
+.ax-fac-card.ax-fac-active{border-color:var(--ax-c-blue);background:var(--ax-surface-2);}
+.ax-fac-card-top{display:flex;gap:10px;align-items:center;margin-bottom:6px;}
+.ax-fac-avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--ax-c-blue),var(--ax-c-purple,#a855f7));display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.85rem;color:#fff;flex-shrink:0;}
+.ax-fac-card-name{font-weight:600;font-size:.88rem;color:var(--ax-text);line-height:1.2;}
+.ax-fac-card-meta{display:flex;flex-wrap:wrap;gap:6px;font-size:.75rem;color:var(--ax-muted);margin-top:2px;}
+.ax-fac-dept-badge{background:var(--ax-surface-2);padding:1px 6px;border-radius:999px;font-size:.7rem;border:1px solid var(--ax-border);}
+.ax-fac-card-bottom{display:flex;flex-wrap:wrap;gap:8px;font-size:.73rem;color:var(--ax-muted);}
+.ax-fac-area{color:var(--ax-c-blue);font-weight:500;}
+.ax-fac-course-count{margin-left:auto;}
+
+/* ── Detail Sections ── */
+.ax-fac-section{margin-top:18px;}
+.ax-fac-section-title{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--ax-muted);font-weight:600;margin-bottom:8px;}
+.ax-fac-info-row{display:flex;gap:8px;font-size:.82rem;color:var(--ax-text);margin-bottom:5px;}
+.ax-fac-info-label{color:var(--ax-muted);min-width:80px;font-weight:500;}
+.ax-fac-bio{font-size:.82rem;color:var(--ax-text-dim);line-height:1.5;white-space:pre-wrap;}
+.ax-fac-course-pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:.73rem;font-weight:500;background:var(--ax-surface-2);border:1px solid var(--ax-border);color:var(--ax-text);margin:2px 4px 2px 0;transition:border-color var(--ax-transition) ease;}
+.ax-fac-course-pill:hover{border-color:var(--ax-c-blue);}
+
+/* ── Star Rating ── */
+.ax-star-group{display:inline-flex;gap:2px;cursor:pointer;}
+.ax-star{width:20px;height:20px;color:var(--ax-border);transition:color .15s ease;}
+.ax-star.filled{color:#f59e0b;}
+.ax-star.hovered{color:#fbbf24;}
+.ax-rating-avg{font-size:.8rem;color:var(--ax-muted);margin-left:6px;}
+.ax-rating-section{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+
+/* ── Skeleton ── */
+.ax-skeleton{background:linear-gradient(90deg,var(--ax-surface-2) 25%,var(--ax-border) 50%,var(--ax-surface-2) 75%);background-size:200% 100%;animation:ax-shimmer 1.5s infinite;}
+@keyframes ax-shimmer{0%{background-position:200% 0}to{background-position:-200% 0}}
+.ax-drawer-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;min-height:300px;text-align:center;padding:24px;}
+
+@media(max-width:900px){
+    .ax-catalog-layout{flex-direction:column;}
+    .ax-catalog-drawer{width:100%;position:static;max-height:none;order:-1;}
+    .ax-catalog-list{max-height:400px;}
+}
+</style>
+
+<script>
+(function(){
+    const cards = document.querySelectorAll('.ax-fac-card');
+    const drawer = document.getElementById('facultyDrawer');
+    const empty = document.getElementById('drawerEmpty');
+    const loading = document.getElementById('drawerLoading');
+    const content = document.getElementById('drawerContent');
+    const search = document.getElementById('facultySearch');
+    const filterDept = document.getElementById('filterDept');
+
+    let activeFid = null;
+
+    /* ── Filtering ── */
+    function applyFilters(){
+        const q = (search.value||'').toLowerCase().trim();
+        const dept = (filterDept.value||'').toLowerCase();
+        cards.forEach(c=>{
+            const name = c.dataset.name||'';
+            const d = c.dataset.dept||'';
+            const areas = c.dataset.areas||'';
+            const matchQ = !q || name.includes(q) || d.includes(q) || areas.includes(q);
+            const matchDept = !dept || d===dept.toLowerCase();
+            c.style.display = (matchQ && matchDept) ? '' : 'none';
+        });
+    }
+    search.addEventListener('input', applyFilters);
+    filterDept.addEventListener('change', applyFilters);
+
+    /* ── Star SVG ── */
+    function starSVG(){
+        return `<svg viewBox="0 0 24 24" fill="currentColor" class="ax-star"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg>`;
+    }
+
+    /* ── Select Card ── */
+    cards.forEach(card=>{
+        card.addEventListener('click', ()=>{
+            const fid = card.dataset.fid;
+            if(activeFid===fid) return;
+            activeFid = fid;
+
+            cards.forEach(c=>c.classList.remove('ax-fac-active'));
+            card.classList.add('ax-fac-active');
+            drawer.classList.add('ax-drawer-active');
+
+            empty.classList.add('d-none');
+            content.classList.add('d-none');
+            loading.classList.remove('d-none');
+
+            fetch(`/student/api/faculty/${fid}`)
+                .then(r=>r.json())
+                .then(data=>{
+                    if(!data.success){
+                        content.innerHTML=`<p style="color:var(--ax-c-red);">${data.message||'Error loading faculty.'}</p>`;
+                    } else {
+                        renderDetail(data.faculty);
+                    }
+                    loading.classList.add('d-none');
+                    content.classList.remove('d-none');
+                })
+                .catch(()=>{
+                    content.innerHTML=`<p style="color:var(--ax-c-red);">Error loading faculty details.</p>`;
+                    loading.classList.add('d-none');
+                    content.classList.remove('d-none');
+                });
+        });
+    });
+
+    /* ── Render Detail ── */
+    function renderDetail(f){
+        let html = '';
+
+        /* Header */
+        html += `<div style="display:flex;gap:12px;align-items:center;margin-bottom:14px;">`;
+        html += `<div class="ax-fac-avatar" style="width:48px;height:48px;font-size:1.1rem;">${(f.name||'?')[0].toUpperCase()}</div>`;
+        html += `<div>`;
+        html += `<div class="fw-bold" style="font-size:1.05rem;color:var(--ax-text);">${esc(f.name)}</div>`;
+        if(f.title) html += `<div style="font-size:.82rem;color:var(--ax-muted);">${esc(f.title)}</div>`;
+        html += `</div></div>`;
+
+        /* Info rows */
+        html += `<div class="ax-fac-section">`;
+        html += `<div class="ax-fac-section-title">Information</div>`;
+        if(f.email) html += `<div class="ax-fac-info-row"><span class="ax-fac-info-label">Email</span><span>${esc(f.email)}</span></div>`;
+        if(f.department) html += `<div class="ax-fac-info-row"><span class="ax-fac-info-label">Dept.</span><span>${esc(f.department)}</span></div>`;
+        if(f.advisor_areas && f.advisor_areas.length)
+            html += `<div class="ax-fac-info-row"><span class="ax-fac-info-label">Advising</span><span>${f.advisor_areas.map(a=>esc(a)).join(', ')}</span></div>`;
+        html += `</div>`;
+
+        /* Bio */
+        if(f.bio){
+            html += `<div class="ax-fac-section">`;
+            html += `<div class="ax-fac-section-title">Background</div>`;
+            html += `<div class="ax-fac-bio">${esc(f.bio)}</div>`;
+            html += `</div>`;
+        }
+
+        /* Courses */
+        if(f.courses && f.courses.length){
+            html += `<div class="ax-fac-section">`;
+            html += `<div class="ax-fac-section-title">Courses (${f.courses.length})</div>`;
+            html += `<div style="display:flex;flex-wrap:wrap;">`;
+            f.courses.forEach(c=>{
+                const label = c.course_number ? `${c.course_number} — ${c.title||''}` : (c.title||'Unknown');
+                html += `<span class="ax-fac-course-pill" title="${esc(label)}">${esc(c.course_number||c.title||'?')}</span>`;
+            });
+            html += `</div></div>`;
+        }
+
+        /* Rating */
+        html += `<div class="ax-fac-section">`;
+        html += `<div class="ax-fac-section-title">Rating</div>`;
+        html += `<div class="ax-rating-section">`;
+        html += `<div class="ax-star-group" id="facStarGroup" data-fid="${f.id}">`;
+        for(let i=1;i<=5;i++){
+            const filled = f.my_rating && f.my_rating.score>=i ? 'filled' : '';
+            html += `<span class="ax-star-wrap" data-val="${i}">${starSVG().replace('class="ax-star"','class="ax-star '+filled+'"')}</span>`;
+        }
+        html += `</div>`;
+        if(f.avg_rating!=null) html += `<span class="ax-rating-avg">${f.avg_rating} / 5 (${f.rating_count})</span>`;
+        else html += `<span class="ax-rating-avg">No ratings yet</span>`;
+        html += `</div>`;
+        /* Comment box */
+        const existingComment = (f.my_rating&&f.my_rating.comment)||'';
+        html += `<textarea id="facRateComment" class="form-control form-control-sm mt-2" rows="2" placeholder="Leave a comment (optional)..."
+                    style="background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);font-size:.8rem;">${esc(existingComment)}</textarea>`;
+        html += `</div>`;
+
+        content.innerHTML = html;
+        bindStarRating(f.id, f.my_rating ? f.my_rating.score : 0);
+    }
+
+    /* ── Star Click/Hover Logic ── */
+    function bindStarRating(facultyId, currentScore){
+        const group = document.getElementById('facStarGroup');
+        if(!group) return;
+        const stars = group.querySelectorAll('.ax-star-wrap');
+        let selected = currentScore;
+
+        stars.forEach(wrap=>{
+            const val = parseInt(wrap.dataset.val);
+            wrap.addEventListener('mouseenter', ()=>{
+                stars.forEach(w=>{
+                    const s = w.querySelector('.ax-star');
+                    s.classList.toggle('hovered', parseInt(w.dataset.val)<=val);
+                });
+            });
+            wrap.addEventListener('mouseleave', ()=>{
+                stars.forEach(w=>{
+                    w.querySelector('.ax-star').classList.remove('hovered');
+                });
+            });
+            wrap.addEventListener('click', ()=>{
+                selected = val;
+                stars.forEach(w=>{
+                    const s = w.querySelector('.ax-star');
+                    s.classList.toggle('filled', parseInt(w.dataset.val)<=val);
+                });
+                submitFacultyRating(facultyId, val);
+            });
+        });
+    }
+
+    function submitFacultyRating(facultyId, score){
+        const comment = (document.getElementById('facRateComment')||{}).value||'';
+        fetch('/student/api/rate/faculty', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({faculty_id: facultyId, score: score, comment: comment.trim()||null})
+        })
+        .then(r=>r.json())
+        .then(data=>{
+            if(data.success){
+                const avgEl = document.querySelector('.ax-rating-avg');
+                if(avgEl) avgEl.textContent = data.avg_rating ? `${data.avg_rating} / 5 (${data.rating_count})` : 'No ratings yet';
+            }
+        });
+    }
+
+    /* ── Helpers ── */
+    function esc(s){ const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+})();
+</script>
+{% endblock %}

@@ -11,9 +11,18 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.5.2**
+- Current version: **Beta 1.6.0**
 
 ## Changelog
+
+### Beta 1.6.0 — 2026-04-10
+
+- **Mega Prereq Data Layer**: Prerequisite and dependency lookups now scan ALL Course rows across every dataset, eliminating gaps where older datasets held prereq info that was lost during deduplication.
+- **Faculty History**: Course detail drawer shows faculty name pills — green for the current instructor (latest dataset), grey for historical instructors — with dataset/year tooltips.
+- **Prerequisite History**: When a course's prerequisites changed across dataset years, a timeline section shows each version with the most recent highlighted.
+- **Faculty Model Expansion**: Added `title`, `department`, and `bio` fields to Faculty. Admin CRUD endpoints updated to read/write the new fields.
+- **Student Faculty Browser**: New "Faculty" tab in the student navigation. Card list with search/filter by department. Detail drawer shows profile info, bio, courses taught, advisor areas, and ratings.
+- **Course & Faculty Rating System**: New `CourseRating` and `FacultyRating` models (1-5 stars, optional comment, one rating per user per target). Rating submission API endpoints. Star rating UI in the course detail drawer and faculty detail drawer with live average display.
 
 ### Beta 1.5.2 — 2026-04-10
 

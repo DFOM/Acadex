@@ -248,6 +248,9 @@ class Faculty(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120), nullable=True)
+    title = db.Column(db.String(200), nullable=True)        # e.g. "Associate Professor"
+    department = db.Column(db.String(200), nullable=True)    # e.g. "Psychology"
+    bio = db.Column(db.Text, nullable=True)                  # admin-editable bio/background
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -330,6 +333,41 @@ class CourseMetadataField(db.Model):
     is_active = db.Column(db.Boolean, default=True, nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class CourseRating(db.Model):
+    __tablename__ = 'course_ratings'
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'course_number', name='uq_course_rating_user_course'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    course_number = db.Column(db.String(120), nullable=False, index=True)
+    score = db.Column(db.Integer, nullable=False)           # 1-5
+    comment = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    user = db.relationship('User', backref=db.backref('course_ratings', lazy='dynamic'))
+
+
+class FacultyRating(db.Model):
+    __tablename__ = 'faculty_ratings'
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'faculty_id', name='uq_faculty_rating_user_faculty'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=False, index=True)
+    score = db.Column(db.Integer, nullable=False)           # 1-5
+    comment = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    user = db.relationship('User', backref=db.backref('faculty_ratings', lazy='dynamic'))
+    faculty = db.relationship('Faculty', backref=db.backref('ratings', lazy='dynamic'))
 
 
 class AIEvent(db.Model):
