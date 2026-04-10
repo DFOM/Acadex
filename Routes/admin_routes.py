@@ -39,6 +39,7 @@ from utils import (
     clean_display_name,
     strip_section_suffix,
     current_dataset_names,
+    transferred_courses_map,
 )
 from flask import Response
 import json
@@ -521,12 +522,32 @@ def _serialize_faculty(row: Faculty, _active_ds: set[str] | None = None) -> dict
         elif cur and not _course_map[base_key]['active']:
             _course_map[base_key]['active'] = True
 
-    _deduped_labels = [v['label'] for v in _course_map.values()]
-    _course_active = [v['active'] for v in _course_map.values()]
+    # For inactive courses, check if another faculty now teaches them
+    inactive_titles = {k for k, v in _course_map.items() if not v['active']}
+    xfer = transferred_courses_map(row.id, inactive_titles, _active_ds)
+
+    _deduped_labels: list[str] = []
+    _course_status: list[str] = []
+    _course_transferred: list[dict | None] = []
+    for key, v in _course_map.items():
+        _deduped_labels.append(v['label'])
+        if v['active']:
+            _course_status.append('active')
+            _course_transferred.append(None)
+        elif key in xfer:
+            _course_status.append('transferred')
+            _course_transferred.append(xfer[key])
+        else:
+            _course_status.append('inactive')
+            _course_transferred.append(None)
 
     # Placeholder names that indicate a not-yet-assigned faculty
     _PLACEHOLDER_PATTERNS = {'新採用教員', 'new hire', 'new faculty', 'tbd', 'tba'}
     _is_placeholder = (row.name or '').strip().lower() in _PLACEHOLDER_PATTERNS or (row.name or '').strip() in _PLACEHOLDER_PATTERNS
+
+    # Faculty may have left if they have courses but none are active
+    _has_active = any(s == 'active' for s in _course_status)
+    _may_have_left = bool(_course_status) and not _has_active
 
     return {
         'id': row.id,
@@ -536,13 +557,16 @@ def _serialize_faculty(row: Faculty, _active_ds: set[str] | None = None) -> dict
         'department': row.department,
         'bio': row.bio,
         'is_placeholder': _is_placeholder,
+        'may_have_left': _may_have_left,
         'assigned_courses_count': len(row.courses or []),
         'assigned_course_refs': [_ref_for_course(c) for c in (row.courses or [])],
         'assigned_course_labels': list(_deduped_labels),
-        'assigned_course_active': list(_course_active),
+        'assigned_course_status': list(_course_status),
+        'assigned_course_transferred': list(_course_transferred),
         'course_refs': [_ref_for_course(c) for c in (row.courses or [])],
         'course_labels': list(_deduped_labels),
-        'course_active': list(_course_active),
+        'course_status': list(_course_status),
+        'course_transferred': list(_course_transferred),
         'advisor_area_ids': [a.id for a in (row.advisor_areas or [])],
         'advisor_area_names': [a.name for a in (row.advisor_areas or [])],
         'advisor_areas': [a.name for a in (row.advisor_areas or [])],

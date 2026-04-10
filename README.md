@@ -11,9 +11,20 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.6.4**
+- Current version: **Beta 1.7.0**
 
 ## Changelog
+
+### Beta 1.7.0 — 2026-04-10
+
+- **3-state course status**: Each course in a faculty’s profile now has one of three states:
+  - **Green** (offered) — course exists in the most recent semester data under this faculty.
+  - **Orange** (transferred) — course still exists but is now taught by a different faculty member. Clicking the pill navigates to the new faculty.
+  - **Grey** (discontinued) — course no longer appears in any current data.
+- **"May have left" detection**: Faculty members with zero active courses get greyed-out cards and a “May have left” badge. Detail drawer shows a banner explaining why.
+- **Transferred course lookup**: `transferred_courses_map()` utility cross-references inactive course titles against current datasets to find the new teaching faculty.
+- Color-coded legend in the detail drawer for easy reference.
+- Admin faculty table shows transferred courses with orange arrow (↗) and tooltip with the new faculty name.
 
 ### Beta 1.6.4 — 2026-04-10
 

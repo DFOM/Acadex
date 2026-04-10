@@ -24,6 +24,7 @@ from utils import (
     clean_display_name,
     strip_section_suffix,
     current_dataset_names,
+    transferred_courses_map,
 )
 from services.eligibility import normalize_course_code_for_prereqs
 from services.conflicts import parse_day_period_blocks
@@ -2711,7 +2712,16 @@ def courses_view():
 def faculty_view():
     rows = Faculty.query.order_by(Faculty.name.asc()).all()
     departments = sorted({f.department for f in rows if f.department})
-    return render_template('Student/faculty.html', faculty=rows, departments=departments)
+    _active_ds = current_dataset_names()
+    # Faculty with at least one course in a current dataset
+    _active_fids: set[int] = set()
+    for fac in rows:
+        for c in (fac.courses or []):
+            ds = (c.dataset_name or '').strip().lower()
+            if (ds and ds in _active_ds) or ((c.source or '').strip().lower() == 'manual' and not ds):
+                _active_fids.add(fac.id)
+                break
+    return render_template('Student/faculty.html', faculty=rows, departments=departments, active_faculty_ids=_active_fids)
 
 
 @student_bp.route('/api/faculty/<int:faculty_id>')
@@ -2755,8 +2765,30 @@ def api_faculty_detail(faculty_id: int):
         elif cur and not _course_map[base_key]['active']:
             _course_map[base_key]['active'] = True
 
-    # Sort: active courses first, then alphabetical
-    courses_taught = sorted(_course_map.values(), key=lambda x: (not x['active'], x['title']))
+    # For inactive courses, check if another faculty now teaches them
+    inactive_titles = {k for k, v in _course_map.items() if not v['active']}
+    xfer = transferred_courses_map(row.id, inactive_titles, _active_ds)
+
+    # Assign status: 'active', 'transferred', or 'inactive'
+    for key, entry in _course_map.items():
+        if entry['active']:
+            entry['status'] = 'active'
+        elif key in xfer:
+            entry['status'] = 'transferred'
+            entry['transferred_to'] = xfer[key]
+        else:
+            entry['status'] = 'inactive'
+
+    # Sort: active first, then transferred, then inactive; alphabetical within
+    _status_order = {'active': 0, 'transferred': 1, 'inactive': 2}
+    courses_taught = sorted(
+        _course_map.values(),
+        key=lambda x: (_status_order.get(x['status'], 9), x['title']),
+    )
+
+    # Faculty may have left if they have zero active courses
+    _has_active = any(v['status'] == 'active' for v in _course_map.values())
+    _may_have_left = bool(_course_map) and not _has_active
 
     return jsonify({
         'success': True,
@@ -2768,6 +2800,7 @@ def api_faculty_detail(faculty_id: int):
             'department': row.department,
             'bio': row.bio,
             'courses': courses_taught,
+            'may_have_left': _may_have_left,
             'advisor_areas': [a.name for a in (row.advisor_areas or [])],
             'avg_rating': round(float(avg_q), 1) if avg_q else None,
             'rating_count': rating_count,

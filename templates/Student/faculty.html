@@ -32,7 +32,7 @@
     {# ── Faculty List ── #}
     <div class="ax-catalog-list" id="facultyList">
         {% for f in faculty %}
-        <div class="ax-fac-card"
+        <div class="ax-fac-card{% if f.id not in active_faculty_ids %} ax-fac-left{% endif %}"
              data-fid="{{ f.id }}"
              data-name="{{ f.name|clean_name|lower }}"
              data-dept="{{ (f.department or '')|lower }}"
@@ -42,6 +42,7 @@
                 <div>
                     <div class="ax-fac-card-name">{{ f.name|clean_name }}</div>
                     <div class="ax-fac-card-meta">
+                        {% if f.id not in active_faculty_ids %}<span class="ax-fac-left-badge">May have left</span>{% endif %}
                         {% if f.title %}<span>{{ f.title }}</span>{% endif %}
                         {% if f.department %}<span class="ax-fac-dept-badge">{{ f.department }}</span>{% endif %}
                     </div>
@@ -113,8 +114,18 @@
 .ax-fac-bio{font-size:.82rem;color:var(--ax-text-dim);line-height:1.5;white-space:pre-wrap;}
 .ax-fac-course-pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:.73rem;font-weight:500;background:var(--ax-surface-2);border:1px solid var(--ax-border);color:var(--ax-text);margin:2px 4px 2px 0;transition:border-color var(--ax-transition) ease;}
 .ax-fac-course-pill:hover{border-color:var(--ax-c-blue);}
+/* Active course – subtle green left border */
+.ax-fac-course-active{border-left:3px solid #22c55e;}
+/* Inactive / discontinued – greyed out, dashed */
 .ax-fac-course-inactive{opacity:.45;background:transparent;border-style:dashed;font-style:italic;}
 .ax-fac-course-inactive:hover{border-color:var(--ax-muted);}
+/* Transferred to another faculty – orange */
+.ax-fac-course-transferred{border-left:3px solid #f59e0b;background:rgba(245,158,11,.07);cursor:pointer;}
+.ax-fac-course-transferred:hover{border-color:#f59e0b;}
+/* Faculty may have left – greyed card */
+.ax-fac-left{opacity:.55;filter:grayscale(.5);}
+.ax-fac-left:hover{opacity:.75;filter:grayscale(.25);}
+.ax-fac-left-badge{font-size:.65rem;padding:1px 6px;border-radius:999px;background:rgba(150,150,150,.18);color:var(--ax-muted);font-style:italic;}
 
 /* ── Star Rating ── */
 .ax-star-group{display:inline-flex;gap:2px;cursor:pointer;}
@@ -215,6 +226,11 @@
         if(f.title) html += `<div style="font-size:.82rem;color:var(--ax-muted);">${esc(f.title)}</div>`;
         html += `</div></div>`;
 
+        /* May have left banner */
+        if(f.may_have_left){
+            html += `<div style="padding:8px 12px;border-radius:var(--ax-radius-xs);background:rgba(150,150,150,.1);border:1px dashed var(--ax-border);color:var(--ax-muted);font-size:.8rem;font-style:italic;margin-bottom:10px;">This faculty member may no longer be at the university &mdash; none of their courses appear in the current data.</div>`;
+        }
+
         /* Info rows */
         html += `<div class="ax-fac-section">`;
         html += `<div class="ax-fac-section-title">Information</div>`;
@@ -234,17 +250,36 @@
 
         /* Courses */
         if(f.courses && f.courses.length){
-            const activeCourses = f.courses.filter(c=>c.active!==false);
-            const inactiveCourses = f.courses.filter(c=>c.active===false);
+            const active = f.courses.filter(c=>c.status==='active');
+            const transferred = f.courses.filter(c=>c.status==='transferred');
+            const inactive = f.courses.filter(c=>c.status==='inactive');
+            let countLabel = `${active.length}`;
+            if(transferred.length) countLabel += ` · ${transferred.length} transferred`;
+            if(inactive.length) countLabel += ` · ${inactive.length} past`;
             html += `<div class="ax-fac-section">`;
-            html += `<div class="ax-fac-section-title">Courses (${activeCourses.length}${inactiveCourses.length ? ' + '+inactiveCourses.length+' past' : ''})</div>`;
+            html += `<div class="ax-fac-section-title">Courses (${countLabel})</div>`;
+            /* Legend */
+            html += `<div style="display:flex;gap:12px;margin-bottom:8px;font-size:.68rem;color:var(--ax-muted);">`;
+            html += `<span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-right:3px;vertical-align:middle;"></span>Offered</span>`;
+            html += `<span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;margin-right:3px;vertical-align:middle;"></span>Transferred</span>`;
+            html += `<span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#999;margin-right:3px;vertical-align:middle;"></span>Discontinued</span>`;
+            html += `</div>`;
             html += `<div style="display:flex;flex-wrap:wrap;">`;
             f.courses.forEach(c=>{
                 const displayTitle = c.title || c.course_number || 'Unknown';
-                const tooltip = c.course_number ? `${c.course_number} — ${c.title||''}` : displayTitle;
-                const inactiveClass = c.active===false ? ' ax-fac-course-inactive' : '';
-                const inactiveLabel = c.active===false ? ' (no longer offered)' : '';
-                html += `<span class="ax-fac-course-pill${inactiveClass}" title="${esc(tooltip+inactiveLabel)}">${esc(displayTitle)}</span>`;
+                const status = c.status || 'active';
+                let pillClass = ' ax-fac-course-active';
+                let tooltip = c.course_number ? `${c.course_number} — ${displayTitle}` : displayTitle;
+                let extra = '';
+                if(status === 'transferred' && c.transferred_to){
+                    pillClass = ' ax-fac-course-transferred';
+                    tooltip += ` — Now taught by ${c.transferred_to.faculty_name}`;
+                    extra = ` data-goto-fid="${c.transferred_to.faculty_id}"`;
+                } else if(status === 'inactive'){
+                    pillClass = ' ax-fac-course-inactive';
+                    tooltip += ' — No longer offered';
+                }
+                html += `<span class="ax-fac-course-pill${pillClass}" title="${esc(tooltip)}"${extra}>${esc(displayTitle)}</span>`;
             });
             html += `</div></div>`;
         }
@@ -270,6 +305,19 @@
 
         content.innerHTML = html;
         bindStarRating(f.id, f.my_rating ? f.my_rating.score : 0);
+
+        /* Click on a transferred course pill → navigate to that faculty */
+        content.querySelectorAll('[data-goto-fid]').forEach(pill=>{
+            pill.style.cursor = 'pointer';
+            pill.addEventListener('click', ()=>{
+                const targetFid = pill.dataset.gotoFid;
+                const targetCard = document.querySelector(`.ax-fac-card[data-fid="${targetFid}"]`);
+                if(targetCard){
+                    targetCard.scrollIntoView({behavior:'smooth',block:'center'});
+                    targetCard.click();
+                }
+            });
+        });
     }
 
     /* ── Star Click/Hover Logic ── */

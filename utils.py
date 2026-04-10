@@ -666,6 +666,49 @@ def current_dataset_names() -> set[str]:
     return names
 
 
+def transferred_courses_map(
+    faculty_id: int,
+    inactive_base_titles: set[str],
+    active_ds: set[str],
+) -> dict[str, dict]:
+    """For titles no longer taught by *faculty_id*, find who teaches them now.
+
+    Returns ``{base_title_lower: {'faculty_id': int, 'faculty_name': str}}``
+    for each title that still exists in a current dataset under a **different**
+    faculty member.
+    """
+    if not inactive_base_titles:
+        return {}
+
+    result: dict[str, dict] = {}
+    # Query current-dataset courses that might match the inactive titles
+    current_courses = (
+        Course.query
+        .filter(db.func.lower(Course.dataset_name).in_(active_ds))
+        .all()
+    ) if active_ds else []
+
+    for c in current_courses:
+        raw_title = (c.title or '').strip()
+        if not raw_title:
+            continue
+        base = strip_section_suffix(raw_title).lower()
+        if base not in inactive_base_titles:
+            continue
+        if base in result:
+            continue  # already found a new faculty for this title
+        # Check faculty linked to this course
+        for f in (c.faculty or []):
+            if f.id != faculty_id:
+                result[base] = {
+                    'faculty_id': f.id,
+                    'faculty_name': clean_display_name(f.name),
+                }
+                break
+
+    return result
+
+
 def normalize_faculty_name(name: str) -> str:
     cleaned = _strip_brackets_quotes(str(name or ''))
     cleaned = re.sub(r'\s+', ' ', cleaned.strip())

@@ -299,6 +299,17 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 # 6. Change Log (Chronological)
 
+## 2026-04-10 — Beta 1.7.0 (3-state courses, transferred detection, faculty-left)
+
+- Added `transferred_courses_map()` in utils.py — for inactive course titles, finds if another faculty teaches them in current datasets.
+- Course status: `active`, `transferred` (with `transferred_to` containing `faculty_id` + `faculty_name`), or `inactive`.
+- `api_faculty_detail()` and `_serialize_faculty()` return `status` per course, `transferred_to` info, and `may_have_left` flag.
+- `faculty_view()` computes `active_faculty_ids` set and passes to template.
+- Faculty cards: `.ax-fac-left` class greys out cards for faculty with no active courses; “May have left” badge.
+- Detail drawer: banner for may-have-left faculty; legend (green/orange/grey); transferred pills are clickable → navigate to new faculty.
+- CSS: `.ax-fac-course-active` (green border), `.ax-fac-course-transferred` (orange), `.ax-fac-course-inactive` (greyed dashed).
+- Admin JS: course labels show orange arrow for transferred, strikethrough for inactive, “May have left” badge on name.
+
 ## 2026-04-10 — Beta 1.6.4 (Both-semester awareness for active courses)
 
 - Rewrote `current_dataset_names()` to walk DatasetRegistry by recency and collect the most recent dataset for each distinct semester (Fall, Spring). Stops after covering two semesters. This ensures Spring-only courses aren’t greyed out when the latest upload is a Fall dataset, and vice versa.

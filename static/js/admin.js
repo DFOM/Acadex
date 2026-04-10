@@ -440,6 +440,8 @@ $(document).ready(function() {
                 state.faculty.map((row) => {
                     const nameHtml = row.is_placeholder
                         ? `<span class="badge bg-warning text-dark me-1" title="Placeholder — courses can be reassigned">Placeholder</span> ${escapeHtml(row.name || '')}`
+                        : row.may_have_left
+                        ? `<span style="opacity:.5;font-style:italic;">${escapeHtml(row.name || '')}</span> <span class="badge bg-secondary" style="font-size:.65rem;" title="No courses in current data">May have left</span>`
                         : escapeHtml(row.name || '');
                     const reassignBtn = row.is_placeholder && (row.assigned_courses_count || 0) > 0
                         ? ` <button class="btn btn-sm btn-outline-warning ms-1 reassign-faculty-btn" data-id="${row.id}" title="Reassign courses to a real faculty member">Reassign</button>`
@@ -450,13 +452,19 @@ $(document).ready(function() {
                         <td>${escapeHtml((row.advisor_area_names || []).join(', ') || '—')}</td>
                         <td>${(function(){
                             const labels = row.course_labels || [];
-                            const active = row.course_active || [];
+                            const statuses = row.course_status || [];
+                            const transfers = row.course_transferred || [];
                             if(!labels.length) return '—';
                             return labels.map((lbl, i) => {
-                                const isActive = active[i] !== false;
-                                return isActive
-                                    ? escapeHtml(lbl)
-                                    : `<span style="opacity:.45;font-style:italic;text-decoration:line-through" title="No longer offered">${escapeHtml(lbl)}</span>`;
+                                const st = statuses[i] || 'active';
+                                if(st === 'transferred'){
+                                    const t = transfers[i];
+                                    const tip = t ? `Now taught by ${t.faculty_name}` : 'Transferred';
+                                    return `<span style="color:#f59e0b;font-style:italic;" title="${escapeHtml(tip)}">${escapeHtml(lbl)} ↗</span>`;
+                                } else if(st === 'inactive'){
+                                    return `<span style="opacity:.45;font-style:italic;text-decoration:line-through" title="No longer offered">${escapeHtml(lbl)}</span>`;
+                                }
+                                return escapeHtml(lbl);
                             }).join(', ');
                         })()}</td>
                         <td>
