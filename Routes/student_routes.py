@@ -19,6 +19,8 @@ from utils import (
     resolve_dataset,
     resolve_dataset_name,
     normalize_dataset_semester,
+    _titlecase_name,
+    _strip_brackets_quotes,
 )
 from services.eligibility import normalize_course_code_for_prereqs
 from services.conflicts import parse_day_period_blocks
@@ -239,12 +241,13 @@ def _normalize_instructor(value: Any) -> str:
         text = str(token or '').strip()
         if not text:
             return ''
+        text = _strip_brackets_quotes(text)
         text = text.strip('[]').strip()
         text = re.sub(r'^["\']+|["\']+$', '', text).strip()
         text = re.sub(r'\s+', ' ', text).strip()
         if text.lower() in {'tba', 'n/a', 'na', 'none', 'unknown'}:
             return ''
-        return text
+        return _titlecase_name(text)
 
     if isinstance(value, (list, tuple, set)):
         names = []
@@ -2721,10 +2724,18 @@ def api_faculty_detail(faculty_id: int):
             my_rating = {'score': r.score, 'comment': r.comment}
 
     courses_taught = []
+    seen_titles = set()
     for c in (row.courses or []):
+        title = (c.title or '').strip()
+        if not title:
+            title = c.course_number or 'Unknown'
+        title_lower = title.lower()
+        if title_lower in seen_titles:
+            continue
+        seen_titles.add(title_lower)
         courses_taught.append({
             'course_number': c.course_number,
-            'title': c.title,
+            'title': title,
             'area': getattr(c, 'Area_of_Study', None) or getattr(c, 'area_of_study', None),
         })
 

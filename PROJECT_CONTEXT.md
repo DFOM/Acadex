@@ -299,6 +299,18 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 # 6. Change Log (Chronological)
 
+## 2026-04-10 — Beta 1.6.1 (Faculty name cleanup, placeholder reassignment)
+
+- Strip `['...']` brackets/quotes from faculty names across `normalize_faculty_name()`, `extract_faculty_names()`, and `_normalize_instructor()`.
+- Title-case per-word: all-upper/all-lower words get capitalized; mixed-case (McBride) preserved; non-Latin (日本語) untouched.
+- `_serialize_faculty()` deduplicates course labels and shows titles not codes.
+- Student faculty detail API deduplicates courses by title.
+- Faculty list shows course titles in pills instead of course codes.
+- `is_placeholder` flag on serialized faculty for names matching `新採用教員`, `TBD`, etc.
+- New admin endpoint `POST /admin/api/faculty/<id>/reassign` to move courses from placeholder to real faculty.
+- Reassign modal in admin manage_faculty page with course checkboxes and target selection.
+- Health action `clean_faculty_names` to batch-fix existing Faculty.name and Course.instructor values.
+
 ## 2026-04-10 — Beta 1.6.0 (Faculty tab, rating system, mega prereqs)
 
 - **Mega Prereq Data Layer**: `_build_all_courses_as_catalog_rows()`, `_build_mega_title_to_code_map()`, `_build_mega_prereq_title_lookup()` scan ALL Course rows across every dataset for prereq/dependency lookups.

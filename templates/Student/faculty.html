@@ -236,8 +236,9 @@
             html += `<div class="ax-fac-section-title">Courses (${f.courses.length})</div>`;
             html += `<div style="display:flex;flex-wrap:wrap;">`;
             f.courses.forEach(c=>{
-                const label = c.course_number ? `${c.course_number} — ${c.title||''}` : (c.title||'Unknown');
-                html += `<span class="ax-fac-course-pill" title="${esc(label)}">${esc(c.course_number||c.title||'?')}</span>`;
+                const displayTitle = c.title || c.course_number || 'Unknown';
+                const tooltip = c.course_number ? `${c.course_number} — ${c.title||''}` : displayTitle;
+                html += `<span class="ax-fac-course-pill" title="${esc(tooltip)}">${esc(displayTitle)}</span>`;
             });
             html += `</div></div>`;
         }

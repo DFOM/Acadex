@@ -555,16 +555,67 @@ def extract_dataset_context(*values: Any) -> tuple[str | None, str | None, str]:
     return year_value, (semester_value or None), dataset_type
 
 
+def _strip_brackets_quotes(text: str) -> str:
+    """Remove surrounding [], '', \"\" from stringified Python lists."""
+    text = text.strip()
+    # Handle Python list repr: "['Name']" or "['A', 'B']"
+    if text.startswith('[') and text.endswith(']'):
+        inner = text[1:-1].strip()
+        # Split on comma but respect quoted strings
+        parts = [p.strip().strip("'\"").strip() for p in re.split(r"'\s*,\s*'|\"\\s*,\\s*\"", inner)]
+        text = ', '.join(p for p in parts if p)
+    text = text.strip("'\"").strip()
+    return text
+
+
+def _titlecase_name(name: str) -> str:
+    """Convert 'ASHMORE Darren' or 'ashmore darren' to 'Ashmore Darren'.
+
+    Applies per-word: words that are fully uppercase or fully lowercase get
+    capitalized. Words already in mixed case (e.g. 'McBride') are preserved.
+    Leaves non-Latin names (e.g. Japanese) untouched.
+    """
+    if not name:
+        return name
+    # If the name contains non-Latin characters, return as-is
+    if re.search(r'[^\x00-\x7F]', name):
+        return name
+    small_words = {'de', 'del', 'da', 'di', 'van', 'von', 'la', 'le', 'el', 'al'}
+    words = name.split()
+    result = []
+    for i, w in enumerate(words):
+        alpha = re.sub(r'[^a-zA-Z]', '', w)
+        if not alpha:
+            result.append(w)
+        elif alpha.isupper() or alpha.islower():
+            # All-upper or all-lower word → capitalize
+            if i > 0 and w.lower() in small_words:
+                result.append(w.lower())
+            else:
+                result.append(w.capitalize())
+        else:
+            # Mixed case (e.g. 'McBride') → preserve
+            result.append(w)
+    return ' '.join(result)
+
+
 def normalize_faculty_name(name: str) -> str:
-    cleaned = re.sub(r'\s+', ' ', str(name or '').strip())
+    cleaned = _strip_brackets_quotes(str(name or ''))
+    cleaned = re.sub(r'\s+', ' ', cleaned.strip())
     cleaned = re.sub(r'^(dr|prof|professor|mr|ms|mrs)\.?\s+', '', cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r'\s+,', ',', cleaned)
     cleaned = cleaned.strip(' -;|/')
+    cleaned = _titlecase_name(cleaned)
     return cleaned
 
 
 def extract_faculty_names(raw_value: Any) -> list[str]:
     text = str(raw_value or '').strip()
+    if not text:
+        return []
+
+    # Unwrap Python list repr before any splitting
+    text = _strip_brackets_quotes(text)
     if not text:
         return []
 

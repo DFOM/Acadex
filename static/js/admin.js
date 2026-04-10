@@ -437,18 +437,24 @@ $(document).ready(function() {
             }
 
             tbody.html(
-                state.faculty.map((row) => `
-                    <tr>
-                        <td>${escapeHtml(row.name || '')}</td>
+                state.faculty.map((row) => {
+                    const nameHtml = row.is_placeholder
+                        ? `<span class="badge bg-warning text-dark me-1" title="Placeholder — courses can be reassigned">Placeholder</span> ${escapeHtml(row.name || '')}`
+                        : escapeHtml(row.name || '');
+                    const reassignBtn = row.is_placeholder && (row.assigned_courses_count || 0) > 0
+                        ? ` <button class="btn btn-sm btn-outline-warning ms-1 reassign-faculty-btn" data-id="${row.id}" title="Reassign courses to a real faculty member">Reassign</button>`
+                        : '';
+                    return `<tr>
+                        <td>${nameHtml}</td>
                         <td>${escapeHtml(row.email || '—')}</td>
                         <td>${escapeHtml((row.advisor_area_names || []).join(', ') || '—')}</td>
                         <td>${escapeHtml((row.course_labels || []).join(', ') || '—')}</td>
                         <td>
                             <button class="btn btn-sm btn-primary edit-faculty-btn" data-id="${row.id}">Edit</button>
-                            <button class="btn btn-sm btn-outline-danger ms-1 delete-faculty-btn" data-id="${row.id}">Delete</button>
+                            <button class="btn btn-sm btn-outline-danger ms-1 delete-faculty-btn" data-id="${row.id}">Delete</button>${reassignBtn}
                         </td>
-                    </tr>
-                `).join('')
+                    </tr>`;
+                }).join('')
             );
         };
 
@@ -517,6 +523,82 @@ $(document).ready(function() {
                 await loadFaculty();
             } catch (err) {
                 setFacultyError(err.message || 'Unable to save faculty.');
+            }
+        });
+
+        /* ── Reassign Modal Logic ── */
+        $(document).on('click', '.close-reassign-modal', function() { $('#reassignModal').hide(); });
+        $(document).on('click', '#reassignModal', function(e) { if (e.target === this) $(this).hide(); });
+
+        $(document).on('click', '.reassign-faculty-btn', function() {
+            const id = Number($(this).data('id'));
+            const row = state.faculty.find(r => r.id === id);
+            if (!row) return;
+
+            $('#reassign_source_id').val(id);
+            $('#reassignHint').text(`Reassign courses from "${row.name}" to another faculty member.`);
+            $('#reassignError').addClass('d-none').text('');
+
+            // Build course checkboxes
+            const courseRefs = row.assigned_course_refs || [];
+            const courseLabels = row.assigned_course_labels || [];
+            let listHtml = '';
+            const allCourses = row.courses || [];
+            // Use refs for IDs and labels for display
+            if (courseRefs.length) {
+                courseRefs.forEach((ref, i) => {
+                    // Extract ID from ref like "csv:123"
+                    const courseId = ref.split(':').pop();
+                    const label = courseLabels[i] || ref;
+                    listHtml += `<div class="form-check"><input class="form-check-input reassign-course-cb" type="checkbox" value="${courseId}" id="rc_${courseId}" checked><label class="form-check-label small" for="rc_${courseId}">${escapeHtml(label)}</label></div>`;
+                });
+            } else {
+                listHtml = '<span class="text-muted small">No courses linked.</span>';
+            }
+            $('#reassignCourseList').html(listHtml);
+
+            // Populate target dropdown with all non-placeholder faculty
+            const targetSelect = $('#reassign_target_id');
+            targetSelect.html('<option value="">— Select existing faculty —</option>');
+            state.faculty.filter(f => !f.is_placeholder && f.id !== id).forEach(f => {
+                targetSelect.append(`<option value="${f.id}">${escapeHtml(f.name)}</option>`);
+            });
+            $('#reassign_new_name').val('');
+
+            $('#reassignModal').show();
+        });
+
+        $('#reassignSubmitBtn').on('click', async function() {
+            const sourceId = $('#reassign_source_id').val();
+            const targetId = $('#reassign_target_id').val();
+            const newName = ($('#reassign_new_name').val() || '').trim();
+            const deleteEmpty = $('#reassign_delete_empty').is(':checked');
+
+            if (!targetId && !newName) {
+                $('#reassignError').removeClass('d-none').text('Select an existing faculty member or enter a new name.');
+                return;
+            }
+
+            const courseIds = [];
+            $('.reassign-course-cb:checked').each(function() { courseIds.push(Number($(this).val())); });
+            if (!courseIds.length) {
+                $('#reassignError').removeClass('d-none').text('Select at least one course to reassign.');
+                return;
+            }
+
+            const payload = { course_ids: courseIds, delete_empty: deleteEmpty };
+            if (targetId) payload.target_faculty_id = Number(targetId);
+            else payload.target_faculty_name = newName;
+
+            try {
+                await jsonFetch(`/admin/api/faculty/${sourceId}/reassign`, {
+                    method: 'POST',
+                    body: JSON.stringify(payload),
+                });
+                $('#reassignModal').hide();
+                await loadFaculty();
+            } catch (err) {
+                $('#reassignError').removeClass('d-none').text(err.message || 'Failed to reassign courses.');
             }
         });
 

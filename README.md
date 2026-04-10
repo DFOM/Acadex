@@ -11,9 +11,16 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.6.0**
+- Current version: **Beta 1.6.1**
 
 ## Changelog
+
+### Beta 1.6.1 — 2026-04-10
+
+- **Faculty name cleanup**: Strip `['...']` brackets and quotes from names throughout the pipeline. Apply proper title casing per-word (e.g. `ASHMORE Darren` → `Ashmore Darren`), preserving non-Latin characters (Japanese) and mixed-case names (McBride).
+- **Course display deduplication**: Faculty detail and admin views now show unique course titles instead of codes, deduplicating sections/semesters of the same course.
+- **新採用教員 reassignment**: Admin faculty page shows a "Placeholder" badge and "Reassign" button for placeholder faculty (新採用教員, TBD, etc.). Reassign modal lets admin pick courses and move them to an existing or new faculty member.
+- **Health action**: `clean_faculty_names` action cleans all existing `Faculty.name` values and `Course.instructor` text in the database.
 
 ### Beta 1.6.0 — 2026-04-10
 

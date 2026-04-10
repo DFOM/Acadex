@@ -34,6 +34,8 @@ from utils import (
     merge_dataset_registry_metadata_schema,
     course_metadata_visibility_map,
     normalize_metadata_field_key,
+    _titlecase_name,
+    _strip_brackets_quotes,
 )
 from flask import Response
 import json
@@ -93,6 +95,7 @@ ENDPOINT_PERMISSION_MAP = {
     'admin.api_course_duplicate': 'edit_courses',
     'admin.api_faculty': 'edit_courses',
     'admin.api_faculty_item': 'edit_courses',
+    'admin.api_faculty_reassign': 'edit_courses',
     'admin.manage_subjects': 'edit_courses',
     'admin.api_update_subject_area': 'edit_courses',
     'admin.manage_instructors': 'edit_courses',
@@ -489,6 +492,22 @@ def _serialize_faculty(row: Faculty) -> dict:
             src = 'manual'
         return f'{src}:{c.id}'
 
+    # Deduplicate course labels by title (different sections of same course)
+    _seen_labels: set[str] = set()
+    _deduped_labels: list[str] = []
+    for c in (row.courses or []):
+        lbl = str(c.title or '').strip()
+        if not lbl:
+            continue
+        key = lbl.lower()
+        if key not in _seen_labels:
+            _seen_labels.add(key)
+            _deduped_labels.append(lbl)
+
+    # Placeholder names that indicate a not-yet-assigned faculty
+    _PLACEHOLDER_PATTERNS = {'新採用教員', 'new hire', 'new faculty', 'tbd', 'tba'}
+    _is_placeholder = (row.name or '').strip().lower() in _PLACEHOLDER_PATTERNS or (row.name or '').strip() in _PLACEHOLDER_PATTERNS
+
     return {
         'id': row.id,
         'name': row.name,
@@ -496,11 +515,12 @@ def _serialize_faculty(row: Faculty) -> dict:
         'title': row.title,
         'department': row.department,
         'bio': row.bio,
+        'is_placeholder': _is_placeholder,
         'assigned_courses_count': len(row.courses or []),
         'assigned_course_refs': [_ref_for_course(c) for c in (row.courses or [])],
-        'assigned_course_labels': [str(c.title or '').strip() for c in (row.courses or []) if str(c.title or '').strip()],
+        'assigned_course_labels': list(_deduped_labels),
         'course_refs': [_ref_for_course(c) for c in (row.courses or [])],
-        'course_labels': [str(c.title or '').strip() for c in (row.courses or []) if str(c.title or '').strip()],
+        'course_labels': list(_deduped_labels),
         'advisor_area_ids': [a.id for a in (row.advisor_areas or [])],
         'advisor_area_names': [a.name for a in (row.advisor_areas or [])],
         'advisor_areas': [a.name for a in (row.advisor_areas or [])],
@@ -3384,6 +3404,66 @@ def api_faculty_item(faculty_id: int):
     return jsonify({'success': True, 'faculty': _serialize_faculty(row)})
 
 
+@admin_bp.route('/api/faculty/<int:source_id>/reassign', methods=['POST'])
+@login_required
+@admin_required
+def api_faculty_reassign(source_id: int):
+    """Reassign some or all courses from one faculty (e.g. 新採用教員) to another."""
+    source = Faculty.query.get(source_id)
+    if not source:
+        return jsonify({'success': False, 'message': 'Source faculty not found.'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    target_id = payload.get('target_faculty_id')
+    target_name = str(payload.get('target_faculty_name') or '').strip()
+    course_ids = payload.get('course_ids')  # optional subset; None = all
+
+    # Resolve or create target faculty
+    target = None
+    if target_id:
+        target = Faculty.query.get(target_id)
+    if not target and target_name:
+        target = Faculty.query.filter(sa.func.lower(Faculty.name) == target_name.lower()).first()
+        if not target:
+            target = Faculty(name=target_name)
+            db.session.add(target)
+            db.session.flush()
+    if not target:
+        return jsonify({'success': False, 'message': 'Provide target_faculty_id or target_faculty_name.'}), 400
+
+    # Determine which courses to move
+    source_courses = list(source.courses or [])
+    if isinstance(course_ids, list) and course_ids:
+        id_set = set(int(x) for x in course_ids if str(x).isdigit())
+        to_move = [c for c in source_courses if c.id in id_set]
+    else:
+        to_move = list(source_courses)
+
+    moved = 0
+    for course in to_move:
+        # Remove from source, add to target
+        if course in source.courses:
+            source.courses.remove(course)
+        if course not in (target.courses or []):
+            target.courses.append(course)
+        # Update instructor text
+        course.instructor = target.name
+        moved += 1
+
+    # If source has no courses left, optionally delete the placeholder
+    delete_source = not source.courses and payload.get('delete_empty', True)
+    if delete_source:
+        db.session.delete(source)
+
+    db.session.commit()
+    return jsonify({
+        'success': True,
+        'moved': moved,
+        'target': _serialize_faculty(target),
+        'source_deleted': delete_source,
+    })
+
+
 @admin_bp.route('/health', methods=['GET'])
 @login_required
 @admin_required
@@ -3488,6 +3568,27 @@ def health_fix_api():
                 db.session.delete(row)
             db.session.commit()
             return jsonify({'success': True, 'message': f'Removed {removed} orphan faculty records.', 'action': action, 'removed': removed})
+
+        if action == 'clean_faculty_names':
+            cleaned = 0
+            for row in Faculty.query.all():
+                original = row.name or ''
+                fixed = _strip_brackets_quotes(original)
+                fixed = _titlecase_name(fixed.strip())
+                if fixed != original:
+                    row.name = fixed
+                    cleaned += 1
+            # Also clean Course.instructor raw text
+            instr_cleaned = 0
+            for course in Course.query.filter(Course.instructor.isnot(None)).all():
+                orig = course.instructor or ''
+                parts = [_titlecase_name(_strip_brackets_quotes(p).strip()) for p in orig.split(';')]
+                new_val = '; '.join(p for p in parts if p)
+                if new_val != orig:
+                    course.instructor = new_val or None
+                    instr_cleaned += 1
+            db.session.commit()
+            return jsonify({'success': True, 'message': f'Cleaned {cleaned} faculty names, {instr_cleaned} course instructor fields.', 'action': action, 'cleaned': cleaned, 'instr_cleaned': instr_cleaned})
 
         if action == 'backfill_catalog_status_dataset':
             active_name = _resolve_latest_dataset_name()
