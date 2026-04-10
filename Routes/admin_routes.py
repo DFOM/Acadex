@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from functools import wraps
 from sqlalchemy import inspect, text
 import sqlalchemy as sa
-from models import db, User, Schedule, ScheduleCourse, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField, ScrapedDataset, ScrapedCourse, Course, Faculty, DatasetRegistry, CourseMetadataField, AIEvent, BehaviorEvent, course_faculty
+from models import db, User, Schedule, ScheduleCourse, SubjectArea, Period, Setting, Announcement, LandingPageSection, CatalogStatus, Notification, Role, Permission, RegistrationField, ScrapedDataset, ScrapedCourse, Course, Faculty, DatasetRegistry, CourseMetadataField, AIEvent, BehaviorEvent, course_faculty, FacultyRating, CourseRating
 from utils import (
     calculate_gpa,
     ensure_default_landing_sections,
@@ -5206,4 +5206,107 @@ def api_activity_log():
         'per_page': per_page,
         'pages': max(1, (total + per_page - 1) // per_page),
         'event_types': sorted(all_event_types),
+    })
+
+
+# ── Admin Ratings Analytics ──
+@admin_bp.route('/api/ratings/overview')
+@login_required
+@admin_required
+def api_ratings_overview():
+    """Aggregate faculty & course ratings for admin analytics dashboard."""
+    from sqlalchemy import func as sqlfunc
+
+    # ── Faculty aggregates ──
+    fac_dims = ['teaching_quality', 'communication', 'availability', 'grading_fairness', 'engagement', 'difficulty']
+    fac_agg_cols = [
+        sqlfunc.count(FacultyRating.id).label('count'),
+        sqlfunc.avg(FacultyRating.score).label('avg_overall'),
+    ] + [sqlfunc.avg(getattr(FacultyRating, d)).label(f'avg_{d}') for d in fac_dims] + [
+        sqlfunc.sum(db.case((FacultyRating.would_recommend == True, 1), else_=0)).label('recommend_yes'),
+        sqlfunc.sum(db.case((FacultyRating.would_recommend == False, 1), else_=0)).label('recommend_no'),
+    ]
+
+    fac_rows = (
+        db.session.query(Faculty.id, Faculty.name, *fac_agg_cols)
+        .join(FacultyRating, FacultyRating.faculty_id == Faculty.id)
+        .group_by(Faculty.id, Faculty.name)
+        .having(sqlfunc.count(FacultyRating.id) > 0)
+        .order_by(sqlfunc.avg(FacultyRating.score).desc())
+        .all()
+    )
+
+    faculty_data = []
+    for row in fac_rows:
+        d = {
+            'faculty_id': row.id,
+            'name': clean_display_name(row.name),
+            'count': row.count,
+            'avg_overall': round(float(row.avg_overall), 2) if row.avg_overall else None,
+            'recommend_yes': int(row.recommend_yes or 0),
+            'recommend_no': int(row.recommend_no or 0),
+        }
+        for dim in fac_dims:
+            v = getattr(row, f'avg_{dim}')
+            d[f'avg_{dim}'] = round(float(v), 2) if v else None
+        faculty_data.append(d)
+
+    # ── Course aggregates ──
+    crs_dims = ['content_quality', 'workload', 'usefulness', 'materials_quality', 'difficulty']
+    crs_agg_cols = [
+        sqlfunc.count(CourseRating.id).label('count'),
+        sqlfunc.avg(CourseRating.score).label('avg_overall'),
+    ] + [sqlfunc.avg(getattr(CourseRating, d)).label(f'avg_{d}') for d in crs_dims] + [
+        sqlfunc.sum(db.case((CourseRating.would_take_again == True, 1), else_=0)).label('take_again_yes'),
+        sqlfunc.sum(db.case((CourseRating.would_take_again == False, 1), else_=0)).label('take_again_no'),
+    ]
+
+    crs_rows = (
+        db.session.query(CourseRating.course_number, *crs_agg_cols)
+        .group_by(CourseRating.course_number)
+        .having(sqlfunc.count(CourseRating.id) > 0)
+        .order_by(sqlfunc.avg(CourseRating.score).desc())
+        .all()
+    )
+
+    course_data = []
+    for row in crs_rows:
+        d = {
+            'course_number': row.course_number,
+            'count': row.count,
+            'avg_overall': round(float(row.avg_overall), 2) if row.avg_overall else None,
+            'take_again_yes': int(row.take_again_yes or 0),
+            'take_again_no': int(row.take_again_no or 0),
+        }
+        for dim in crs_dims:
+            v = getattr(row, f'avg_{dim}')
+            d[f'avg_{dim}'] = round(float(v), 2) if v else None
+        course_data.append(d)
+
+    # ── Correlation: top-enrolled faculty vs their avg rating ──
+    correlation = []
+    for fd in faculty_data[:20]:
+        fid = fd['faculty_id']
+        enroll_count = (
+            db.session.query(sqlfunc.count(ScheduleCourse.id))
+            .join(Course, sqlfunc.upper(Course.course_number) == sqlfunc.upper(ScheduleCourse.course_number))
+            .join(course_faculty, course_faculty.c.course_id == Course.id)
+            .filter(course_faculty.c.faculty_id == fid)
+            .scalar()
+        ) or 0
+        correlation.append({
+            'faculty_id': fid,
+            'name': fd['name'],
+            'avg_rating': fd['avg_overall'],
+            'enrollments': enroll_count,
+            'recommend_pct': round(fd['recommend_yes'] / max(1, fd['recommend_yes'] + fd['recommend_no']) * 100, 1),
+        })
+
+    return jsonify({
+        'success': True,
+        'faculty': faculty_data,
+        'courses': course_data,
+        'correlation': sorted(correlation, key=lambda x: x.get('enrollments', 0), reverse=True),
+        'total_faculty_ratings': sum(f['count'] for f in faculty_data),
+        'total_course_ratings': sum(c['count'] for c in course_data),
     })

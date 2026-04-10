@@ -11,9 +11,23 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.7.0**
+- Current version: **Beta 1.8.0**
 
 ## Changelog
+
+### Beta 1.8.0 — 2026-06-14
+
+- **Dedicated Ratings tab**: New student "Ratings" page with structured multi-dimension rating forms for faculty and courses.
+- **Faculty rating dimensions**: Teaching Quality, Communication, Availability, Grading Fairness, Engagement, Difficulty, "Would Recommend" (yes/no), overall score, and one free-text comment.
+- **Course rating dimensions**: Content Quality, Workload, Usefulness, Materials Quality, Difficulty, "Would Take Again" (yes/no), overall score, and one free-text comment.
+- **My Ratings history**: Students can review all their past ratings in the "My Ratings" tab.
+- **Admin Ratings Analytics**: Admin analytics page now includes a "Ratings Analytics" section with:
+  - Faculty ratings table (all dimension averages + recommend %)
+  - Course ratings table (all dimension averages + take-again %)
+  - Scatter chart: faculty avg rating vs schedule enrollment count (correlation)
+  - Grouped bar chart: top faculty compared across rating dimensions
+- Existing star-rating endpoints upgraded to accept dimension data (backward-compatible).
+- New migration `a2b3c4d5e6f7` for dimension columns on `course_ratings` and `faculty_ratings` tables.
 
 ### Beta 1.7.0 — 2026-04-10
 

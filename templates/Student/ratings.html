@@ -1,0 +1,617 @@
+{% extends "Layouts/student_base.html" %}
+{% block title %}Ratings{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-3">
+    <div>
+        <h1 class="fw-bold mb-1" style="font-size:1.5rem;letter-spacing:-.02em;">Ratings</h1>
+        <p style="color:var(--ax-muted);font-size:.85rem;margin:0;">Rate your faculty and courses across multiple dimensions</p>
+    </div>
+</div>
+
+{# ── Tab Switcher ── #}
+<div class="ax-card p-0 mb-4">
+    <div class="d-flex border-bottom" style="border-color:var(--ax-border)!important;">
+        <button class="ax-rate-tab active" data-tab="faculty" style="flex:1;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            Rate Faculty
+        </button>
+        <button class="ax-rate-tab" data-tab="course" style="flex:1;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+            Rate Courses
+        </button>
+        <button class="ax-rate-tab" data-tab="history" style="flex:1;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            My Ratings
+        </button>
+    </div>
+</div>
+
+{# ══════════════════════════════════════════════════════
+   FACULTY RATING PANEL
+   ══════════════════════════════════════════════════════ #}
+<div class="ax-rate-panel" id="panelFaculty">
+    <div class="ax-card p-3 mb-3">
+        <label class="form-label fw-semibold" style="font-size:.85rem;">Select Faculty Member</label>
+        <select id="facSelect" class="form-select form-select-sm" style="background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);">
+            <option value="">Choose a faculty member...</option>
+            {% for f in faculty_list %}
+            <option value="{{ f.id }}" data-name="{{ f.name|clean_name }}">{{ f.name|clean_name }}{% if f.department %} — {{ f.department }}{% endif %}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div id="facRatingForm" class="d-none">
+        <div class="ax-card p-4">
+            <h5 class="fw-bold mb-1" id="facFormTitle" style="font-size:1.1rem;"></h5>
+            <p style="color:var(--ax-muted);font-size:.8rem;" class="mb-4">Rate each dimension from 1 (Poor) to 5 (Excellent). All fields are required.</p>
+
+            <div class="ax-rate-grid">
+                <div class="ax-rate-dim" data-key="teaching_quality">
+                    <div class="ax-rate-dim-label">
+                        <span class="ax-rate-dim-icon">📚</span>
+                        <div>
+                            <div class="fw-semibold">Teaching Quality</div>
+                            <div class="ax-rate-dim-hint">How well does this faculty explain concepts and deliver lectures?</div>
+                        </div>
+                    </div>
+                    <div class="ax-rate-pills" data-key="teaching_quality"></div>
+                </div>
+
+                <div class="ax-rate-dim" data-key="communication">
+                    <div class="ax-rate-dim-label">
+                        <span class="ax-rate-dim-icon">💬</span>
+                        <div>
+                            <div class="fw-semibold">Communication</div>
+                            <div class="ax-rate-dim-hint">Are they clear, responsive, and approachable?</div>
+                        </div>
+                    </div>
+                    <div class="ax-rate-pills" data-key="communication"></div>
+                </div>
+
+                <div class="ax-rate-dim" data-key="availability">
+                    <div class="ax-rate-dim-label">
+                        <span class="ax-rate-dim-icon">🕐</span>
+                        <div>
+                            <div class="fw-semibold">Availability</div>
+                            <div class="ax-rate-dim-hint">Are they available during office hours? Willing to help outside class?</div>
+                        </div>
+                    </div>
+                    <div class="ax-rate-pills" data-key="availability"></div>
+                </div>
+
+                <div class="ax-rate-dim" data-key="grading_fairness">
+                    <div class="ax-rate-dim-label">
+                        <span class="ax-rate-dim-icon">⚖️</span>
+                        <div>
+                            <div class="fw-semibold">Grading Fairness</div>
+                            <div class="ax-rate-dim-hint">Is grading transparent, consistent, and fair?</div>
+                        </div>
+                    </div>
+                    <div class="ax-rate-pills" data-key="grading_fairness"></div>
+                </div>
+
+                <div class="ax-rate-dim" data-key="engagement">
+                    <div class="ax-rate-dim-label">
+                        <span class="ax-rate-dim-icon">🔥</span>
+                        <div>
+                            <div class="fw-semibold">Engagement</div>
+                            <div class="ax-rate-dim-hint">Does this faculty keep you interested and involved?</div>
+                        </div>
+                    </div>
+                    <div class="ax-rate-pills" data-key="engagement"></div>
+                </div>
+
+                <div class="ax-rate-dim" data-key="difficulty">
+                    <div class="ax-rate-dim-label">
+                        <span class="ax-rate-dim-icon">🎯</span>
+                        <div>
+                            <div class="fw-semibold">Difficulty</div>
+                            <div class="ax-rate-dim-hint">How challenging is this faculty's teaching style?</div>
+                        </div>
+                    </div>
+                    <div class="ax-rate-pills" data-key="difficulty" data-labels="Very Easy,Easy,Moderate,Hard,Very Hard"></div>
+                </div>
+            </div>
+
+            {# Overall + Recommend + Comment #}
+            <hr style="border-color:var(--ax-border);margin:1.5rem 0;">
+
+            <div class="d-flex flex-wrap gap-4 mb-3">
+                <div>
+                    <label class="form-label fw-semibold" style="font-size:.85rem;">Overall Rating</label>
+                    <div class="ax-rate-pills" data-key="score"></div>
+                </div>
+                <div>
+                    <label class="form-label fw-semibold" style="font-size:.85rem;">Would you recommend this faculty?</label>
+                    <div class="ax-rate-bool" data-key="would_recommend">
+                        <button class="ax-bool-btn" data-val="true">👍 Yes</button>
+                        <button class="ax-bool-btn" data-val="false">👎 No</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label fw-semibold" style="font-size:.85rem;">Additional Comments <span style="font-weight:400;color:var(--ax-muted);">(optional)</span></label>
+                <textarea id="facComment" class="form-control form-control-sm" rows="3"
+                    placeholder="Share any additional thoughts about this faculty..."
+                    style="background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);font-size:.85rem;"></textarea>
+            </div>
+
+            <button id="facSubmitBtn" class="btn btn-sm px-4 py-2" disabled
+                style="background:var(--ax-accent);color:#fff;border:none;border-radius:8px;font-weight:600;font-size:.85rem;">
+                Submit Faculty Rating
+            </button>
+            <span id="facSubmitMsg" class="ms-3" style="font-size:.82rem;color:var(--ax-muted);"></span>
+        </div>
+    </div>
+</div>
+
+{# ══════════════════════════════════════════════════════
+   COURSE RATING PANEL
+   ══════════════════════════════════════════════════════ #}
+<div class="ax-rate-panel d-none" id="panelCourse">
+    <div class="ax-card p-3 mb-3">
+        <label class="form-label fw-semibold" style="font-size:.85rem;">Select Course</label>
+        <select id="crsSelect" class="form-select form-select-sm" style="background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);">
+            <option value="">Choose a course...</option>
+            {% for c in course_list %}
+            <option value="{{ c.course_number }}">{{ c.course_number }} — {{ c.title }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div id="crsRatingForm" class="d-none">
+        <div class="ax-card p-4">
+            <h5 class="fw-bold mb-1" id="crsFormTitle" style="font-size:1.1rem;"></h5>
+            <p style="color:var(--ax-muted);font-size:.8rem;" class="mb-4">Rate each dimension from 1 (Poor) to 5 (Excellent). All fields are required.</p>
+
+            <div class="ax-rate-grid">
+                <div class="ax-rate-dim" data-key="content_quality">
+                    <div class="ax-rate-dim-label">
+                        <span class="ax-rate-dim-icon">📖</span>
+                        <div>
+                            <div class="fw-semibold">Content Quality</div>
+                            <div class="ax-rate-dim-hint">Is the course content well-structured, relevant, and up to date?</div>
+                        </div>
+                    </div>
+                    <div class="ax-rate-pills" data-key="content_quality"></div>
+                </div>
+
+                <div class="ax-rate-dim" data-key="workload">
+                    <div class="ax-rate-dim-label">
+                        <span class="ax-rate-dim-icon">⏱️</span>
+                        <div>
+                            <div class="fw-semibold">Workload</div>
+                            <div class="ax-rate-dim-hint">How heavy is the workload (assignments, reading, projects)?</div>
+                        </div>
+                    </div>
+                    <div class="ax-rate-pills" data-key="workload" data-labels="Very Light,Light,Moderate,Heavy,Very Heavy"></div>
+                </div>
+
+                <div class="ax-rate-dim" data-key="usefulness">
+                    <div class="ax-rate-dim-label">
+                        <span class="ax-rate-dim-icon">🎓</span>
+                        <div>
+                            <div class="fw-semibold">Usefulness</div>
+                            <div class="ax-rate-dim-hint">How useful is this course for your degree or career?</div>
+                        </div>
+                    </div>
+                    <div class="ax-rate-pills" data-key="usefulness"></div>
+                </div>
+
+                <div class="ax-rate-dim" data-key="materials_quality">
+                    <div class="ax-rate-dim-label">
+                        <span class="ax-rate-dim-icon">📎</span>
+                        <div>
+                            <div class="fw-semibold">Materials Quality</div>
+                            <div class="ax-rate-dim-hint">Are textbooks, slides, and resources helpful and well-prepared?</div>
+                        </div>
+                    </div>
+                    <div class="ax-rate-pills" data-key="materials_quality"></div>
+                </div>
+
+                <div class="ax-rate-dim" data-key="difficulty">
+                    <div class="ax-rate-dim-label">
+                        <span class="ax-rate-dim-icon">🎯</span>
+                        <div>
+                            <div class="fw-semibold">Difficulty</div>
+                            <div class="ax-rate-dim-hint">How challenging is this course overall?</div>
+                        </div>
+                    </div>
+                    <div class="ax-rate-pills" data-key="difficulty" data-labels="Very Easy,Easy,Moderate,Hard,Very Hard"></div>
+                </div>
+            </div>
+
+            <hr style="border-color:var(--ax-border);margin:1.5rem 0;">
+
+            <div class="d-flex flex-wrap gap-4 mb-3">
+                <div>
+                    <label class="form-label fw-semibold" style="font-size:.85rem;">Overall Rating</label>
+                    <div class="ax-rate-pills" data-key="score"></div>
+                </div>
+                <div>
+                    <label class="form-label fw-semibold" style="font-size:.85rem;">Would you take this course again?</label>
+                    <div class="ax-rate-bool" data-key="would_take_again">
+                        <button class="ax-bool-btn" data-val="true">👍 Yes</button>
+                        <button class="ax-bool-btn" data-val="false">👎 No</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label fw-semibold" style="font-size:.85rem;">Additional Comments <span style="font-weight:400;color:var(--ax-muted);">(optional)</span></label>
+                <textarea id="crsComment" class="form-control form-control-sm" rows="3"
+                    placeholder="Share any additional thoughts about this course..."
+                    style="background:var(--ax-surface-2);border-color:var(--ax-border);color:var(--ax-text);font-size:.85rem;"></textarea>
+            </div>
+
+            <button id="crsSubmitBtn" class="btn btn-sm px-4 py-2" disabled
+                style="background:var(--ax-accent);color:#fff;border:none;border-radius:8px;font-weight:600;font-size:.85rem;">
+                Submit Course Rating
+            </button>
+            <span id="crsSubmitMsg" class="ms-3" style="font-size:.82rem;color:var(--ax-muted);"></span>
+        </div>
+    </div>
+</div>
+
+{# ══════════════════════════════════════════════════════
+   MY RATINGS HISTORY
+   ══════════════════════════════════════════════════════ #}
+<div class="ax-rate-panel d-none" id="panelHistory">
+    <div id="historyLoading" class="text-center py-5" style="color:var(--ax-muted);">Loading your ratings...</div>
+    <div id="historyContent" class="d-none">
+        <div class="ax-card p-4 mb-3" id="histFaculty"></div>
+        <div class="ax-card p-4" id="histCourse"></div>
+    </div>
+</div>
+
+<style>
+/* ── Tab Switcher ── */
+.ax-rate-tab{background:none;border:none;padding:.7rem 1rem;font-size:.85rem;font-weight:500;color:var(--ax-muted);
+    cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .15s;border-bottom:2px solid transparent;}
+.ax-rate-tab:hover{color:var(--ax-text);}
+.ax-rate-tab.active{color:var(--ax-accent);border-bottom-color:var(--ax-accent);font-weight:600;}
+
+/* ── Rating Grid ── */
+.ax-rate-grid{display:grid;gap:1rem;}
+.ax-rate-dim{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.75rem 1rem;
+    border-radius:10px;background:var(--ax-surface-2);border:1px solid var(--ax-border);flex-wrap:wrap;}
+.ax-rate-dim-label{display:flex;align-items:center;gap:10px;flex:1;min-width:200px;}
+.ax-rate-dim-icon{font-size:1.2rem;flex-shrink:0;}
+.ax-rate-dim-hint{font-size:.75rem;color:var(--ax-muted);margin-top:1px;}
+
+/* ── Pill Selectors ── */
+.ax-rate-pills{display:inline-flex;gap:4px;}
+.ax-rate-pill{width:36px;height:36px;border-radius:8px;border:1.5px solid var(--ax-border);background:var(--ax-surface);
+    color:var(--ax-text);font-size:.82rem;font-weight:600;cursor:pointer;transition:all .15s;display:inline-flex;
+    align-items:center;justify-content:center;}
+.ax-rate-pill:hover{border-color:var(--ax-accent);background:color-mix(in srgb, var(--ax-accent) 10%, transparent);}
+.ax-rate-pill.selected{background:var(--ax-accent);color:#fff;border-color:var(--ax-accent);}
+
+/* ── Bool Buttons ── */
+.ax-rate-bool{display:inline-flex;gap:6px;}
+.ax-bool-btn{padding:.4rem .9rem;border-radius:8px;border:1.5px solid var(--ax-border);background:var(--ax-surface);
+    color:var(--ax-text);font-size:.82rem;font-weight:500;cursor:pointer;transition:all .15s;}
+.ax-bool-btn:hover{border-color:var(--ax-accent);}
+.ax-bool-btn.selected-yes{background:#16a34a;color:#fff;border-color:#16a34a;}
+.ax-bool-btn.selected-no{background:#dc2626;color:#fff;border-color:#dc2626;}
+
+/* ── History Cards ── */
+.ax-hist-item{padding:.75rem 1rem;border-radius:8px;background:var(--ax-surface-2);border:1px solid var(--ax-border);margin-bottom:.5rem;}
+.ax-hist-dim{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;background:var(--ax-surface);
+    border:1px solid var(--ax-border);font-size:.75rem;color:var(--ax-text);margin:2px;}
+.ax-hist-dim .val{font-weight:700;color:var(--ax-accent);}
+.ax-hist-bool-yes{color:#16a34a;font-weight:600;}
+.ax-hist-bool-no{color:#dc2626;font-weight:600;}
+
+/* ── Tooltip labels for pills ── */
+.ax-rate-pill[title]{position:relative;}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const esc = s => { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; };
+
+    /* ── Tab switching ── */
+    const tabs = document.querySelectorAll('.ax-rate-tab');
+    const panels = {
+        faculty: document.getElementById('panelFaculty'),
+        course: document.getElementById('panelCourse'),
+        history: document.getElementById('panelHistory'),
+    };
+    tabs.forEach(t => t.addEventListener('click', () => {
+        tabs.forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        Object.values(panels).forEach(p => p.classList.add('d-none'));
+        panels[t.dataset.tab].classList.remove('d-none');
+        if (t.dataset.tab === 'history') loadHistory();
+    }));
+
+    /* ── Initialize pill selectors ── */
+    const defaultLabels = ['1','2','3','4','5'];
+    document.querySelectorAll('.ax-rate-pills').forEach(container => {
+        const labels = container.dataset.labels ? container.dataset.labels.split(',') : defaultLabels;
+        for (let i = 1; i <= 5; i++) {
+            const pill = document.createElement('button');
+            pill.className = 'ax-rate-pill';
+            pill.type = 'button';
+            pill.dataset.val = i;
+            pill.textContent = i;
+            pill.title = labels[i-1] || i;
+            pill.addEventListener('click', () => {
+                container.querySelectorAll('.ax-rate-pill').forEach(p => p.classList.remove('selected'));
+                pill.classList.add('selected');
+                checkFormReady(container.closest('.ax-rate-panel'));
+            });
+            container.appendChild(pill);
+        }
+    });
+
+    /* ── Bool buttons ── */
+    document.querySelectorAll('.ax-rate-bool').forEach(container => {
+        container.querySelectorAll('.ax-bool-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                container.querySelectorAll('.ax-bool-btn').forEach(b => b.classList.remove('selected-yes','selected-no'));
+                btn.classList.add(btn.dataset.val === 'true' ? 'selected-yes' : 'selected-no');
+                checkFormReady(container.closest('.ax-rate-panel'));
+            });
+        });
+    });
+
+    /* ── Faculty select ── */
+    const facSelect = document.getElementById('facSelect');
+    const facForm = document.getElementById('facRatingForm');
+    const facTitle = document.getElementById('facFormTitle');
+
+    facSelect.addEventListener('change', () => {
+        const opt = facSelect.selectedOptions[0];
+        if (!opt || !opt.value) { facForm.classList.add('d-none'); return; }
+        facTitle.textContent = opt.dataset.name || opt.textContent;
+        facForm.classList.remove('d-none');
+        resetForm(panels.faculty);
+        prefillFaculty(parseInt(opt.value));
+    });
+
+    /* ── Course select ── */
+    const crsSelect = document.getElementById('crsSelect');
+    const crsForm = document.getElementById('crsRatingForm');
+    const crsTitle = document.getElementById('crsFormTitle');
+
+    crsSelect.addEventListener('change', () => {
+        const opt = crsSelect.selectedOptions[0];
+        if (!opt || !opt.value) { crsForm.classList.add('d-none'); return; }
+        crsTitle.textContent = opt.textContent;
+        crsForm.classList.remove('d-none');
+        resetForm(panels.course);
+        prefillCourse(opt.value);
+    });
+
+    /* ── Prefill uses API fetch below ── */
+
+    /* ── Collect form values ── */
+    function collectFormData(panel) {
+        const data = {};
+        panel.querySelectorAll('.ax-rate-pills').forEach(container => {
+            const sel = container.querySelector('.ax-rate-pill.selected');
+            if (sel) data[container.dataset.key] = parseInt(sel.dataset.val);
+        });
+        panel.querySelectorAll('.ax-rate-bool').forEach(container => {
+            const sel = container.querySelector('.ax-bool-btn.selected-yes, .ax-bool-btn.selected-no');
+            if (sel) data[container.dataset.key] = sel.dataset.val === 'true';
+        });
+        const ta = panel.querySelector('textarea');
+        if (ta && ta.value.trim()) data.comment = ta.value.trim();
+        return data;
+    }
+
+    function checkFormReady(panel) {
+        const btn = panel.querySelector('button[id$="SubmitBtn"]');
+        if (!btn) return;
+        // Need all pill groups filled + bool + score
+        let ready = true;
+        panel.querySelectorAll('.ax-rate-pills').forEach(c => {
+            if (!c.querySelector('.ax-rate-pill.selected')) ready = false;
+        });
+        panel.querySelectorAll('.ax-rate-bool').forEach(c => {
+            if (!c.querySelector('.selected-yes, .selected-no')) ready = false;
+        });
+        btn.disabled = !ready;
+    }
+
+    function resetForm(panel) {
+        panel.querySelectorAll('.ax-rate-pill').forEach(p => p.classList.remove('selected'));
+        panel.querySelectorAll('.ax-bool-btn').forEach(b => b.classList.remove('selected-yes','selected-no'));
+        const ta = panel.querySelector('textarea');
+        if (ta) ta.value = '';
+        const btn = panel.querySelector('button[id$="SubmitBtn"]');
+        if (btn) btn.disabled = true;
+        const msg = panel.querySelector('span[id$="SubmitMsg"]');
+        if (msg) msg.textContent = '';
+    }
+
+    function setFormValues(panel, data) {
+        for (const [key, val] of Object.entries(data)) {
+            if (val === null || val === undefined) continue;
+            if (typeof val === 'boolean') {
+                const boolDiv = panel.querySelector(`.ax-rate-bool[data-key="${key}"]`);
+                if (boolDiv) {
+                    boolDiv.querySelectorAll('.ax-bool-btn').forEach(b => {
+                        b.classList.remove('selected-yes','selected-no');
+                        if (b.dataset.val === String(val)) b.classList.add(val ? 'selected-yes' : 'selected-no');
+                    });
+                }
+            } else if (typeof val === 'number') {
+                const pillDiv = panel.querySelector(`.ax-rate-pills[data-key="${key}"]`);
+                if (pillDiv) {
+                    pillDiv.querySelectorAll('.ax-rate-pill').forEach(p => {
+                        p.classList.toggle('selected', parseInt(p.dataset.val) === val);
+                    });
+                }
+            } else if (key === 'comment' && val) {
+                const ta = panel.querySelector('textarea');
+                if (ta) ta.value = val;
+            }
+        }
+        checkFormReady(panel);
+    }
+
+    /* ── Submit Faculty ── */
+    document.getElementById('facSubmitBtn').addEventListener('click', () => {
+        const fid = parseInt(facSelect.value);
+        if (!fid) return;
+        const data = collectFormData(panels.faculty);
+        data.faculty_id = fid;
+
+        const btn = document.getElementById('facSubmitBtn');
+        const msg = document.getElementById('facSubmitMsg');
+        btn.disabled = true;
+        msg.textContent = 'Submitting...';
+
+        fetch('/student/api/rate/faculty', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                msg.style.color = '#16a34a';
+                msg.textContent = '✓ Rating submitted successfully!';
+            } else {
+                msg.style.color = '#dc2626';
+                msg.textContent = d.message || 'Error submitting rating.';
+                btn.disabled = false;
+            }
+        })
+        .catch(() => {
+            msg.style.color = '#dc2626';
+            msg.textContent = 'Network error.';
+            btn.disabled = false;
+        });
+    });
+
+    /* ── Submit Course ── */
+    document.getElementById('crsSubmitBtn').addEventListener('click', () => {
+        const cn = crsSelect.value;
+        if (!cn) return;
+        const data = collectFormData(panels.course);
+        data.course_number = cn;
+
+        const btn = document.getElementById('crsSubmitBtn');
+        const msg = document.getElementById('crsSubmitMsg');
+        btn.disabled = true;
+        msg.textContent = 'Submitting...';
+
+        fetch('/student/api/rate/course', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                msg.style.color = '#16a34a';
+                msg.textContent = '✓ Rating submitted successfully!';
+            } else {
+                msg.style.color = '#dc2626';
+                msg.textContent = d.message || 'Error submitting rating.';
+                btn.disabled = false;
+            }
+        })
+        .catch(() => {
+            msg.style.color = '#dc2626';
+            msg.textContent = 'Network error.';
+            btn.disabled = false;
+        });
+    });
+
+    /* ── Load & render prefill from API when selecting ── */
+    function prefillFaculty(fid) {
+        fetch('/student/api/ratings/my')
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) return;
+                const mine = d.faculty.find(r => r.faculty_id === fid);
+                if (mine) setFormValues(panels.faculty, mine);
+            });
+    }
+    function prefillCourse(cn) {
+        fetch('/student/api/ratings/my')
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) return;
+                const mine = d.courses.find(r => r.course_number === cn);
+                if (mine) setFormValues(panels.course, mine);
+            });
+    }
+
+    /* ── History tab ── */
+    function loadHistory() {
+        const loading = document.getElementById('historyLoading');
+        const content = document.getElementById('historyContent');
+        loading.classList.remove('d-none');
+        content.classList.add('d-none');
+
+        fetch('/student/api/ratings/my')
+            .then(r => r.json())
+            .then(d => {
+                loading.classList.add('d-none');
+                content.classList.remove('d-none');
+                if (!d.success) return;
+                renderFacultyHistory(d.faculty);
+                renderCourseHistory(d.courses);
+            });
+    }
+
+    const facDimLabels = {
+        teaching_quality: 'Teaching', communication: 'Communication', availability: 'Availability',
+        grading_fairness: 'Grading', engagement: 'Engagement', difficulty: 'Difficulty'
+    };
+    const crsDimLabels = {
+        content_quality: 'Content', workload: 'Workload', usefulness: 'Usefulness',
+        materials_quality: 'Materials', difficulty: 'Difficulty'
+    };
+
+    function renderFacultyHistory(items) {
+        const el = document.getElementById('histFaculty');
+        if (!items.length) { el.innerHTML = '<h6 class="fw-bold mb-2">Faculty Ratings</h6><p style="color:var(--ax-muted);font-size:.85rem;">No faculty ratings yet.</p>'; return; }
+        let html = '<h6 class="fw-bold mb-3">Faculty Ratings</h6>';
+        for (const r of items) {
+            html += `<div class="ax-hist-item">`;
+            html += `<div class="d-flex justify-content-between align-items-center mb-2"><strong>${esc(r.faculty_name)}</strong><span style="font-size:.75rem;color:var(--ax-muted);">${r.updated_at ? new Date(r.updated_at).toLocaleDateString() : ''}</span></div>`;
+            html += `<div class="d-flex flex-wrap mb-1">`;
+            html += `<span class="ax-hist-dim">Overall <span class="val">${r.score}/5</span></span>`;
+            for (const [k, label] of Object.entries(facDimLabels)) {
+                if (r[k] != null) html += `<span class="ax-hist-dim">${label} <span class="val">${r[k]}/5</span></span>`;
+            }
+            if (r.would_recommend != null) html += `<span class="ax-hist-dim">Recommend ${r.would_recommend ? '<span class="ax-hist-bool-yes">Yes</span>' : '<span class="ax-hist-bool-no">No</span>'}</span>`;
+            html += `</div>`;
+            if (r.comment) html += `<div style="font-size:.8rem;color:var(--ax-muted);margin-top:4px;font-style:italic;">"${esc(r.comment)}"</div>`;
+            html += `</div>`;
+        }
+        el.innerHTML = html;
+    }
+
+    function renderCourseHistory(items) {
+        const el = document.getElementById('histCourse');
+        if (!items.length) { el.innerHTML = '<h6 class="fw-bold mb-2">Course Ratings</h6><p style="color:var(--ax-muted);font-size:.85rem;">No course ratings yet.</p>'; return; }
+        let html = '<h6 class="fw-bold mb-3">Course Ratings</h6>';
+        for (const r of items) {
+            html += `<div class="ax-hist-item">`;
+            html += `<div class="d-flex justify-content-between align-items-center mb-2"><strong>${esc(r.course_number)}</strong><span style="font-size:.75rem;color:var(--ax-muted);">${r.updated_at ? new Date(r.updated_at).toLocaleDateString() : ''}</span></div>`;
+            html += `<div class="d-flex flex-wrap mb-1">`;
+            html += `<span class="ax-hist-dim">Overall <span class="val">${r.score}/5</span></span>`;
+            for (const [k, label] of Object.entries(crsDimLabels)) {
+                if (r[k] != null) html += `<span class="ax-hist-dim">${label} <span class="val">${r[k]}/5</span></span>`;
+            }
+            if (r.would_take_again != null) html += `<span class="ax-hist-dim">Take again ${r.would_take_again ? '<span class="ax-hist-bool-yes">Yes</span>' : '<span class="ax-hist-bool-no">No</span>'}</span>`;
+            html += `</div>`;
+            if (r.comment) html += `<div style="font-size:.8rem;color:var(--ax-muted);margin-top:4px;font-style:italic;">"${esc(r.comment)}"</div>`;
+            html += `</div>`;
+        }
+        el.innerHTML = html;
+    }
+});
+</script>
+{% endblock %}

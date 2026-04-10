@@ -344,8 +344,15 @@ class CourseRating(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     course_number = db.Column(db.String(120), nullable=False, index=True)
-    score = db.Column(db.Integer, nullable=False)           # 1-5
+    score = db.Column(db.Integer, nullable=False)           # overall 1-5
     comment = db.Column(db.Text, nullable=True)
+    # ── Dimension scores (1-5 each, nullable for backcompat) ──
+    content_quality = db.Column(db.Integer, nullable=True)
+    workload = db.Column(db.Integer, nullable=True)         # 1=light .. 5=heavy
+    usefulness = db.Column(db.Integer, nullable=True)
+    materials_quality = db.Column(db.Integer, nullable=True)
+    difficulty = db.Column(db.Integer, nullable=True)        # 1=easy .. 5=hard
+    would_take_again = db.Column(db.Boolean, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -361,8 +368,16 @@ class FacultyRating(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
     faculty_id = db.Column(db.Integer, db.ForeignKey('faculty.id'), nullable=False, index=True)
-    score = db.Column(db.Integer, nullable=False)           # 1-5
+    score = db.Column(db.Integer, nullable=False)           # overall 1-5
     comment = db.Column(db.Text, nullable=True)
+    # ── Dimension scores (1-5 each, nullable for backcompat) ──
+    teaching_quality = db.Column(db.Integer, nullable=True)
+    communication = db.Column(db.Integer, nullable=True)
+    availability = db.Column(db.Integer, nullable=True)
+    grading_fairness = db.Column(db.Integer, nullable=True)
+    engagement = db.Column(db.Integer, nullable=True)
+    difficulty = db.Column(db.Integer, nullable=True)        # 1=easy .. 5=hard
+    would_recommend = db.Column(db.Boolean, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

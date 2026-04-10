@@ -327,7 +327,191 @@
     </div>
 </div>
 
+{# ══════════════════════════════════════════════════════
+   RATINGS ANALYTICS SECTION
+   ══════════════════════════════════════════════════════ #}
+<hr class="my-4">
+<h4 class="fw-bold mb-3">📊 Ratings Analytics</h4>
+<p class="text-muted mb-4">Multi-dimensional student ratings for faculty and courses. Data loaded from the dedicated ratings system.</p>
+
+<div class="row mb-4">
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">Faculty Ratings Overview</h6>
+                <div id="ratFacultyLoading" class="text-muted text-center py-3">Loading...</div>
+                <div id="ratFacultyTable" class="d-none" style="max-height:400px;overflow-y:auto;"></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">Course Ratings Overview</h6>
+                <div id="ratCourseLoading" class="text-muted text-center py-3">Loading...</div>
+                <div id="ratCourseTable" class="d-none" style="max-height:400px;overflow-y:auto;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">Faculty: Rating vs Enrollment Correlation</h6>
+                <div style="height:340px;"><canvas id="ratCorrelationChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-3">
+        <div class="card shadow-sm border-0 rounded-4 h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-2">Top Faculty by Dimension</h6>
+                <div style="height:340px;"><canvas id="ratFacDimChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script id="initialAnalyticsPayload" type="application/json">{{ payload | tojson | safe }}</script>
+
+{# ── Ratings analytics loader (runs after main analytics DOMContentLoaded) ── #}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    fetch('/admin/api/ratings/overview')
+        .then(r => r.json())
+        .then(d => {
+            if (!d.success) return;
+            renderFacultyRatingsTable(d.faculty);
+            renderCourseRatingsTable(d.courses);
+            renderCorrelationChart(d.correlation);
+            renderFacDimChart(d.faculty.slice(0, 10));
+        })
+        .catch(() => {
+            document.getElementById('ratFacultyLoading').textContent = 'No ratings data yet.';
+            document.getElementById('ratCourseLoading').textContent = 'No ratings data yet.';
+        });
+
+    function renderFacultyRatingsTable(items) {
+        const el = document.getElementById('ratFacultyTable');
+        const load = document.getElementById('ratFacultyLoading');
+        load.classList.add('d-none');
+        el.classList.remove('d-none');
+        if (!items.length) { el.innerHTML = '<p class="text-muted">No faculty ratings yet.</p>'; return; }
+        let html = `<table class="table table-sm table-hover mb-0" style="font-size:.8rem;">
+            <thead><tr><th>Faculty</th><th>Overall</th><th>Teaching</th><th>Comm.</th><th>Avail.</th><th>Grading</th><th>Engage.</th><th>Diff.</th><th>Rec %</th><th>#</th></tr></thead><tbody>`;
+        for (const r of items) {
+            const recPct = (r.recommend_yes + r.recommend_no) > 0
+                ? Math.round(r.recommend_yes / (r.recommend_yes + r.recommend_no) * 100) + '%'
+                : '—';
+            html += `<tr>
+                <td class="fw-semibold">${esc(r.name)}</td>
+                <td>${r.avg_overall ?? '—'}</td>
+                <td>${r.avg_teaching_quality ?? '—'}</td>
+                <td>${r.avg_communication ?? '—'}</td>
+                <td>${r.avg_availability ?? '—'}</td>
+                <td>${r.avg_grading_fairness ?? '—'}</td>
+                <td>${r.avg_engagement ?? '—'}</td>
+                <td>${r.avg_difficulty ?? '—'}</td>
+                <td>${recPct}</td>
+                <td>${r.count}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    }
+
+    function renderCourseRatingsTable(items) {
+        const el = document.getElementById('ratCourseTable');
+        const load = document.getElementById('ratCourseLoading');
+        load.classList.add('d-none');
+        el.classList.remove('d-none');
+        if (!items.length) { el.innerHTML = '<p class="text-muted">No course ratings yet.</p>'; return; }
+        let html = `<table class="table table-sm table-hover mb-0" style="font-size:.8rem;">
+            <thead><tr><th>Course</th><th>Overall</th><th>Content</th><th>Workload</th><th>Useful</th><th>Materials</th><th>Diff.</th><th>Again %</th><th>#</th></tr></thead><tbody>`;
+        for (const r of items) {
+            const againPct = (r.take_again_yes + r.take_again_no) > 0
+                ? Math.round(r.take_again_yes / (r.take_again_yes + r.take_again_no) * 100) + '%'
+                : '—';
+            html += `<tr>
+                <td class="fw-semibold">${esc(r.course_number)}</td>
+                <td>${r.avg_overall ?? '—'}</td>
+                <td>${r.avg_content_quality ?? '—'}</td>
+                <td>${r.avg_workload ?? '—'}</td>
+                <td>${r.avg_usefulness ?? '—'}</td>
+                <td>${r.avg_materials_quality ?? '—'}</td>
+                <td>${r.avg_difficulty ?? '—'}</td>
+                <td>${againPct}</td>
+                <td>${r.count}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    }
+
+    function renderCorrelationChart(items) {
+        if (!items.length) return;
+        const ctx = document.getElementById('ratCorrelationChart');
+        if (!ctx) return;
+        const p = window.AcadexCharts ? AcadexCharts.palette() : {};
+        new Chart(ctx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'Faculty',
+                    data: items.map(r => ({ x: r.avg_rating || 0, y: r.enrollments || 0, label: r.name })),
+                    backgroundColor: p.primary || '#6366f1',
+                    pointRadius: 6,
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => `${ctx.raw.label}: Rating ${ctx.raw.x}, Enrollments ${ctx.raw.y}`
+                        }
+                    }
+                },
+                scales: {
+                    x: { title: { display: true, text: 'Avg Rating' }, min: 0, max: 5 },
+                    y: { title: { display: true, text: 'Schedule Enrollments' }, beginAtZero: true }
+                }
+            }
+        });
+    }
+
+    function renderFacDimChart(items) {
+        if (!items.length) return;
+        const ctx = document.getElementById('ratFacDimChart');
+        if (!ctx) return;
+        const p = window.AcadexCharts ? AcadexCharts.palette() : {};
+        const dims = ['avg_teaching_quality','avg_communication','avg_availability','avg_grading_fairness','avg_engagement'];
+        const dimLabels = ['Teaching','Comm.','Avail.','Grading','Engage.'];
+        const colors = [p.primary||'#6366f1', p.info||'#06b6d4', p.success||'#22c55e', p.warning||'#f59e0b', p.danger||'#ef4444',
+                        '#8b5cf6','#ec4899','#14b8a6','#f97316','#64748b'];
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: dimLabels,
+                datasets: items.slice(0, 5).map((r, i) => ({
+                    label: r.name,
+                    data: dims.map(d => r[d] || 0),
+                    backgroundColor: colors[i % colors.length],
+                }))
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } },
+                scales: { y: { beginAtZero: true, max: 5, title: { display: true, text: 'Avg Score' } } }
+            }
+        });
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+});
+</script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {

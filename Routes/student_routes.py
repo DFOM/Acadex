@@ -2821,12 +2821,26 @@ def api_rate_course():
     if not course_number or not isinstance(score, int) or score < 1 or score > 5:
         return jsonify({'success': False, 'message': 'Valid course_number and score (1-5) required.'}), 400
 
+    # Dimension scores (optional, 1-5)
+    dims = {}
+    for key in ('content_quality', 'workload', 'usefulness', 'materials_quality', 'difficulty'):
+        v = payload.get(key)
+        if v is not None:
+            if not isinstance(v, int) or v < 1 or v > 5:
+                return jsonify({'success': False, 'message': f'{key} must be 1-5.'}), 400
+            dims[key] = v
+    wta = payload.get('would_take_again')
+    if wta is not None:
+        dims['would_take_again'] = bool(wta)
+
     existing = CourseRating.query.filter_by(user_id=current_user.id, course_number=course_number).first()
     if existing:
         existing.score = score
         existing.comment = comment
+        for k, v in dims.items():
+            setattr(existing, k, v)
     else:
-        existing = CourseRating(user_id=current_user.id, course_number=course_number, score=score, comment=comment)
+        existing = CourseRating(user_id=current_user.id, course_number=course_number, score=score, comment=comment, **dims)
         db.session.add(existing)
     db.session.commit()
 
@@ -2849,18 +2863,100 @@ def api_rate_faculty():
     if not Faculty.query.get(faculty_id):
         return jsonify({'success': False, 'message': 'Faculty not found.'}), 404
 
+    # Dimension scores (optional, 1-5)
+    dims = {}
+    for key in ('teaching_quality', 'communication', 'availability', 'grading_fairness', 'engagement', 'difficulty'):
+        v = payload.get(key)
+        if v is not None:
+            if not isinstance(v, int) or v < 1 or v > 5:
+                return jsonify({'success': False, 'message': f'{key} must be 1-5.'}), 400
+            dims[key] = v
+    wr = payload.get('would_recommend')
+    if wr is not None:
+        dims['would_recommend'] = bool(wr)
+
     existing = FacultyRating.query.filter_by(user_id=current_user.id, faculty_id=faculty_id).first()
     if existing:
         existing.score = score
         existing.comment = comment
+        for k, v in dims.items():
+            setattr(existing, k, v)
     else:
-        existing = FacultyRating(user_id=current_user.id, faculty_id=faculty_id, score=score, comment=comment)
+        existing = FacultyRating(user_id=current_user.id, faculty_id=faculty_id, score=score, comment=comment, **dims)
         db.session.add(existing)
     db.session.commit()
 
     avg_q = db.session.query(db.func.avg(FacultyRating.score)).filter(FacultyRating.faculty_id == faculty_id).scalar()
     count = FacultyRating.query.filter_by(faculty_id=faculty_id).count()
     return jsonify({'success': True, 'avg_rating': round(float(avg_q), 1) if avg_q else None, 'rating_count': count})
+
+
+# ── Student Ratings Tab ──
+@student_bp.route('/ratings')
+@login_required
+def ratings_view():
+    faculty_list = Faculty.query.order_by(Faculty.name.asc()).all()
+    # Distinct course numbers from current datasets
+    _active_ds = current_dataset_names()
+    courses_q = Course.query.filter(
+        func.lower(func.trim(Course.dataset_name)).in_([d.lower() for d in _active_ds])
+    ).with_entities(Course.course_number, Course.title).distinct().order_by(Course.course_number).all()
+
+    my_faculty_ratings = FacultyRating.query.filter_by(user_id=current_user.id).all()
+    my_course_ratings = CourseRating.query.filter_by(user_id=current_user.id).all()
+
+    fac_map = {r.faculty_id: r for r in my_faculty_ratings}
+    crs_map = {r.course_number: r for r in my_course_ratings}
+
+    return render_template('Student/ratings.html',
+                           faculty_list=faculty_list,
+                           course_list=courses_q,
+                           fac_ratings=fac_map,
+                           crs_ratings=crs_map)
+
+
+@student_bp.route('/api/ratings/my')
+@login_required
+def api_my_ratings():
+    """Return current user's ratings for the ratings history panel."""
+    fac_ratings = FacultyRating.query.filter_by(user_id=current_user.id).all()
+    crs_ratings = CourseRating.query.filter_by(user_id=current_user.id).all()
+
+    fac_names = {}
+    if fac_ratings:
+        fids = [r.faculty_id for r in fac_ratings]
+        rows = Faculty.query.filter(Faculty.id.in_(fids)).all()
+        fac_names = {f.id: clean_display_name(f.name) for f in rows}
+
+    return jsonify({
+        'success': True,
+        'faculty': [{
+            'faculty_id': r.faculty_id,
+            'faculty_name': fac_names.get(r.faculty_id, 'Unknown'),
+            'score': r.score,
+            'teaching_quality': r.teaching_quality,
+            'communication': r.communication,
+            'availability': r.availability,
+            'grading_fairness': r.grading_fairness,
+            'engagement': r.engagement,
+            'difficulty': r.difficulty,
+            'would_recommend': r.would_recommend,
+            'comment': r.comment,
+            'updated_at': r.updated_at.isoformat() if r.updated_at else None,
+        } for r in fac_ratings],
+        'courses': [{
+            'course_number': r.course_number,
+            'score': r.score,
+            'content_quality': r.content_quality,
+            'workload': r.workload,
+            'usefulness': r.usefulness,
+            'materials_quality': r.materials_quality,
+            'difficulty': r.difficulty,
+            'would_take_again': r.would_take_again,
+            'comment': r.comment,
+            'updated_at': r.updated_at.isoformat() if r.updated_at else None,
+        } for r in crs_ratings],
+    })
 
 
 # --- Premium Dashboard Logic ---

@@ -299,6 +299,24 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 # 6. Change Log (Chronological)
 
+## 2026-06-14 — Beta 1.8.0 (Comprehensive multi-dimension rating system)
+
+- **New models columns**: `CourseRating` now has `content_quality`, `workload`, `usefulness`, `materials_quality`, `difficulty` (all 1-5 int), and `would_take_again` (boolean). `FacultyRating` now has `teaching_quality`, `communication`, `availability`, `grading_fairness`, `engagement`, `difficulty` (all 1-5 int), and `would_recommend` (boolean). All nullable for backward compatibility.
+- **Migration**: `a2b3c4d5e6f7_add_rating_dimensions.py` adds dimension columns to both tables.
+- **Dedicated Ratings tab**: New `/student/ratings` route + `templates/Student/ratings.html`. Three sub-tabs: Rate Faculty, Rate Courses, My Ratings.
+  - Faculty rating form: 6 dimension pill selectors (Teaching Quality, Communication, Availability, Grading Fairness, Engagement, Difficulty), overall score pills, yes/no Would Recommend button, single comment textarea.
+  - Course rating form: 5 dimension pill selectors (Content Quality, Workload, Usefulness, Materials Quality, Difficulty), overall score pills, yes/no Would Take Again button, single comment textarea.
+  - My Ratings: historical view of all submitted ratings with dimension breakdowns and timestamps.
+- **Updated APIs**: `POST /student/api/rate/faculty` and `POST /student/api/rate/course` now accept optional dimension fields alongside the required `score`. Backward-compatible — old callers still work.
+- **New API**: `GET /student/api/ratings/my` returns all of the current user's faculty and course ratings with dimension data.
+- **Nav update**: "Ratings" tab added to student navigation between Faculty and Admin.
+- **Admin Ratings Analytics**: `GET /admin/api/ratings/overview` aggregates all ratings by faculty and course, returns dimension averages, recommend/take-again percentages, and enrollment-vs-rating correlation data.
+- **Admin analytics page**: New "Ratings Analytics" section at the bottom of `admin_analytics.html` with:
+  - Faculty ratings table (overall + 6 dimensions + recommend % + count)
+  - Course ratings table (overall + 5 dimensions + take-again % + count)
+  - Scatter chart correlating faculty avg rating with schedule enrollment count
+  - Grouped bar chart comparing top 5 faculty across rating dimensions
+
 ## 2026-04-10 — Beta 1.7.0 (3-state courses, transferred detection, faculty-left)
 
 - Added `transferred_courses_map()` in utils.py — for inactive course titles, finds if another faculty teaches them in current datasets.
