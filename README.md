@@ -11,9 +11,13 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.6.3**
+- Current version: **Beta 1.6.4**
 
 ## Changelog
+
+### Beta 1.6.4 — 2026-04-10
+
+- **Both-semester awareness**: `current_dataset_names()` now includes the most recent Fall AND the most recent Spring datasets, so courses offered only in one semester are not wrongly marked as discontinued.
 
 ### Beta 1.6.3 — 2026-04-10
 

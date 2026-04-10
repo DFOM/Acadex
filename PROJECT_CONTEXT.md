@@ -299,6 +299,10 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 # 6. Change Log (Chronological)
 
+## 2026-04-10 — Beta 1.6.4 (Both-semester awareness for active courses)
+
+- Rewrote `current_dataset_names()` to walk DatasetRegistry by recency and collect the most recent dataset for each distinct semester (Fall, Spring). Stops after covering two semesters. This ensures Spring-only courses aren’t greyed out when the latest upload is a Fall dataset, and vice versa.
+
 ## 2026-04-10 — Beta 1.6.3 (Historical course highlighting)
 
 - Added `current_dataset_names()` in utils.py — returns the set of dataset names from the most recent year in DatasetRegistry.

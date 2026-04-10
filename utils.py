@@ -622,21 +622,48 @@ def strip_section_suffix(title: str) -> str:
 
 
 def current_dataset_names() -> set[str]:
-    """Return the lowercased dataset names considered 'current' (most recent year)."""
-    latest = DatasetRegistry.query.order_by(
+    """Return lowercased dataset names considered 'current'.
+
+    Includes the most recent semester's datasets AND the most recent
+    opposite-semester datasets, so Spring-only and Fall-only courses
+    are both treated as active.
+    """
+    all_ds = DatasetRegistry.query.order_by(
         DatasetRegistry.created_at.desc()
-    ).first()
-    if not latest:
-        return set()
-    latest_year = (latest.year or '').strip()
-    if not latest_year:
-        # No year info — just use the single most-recent dataset
-        return {(latest.name or '').strip().lower()}
-    # All datasets from the same year are current
-    rows = DatasetRegistry.query.filter(
-        DatasetRegistry.year == latest_year
     ).all()
-    return {(r.name or '').strip().lower() for r in rows if r.name}
+    if not all_ds:
+        return set()
+
+    names: set[str] = set()
+    seen_semesters: set[str] = set()   # track which semesters we've covered
+
+    for ds in all_ds:
+        sem = normalize_dataset_semester(ds.semester).lower() or 'unknown'
+        if sem in seen_semesters:
+            continue
+        # First time seeing this semester → it's the most recent for that semester
+        seen_semesters.add(sem)
+        # Include all datasets sharing the same year+semester
+        year = (ds.year or '').strip()
+        if year:
+            siblings = [
+                d for d in all_ds
+                if (d.year or '').strip() == year
+                and normalize_dataset_semester(d.semester).lower() == sem
+            ]
+            for s in siblings:
+                n = (s.name or '').strip().lower()
+                if n:
+                    names.add(n)
+        else:
+            n = (ds.name or '').strip().lower()
+            if n:
+                names.add(n)
+        # Stop once we have both Fall and Spring (or two distinct semesters)
+        if len(seen_semesters) >= 2:
+            break
+
+    return names
 
 
 def normalize_faculty_name(name: str) -> str:
