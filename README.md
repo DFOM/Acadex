@@ -11,9 +11,14 @@ It supports:
 
 ## Version
 
-- Current version: **Beta 1.6.1**
+- Current version: **Beta 1.6.2**
 
 ## Changelog
+
+### Beta 1.6.2 — 2026-04-10
+
+- **Section-aware dedup**: Course lists for faculty now strip section suffixes ("Sec 1", "Section A") before comparing, so "Japanese Language 2 Sec 1/2/3" collapse into one entry.
+- **Faculty name cleanup on all display paths**: `clean_display_name` Jinja filter and API serialization ensure brackets/quotes/ALL-CAPS are fixed everywhere — admin list, student cards, detail drawer, course faculty field.
 
 ### Beta 1.6.1 — 2026-04-10
 

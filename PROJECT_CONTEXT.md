@@ -299,6 +299,16 @@ No change is complete unless `PROJECT_CONTEXT.md` is updated.
 
 # 6. Change Log (Chronological)
 
+## 2026-04-10 — Beta 1.6.2 (Section dedup & display-name cleanup)
+
+- Added `strip_section_suffix()` util — removes trailing "Sec 1", "Section A" etc. for dedup comparison.
+- Added `clean_display_name()` util — one-call bracket-strip + title-case for display.
+- Registered `|clean_name` Jinja filter (app.py) so templates can pipe `f.name|clean_name`.
+- `_serialize_faculty()` in admin_routes now returns `clean_display_name(row.name)` and deduplicates courses by base title.
+- `_serialize_manual_course()` cleans faculty names with `clean_display_name()`.
+- `api_faculty_detail()` in student_routes returns cleaned name and section-deduped courses.
+- Student faculty.html cards use `|clean_name` filter for name display.
+
 ## 2026-04-10 — Beta 1.6.1 (Faculty name cleanup, placeholder reassignment)
 
 - Strip `['...']` brackets/quotes from faculty names across `normalize_faculty_name()`, `extract_faculty_names()`, and `_normalize_instructor()`.

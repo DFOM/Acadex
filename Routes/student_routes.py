@@ -21,6 +21,8 @@ from utils import (
     normalize_dataset_semester,
     _titlecase_name,
     _strip_brackets_quotes,
+    clean_display_name,
+    strip_section_suffix,
 )
 from services.eligibility import normalize_course_code_for_prereqs
 from services.conflicts import parse_day_period_blocks
@@ -2729,13 +2731,14 @@ def api_faculty_detail(faculty_id: int):
         title = (c.title or '').strip()
         if not title:
             title = c.course_number or 'Unknown'
-        title_lower = title.lower()
-        if title_lower in seen_titles:
+        base_title = strip_section_suffix(title)
+        base_key = base_title.lower()
+        if base_key in seen_titles:
             continue
-        seen_titles.add(title_lower)
+        seen_titles.add(base_key)
         courses_taught.append({
             'course_number': c.course_number,
-            'title': title,
+            'title': base_title,
             'area': getattr(c, 'Area_of_Study', None) or getattr(c, 'area_of_study', None),
         })
 
@@ -2743,7 +2746,7 @@ def api_faculty_detail(faculty_id: int):
         'success': True,
         'faculty': {
             'id': row.id,
-            'name': row.name,
+            'name': clean_display_name(row.name),
             'email': row.email,
             'title': row.title,
             'department': row.department,

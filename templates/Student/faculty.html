@@ -34,13 +34,13 @@
         {% for f in faculty %}
         <div class="ax-fac-card"
              data-fid="{{ f.id }}"
-             data-name="{{ f.name|lower }}"
+             data-name="{{ f.name|clean_name|lower }}"
              data-dept="{{ (f.department or '')|lower }}"
              data-areas="{{ (f.advisor_areas|map(attribute='name')|join('|'))|lower }}">
             <div class="ax-fac-card-top">
-                <div class="ax-fac-avatar">{{ f.name[0].upper() if f.name else '?' }}</div>
+                <div class="ax-fac-avatar">{{ (f.name|clean_name)[0].upper() if f.name else '?' }}</div>
                 <div>
-                    <div class="ax-fac-card-name">{{ f.name }}</div>
+                    <div class="ax-fac-card-name">{{ f.name|clean_name }}</div>
                     <div class="ax-fac-card-meta">
                         {% if f.title %}<span>{{ f.title }}</span>{% endif %}
                         {% if f.department %}<span class="ax-fac-dept-badge">{{ f.department }}</span>{% endif %}

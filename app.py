@@ -19,8 +19,9 @@ from Routes.admin_routes import admin_bp
 from Routes.main_routes import main_bp
 from Routes.student_routes import student_bp
 from Routes.schedule_routes import schedule_bp
+from utils import clean_display_name as _clean_display_name
 
-VERSION = 'Beta 1.6.1'
+VERSION = 'Beta 1.6.2'
 APP_STARTED_AT = datetime.utcnow().replace(tzinfo=None).isoformat() + 'Z'
 
 app = Flask(__name__)
@@ -181,6 +182,9 @@ def _csrf_token() -> str:
         token = secrets.token_urlsafe(32)
         session['_csrf_token'] = token
     return token
+
+
+app.jinja_env.filters['clean_name'] = _clean_display_name
 
 
 @app.context_processor

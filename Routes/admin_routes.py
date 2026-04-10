@@ -36,6 +36,8 @@ from utils import (
     normalize_metadata_field_key,
     _titlecase_name,
     _strip_brackets_quotes,
+    clean_display_name,
+    strip_section_suffix,
 )
 from flask import Response
 import json
@@ -386,12 +388,12 @@ def _serialize_local_course(row: Course) -> dict:
         'year_level': row.year_level,
         'prerequisite': row.prerequisite,
         'subject_area': row.subject_area,
-        'faculty': '; '.join(f.name for f in row.faculty) if row.faculty else (row.instructor or ''),
+        'faculty': '; '.join(clean_display_name(f.name) for f in row.faculty) if row.faculty else (row.instructor or ''),
         'instructor': row.instructor,
         'dataset_name': row.dataset_name,
         'last_updated': (row.last_updated or row.updated_at or row.created_at).isoformat() if (row.last_updated or row.updated_at or row.created_at) else None,
         'faculty_ids': [f.id for f in row.faculty],
-        'faculty_names': [f.name for f in row.faculty],
+        'faculty_names': [clean_display_name(f.name) for f in row.faculty],
         'dynamic_metadata': dynamic_metadata if isinstance(dynamic_metadata, dict) else {},
         'editable': True,
         'deletable': src == 'manual',
@@ -492,17 +494,17 @@ def _serialize_faculty(row: Faculty) -> dict:
             src = 'manual'
         return f'{src}:{c.id}'
 
-    # Deduplicate course labels by title (different sections of same course)
+    # Deduplicate course labels by base title (strip section suffixes)
     _seen_labels: set[str] = set()
     _deduped_labels: list[str] = []
     for c in (row.courses or []):
         lbl = str(c.title or '').strip()
         if not lbl:
             continue
-        key = lbl.lower()
-        if key not in _seen_labels:
-            _seen_labels.add(key)
-            _deduped_labels.append(lbl)
+        base = strip_section_suffix(lbl).lower()
+        if base not in _seen_labels:
+            _seen_labels.add(base)
+            _deduped_labels.append(strip_section_suffix(lbl))
 
     # Placeholder names that indicate a not-yet-assigned faculty
     _PLACEHOLDER_PATTERNS = {'新採用教員', 'new hire', 'new faculty', 'tbd', 'tba'}
@@ -510,7 +512,7 @@ def _serialize_faculty(row: Faculty) -> dict:
 
     return {
         'id': row.id,
-        'name': row.name,
+        'name': clean_display_name(row.name),
         'email': row.email,
         'title': row.title,
         'department': row.department,

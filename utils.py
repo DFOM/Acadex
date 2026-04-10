@@ -599,6 +599,28 @@ def _titlecase_name(name: str) -> str:
     return ' '.join(result)
 
 
+def clean_display_name(name: str) -> str:
+    """Quick clean for display: strip brackets/quotes and title-case."""
+    if not name:
+        return name
+    return _titlecase_name(_strip_brackets_quotes(name).strip())
+
+
+def strip_section_suffix(title: str) -> str:
+    """Remove trailing section identifiers for dedup comparison.
+
+    'Japanese Language 2 Sec 1'  → 'Japanese Language 2'
+    'Japanese Language 2 Sec 2'  → 'Japanese Language 2'
+    'Intro to Law Section A'     → 'Intro to Law'
+    """
+    if not title:
+        return title
+    return re.sub(
+        r'\s+(?:Sec(?:tion)?\.?\s*[A-Za-z0-9]+)$',
+        '', title, flags=re.IGNORECASE
+    ).strip()
+
+
 def normalize_faculty_name(name: str) -> str:
     cleaned = _strip_brackets_quotes(str(name or ''))
     cleaned = re.sub(r'\s+', ' ', cleaned.strip())
