@@ -3295,8 +3295,15 @@ def user_dashboard():
         requirement_areas.add(minor_area_name)
 
     area_progress = []
-    all_area_names = set(area_credits.keys()) | set(in_progress_by_area.keys()) | set(progress.get('missing_by_area', {}).keys())
-    for area_name in sorted(all_area_names):
+    all_area_names = (
+        set(total_available_by_area.keys())
+        | set(area_credits.keys())
+        | set(in_progress_by_area.keys())
+        | set(progress.get('missing_by_area', {}).keys())
+        | requirement_areas
+    )
+    active_subject_areas = _active_subject_areas()
+    for area_name in sorted(a for a in all_area_names if str(a or '').strip()):
         earned_a = area_credits.get(area_name, 0.0)
         in_prog_a = in_progress_by_area.get(area_name, 0.0)
         total_avail = total_available_by_area.get(area_name, 0.0)
@@ -3307,24 +3314,34 @@ def user_dashboard():
                     req_a = earned_a + a_val
                     break
             if req_a <= 0:
-                active = _active_subject_areas()
                 area_lower = area_name.strip().lower()
-                if area_lower in active:
-                    sa = active[area_lower]
+                if area_lower in active_subject_areas:
+                    sa = active_subject_areas[area_lower]
                     if area_name == major_area_name:
                         req_a = float(getattr(sa, 'min_major_credits', 0.0) or 0.0)
                     elif area_name == minor_area_name:
                         req_a = float(getattr(sa, 'min_minor_credits', 0.0) or 0.0)
+        required_display = req_a if area_name in requirement_areas else 0.0
+        denominator = max(total_avail, required_display, earned_a + in_prog_a, 1.0)
         area_progress.append({
             'name': area_name,
             'earned': round(earned_a, 1),
             'in_progress': round(in_prog_a, 1),
             'total_available': round(total_avail, 1),
-            'required': round(req_a, 1) if area_name in requirement_areas else 0.0,
-            'remaining': round(max(0.0, req_a - earned_a - in_prog_a), 1) if area_name in requirement_areas and req_a > 0 else 0.0,
+            'required': round(required_display, 1),
+            'remaining': round(max(0.0, required_display - earned_a - in_prog_a), 1) if required_display > 0 else 0.0,
+            'capacity_remaining': round(max(0.0, denominator - earned_a - in_prog_a), 1),
+            'bar_total': round(denominator, 1),
             'is_major': area_name == major_area_name,
             'is_minor': area_name == minor_area_name,
         })
+
+    area_progress.sort(
+        key=lambda item: (
+            not (item.get('is_major') or item.get('is_minor')),
+            str(item.get('name') or '').lower(),
+        )
+    )
 
     # ── Graduation requirements checklist ──
     req_year_param = request.args.get('req_year', type=int)
