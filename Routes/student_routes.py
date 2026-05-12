@@ -1307,6 +1307,26 @@ def _load_scraped_catalog_for_term(year: Any, semester: Any) -> tuple[list[Dict[
     return resolved, dataset_id
 
 
+def _metadata_from_catalog_row(mapped: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        credits = float(mapped.get('Credits') or 0.0)
+    except Exception:
+        credits = 0.0
+    return {
+        'title': str(mapped.get('Course_Title') or '').strip(),
+        'instructor': str(mapped.get('Instructor') or '').strip(),
+        'area': str(mapped.get('Area_of_Study') or '').strip(),
+        'day_and_period': str(mapped.get('Day_and_Period') or '').strip(),
+        'credits': max(0.0, credits),
+    }
+
+
+def _metadata_identity_index_key(course_number: Any, day_period: Any, semester: Any, year: Any, dataset_name: Any) -> str:
+    return '__identity__|' + '|'.join(
+        _catalog_identity_key(course_number, day_period, semester, year, dataset_name)
+    )
+
+
 def _build_course_metadata_index() -> Dict[str, Dict[str, Any]]:
     index: Dict[str, Dict[str, Any]] = {}
     candidates = [_manual_or_csv_course_to_catalog_row(r) for r in Course.query.all()]
@@ -1320,20 +1340,43 @@ def _build_course_metadata_index() -> Dict[str, Dict[str, Any]]:
 
     for mapped in candidates:
         course_number = _normalize_course_number(mapped.get('Course_Number'))
-        if not course_number or course_number in index:
+        if not course_number:
             continue
-        try:
-            credits = float(mapped.get('Credits') or 0.0)
-        except Exception:
-            credits = 0.0
-        index[course_number] = {
-            'title': str(mapped.get('Course_Title') or '').strip(),
-            'instructor': str(mapped.get('Instructor') or '').strip(),
-            'area': str(mapped.get('Area_of_Study') or '').strip(),
-            'day_and_period': str(mapped.get('Day_and_Period') or '').strip(),
-            'credits': max(0.0, credits),
-        }
+        meta = _metadata_from_catalog_row(mapped)
+        index.setdefault(course_number, meta)
+        index.setdefault(
+            _metadata_identity_index_key(
+                mapped.get('Course_Number'),
+                mapped.get('Day_and_Period'),
+                mapped.get('semester'),
+                mapped.get('year'),
+                mapped.get('dataset_name'),
+            ),
+            meta,
+        )
     return index
+
+
+def _row_value(row: Any, key: str, default: Any = None) -> Any:
+    if isinstance(row, dict):
+        return row.get(key, default)
+    mapping = getattr(row, '_mapping', None)
+    if mapping is not None and key in mapping:
+        return mapping.get(key, default)
+    return getattr(row, key, default)
+
+
+def _metadata_for_schedule_course(row: Any, metadata_index: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    code = _normalize_course_number(_row_value(row, 'course_number'))
+    if not code:
+        return {}
+
+    day_period = str(_row_value(row, 'day_period') or '').strip()
+    semester = normalize_dataset_semester(_row_value(row, 'semester') or '')
+    year = str(_row_value(row, 'year') or '').strip()
+    dataset_name = str(_row_value(row, 'dataset_name') or '').strip()
+    identity_key = _metadata_identity_index_key(code, day_period, semester, year, dataset_name)
+    return metadata_index.get(identity_key) or metadata_index.get(code, {})
 
 
 def _catalog_rows_with_local_course_ids(catalog_rows: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
@@ -1378,6 +1421,8 @@ def _build_prereq_title_lookup() -> Dict[str, str]:
     metadata = _build_course_metadata_index()
     lookup: Dict[str, str] = {}
     for course_number, info in metadata.items():
+        if str(course_number).startswith('__identity__|'):
+            continue
         title = str((info or {}).get('title') or '').strip()
         if not title:
             continue
@@ -1640,7 +1685,7 @@ def _degree_progress_context(user_id: int) -> Dict[str, Any]:
     rows = db.session.execute(
         text(
             '''
-            SELECT s.schedule_type, sc.course_number, sc.grade
+            SELECT s.schedule_type, sc.course_number, sc.day_period, sc.semester, sc.year, sc.dataset_name, sc.source, sc.grade
             FROM schedule_courses sc
             JOIN schedules s ON s.id = sc.schedule_id
             WHERE s.user_id = :uid
@@ -1659,7 +1704,7 @@ def _degree_progress_context(user_id: int) -> Dict[str, Any]:
         code = _normalize_course_number(row.course_number)
         if not code:
             continue
-        meta = metadata.get(code, {})
+        meta = _metadata_for_schedule_course(row, metadata)
         area = (meta.get('area') or '').strip()
         credits = float(meta.get('credits') or 0.0)
 
@@ -1843,7 +1888,8 @@ def _graduation_requirements_context(user_id: int, entry_year_override: int | No
         if key == 'english':
             eae_courses = [
                 (cnum, meta) for cnum, meta in metadata.items()
-                if (meta.get('area') or '').startswith('English for Academic Excellence')
+                if not str(cnum).startswith('__identity__|')
+                and (meta.get('area') or '').startswith('English for Academic Excellence')
             ]
             earned_eae = 0.0
             for cnum, meta in eae_courses:
@@ -1921,6 +1967,8 @@ def _graduation_requirements_context(user_id: int, entry_year_override: int | No
             for title_lower, area in PATHWAY_TITLE_TO_AREA.items():
                 title_display = title_lower.title()
                 for _cnum, _meta in metadata.items():
+                    if str(_cnum).startswith('__identity__|'):
+                        continue
                     if (_meta.get('title') or '').strip().lower() == title_lower:
                         title_display = (_meta.get('title') or '').strip()
                         break
@@ -1979,7 +2027,8 @@ def _graduation_requirements_context(user_id: int, entry_year_override: int | No
         if major_reqs:
             major_area_courses = [
                 (cnum, meta) for cnum, meta in metadata.items()
-                if _area_matches_major(meta.get('area', ''), major_name)
+                if not str(cnum).startswith('__identity__|')
+                and _area_matches_major(meta.get('area', ''), major_name)
             ]
             earned_major = 0.0
             planned_major = 0.0
@@ -2979,7 +3028,7 @@ def user_dashboard():
         joined_rows = db.session.execute(
             text(
                 '''
-                SELECT s.schedule_type, sc.grade, sc.course_number
+                SELECT s.schedule_type, sc.grade, sc.course_number, sc.day_period, sc.semester, sc.year, sc.dataset_name, sc.source
                 FROM schedule_courses sc
                 JOIN schedules s ON sc.schedule_id = s.id
                 WHERE s.user_id = :uid
@@ -2989,8 +3038,7 @@ def user_dashboard():
         ).fetchall()
 
         for row in joined_rows:
-            cnum = _normalize_course_number(row.course_number)
-            meta = metadata_index.get(cnum, {})
+            meta = _metadata_for_schedule_course(row, metadata_index)
             credits_value = float(meta.get('credits') or 0.0)
             instructor = str(meta.get('instructor') or '').strip()
             area = str(meta.get('area') or '').strip() or 'Unspecified'
@@ -3062,15 +3110,22 @@ def user_dashboard():
     if schedule_ids:
         try:
             rows = (
-                db.session.query(ScheduleCourse.schedule_id, ScheduleCourse.course_number)
+                db.session.query(
+                    ScheduleCourse.schedule_id,
+                    ScheduleCourse.course_number,
+                    ScheduleCourse.day_period,
+                    ScheduleCourse.semester,
+                    ScheduleCourse.year,
+                    ScheduleCourse.dataset_name,
+                    ScheduleCourse.source,
+                )
                 .filter(ScheduleCourse.schedule_id.in_(schedule_ids))
                 .all()
             )
             for row in rows:
                 sid = int(row.schedule_id)
-                code = _normalize_course_number(row.course_number)
-                meta = metadata_index.get(code, {})
-                day_period = str(meta.get('day_and_period') or '').strip()
+                meta = _metadata_for_schedule_course(row, metadata_index)
+                day_period = str(row.day_period or meta.get('day_and_period') or '').strip()
                 instructor = _normalize_instructor(meta.get('instructor') or '') or 'TBA'
                 title = str(meta.get('title') or row.course_number or '').strip()
                 schedule_courses_by_schedule.setdefault(sid, []).append(
@@ -3087,20 +3142,23 @@ def user_dashboard():
     schedule_grade_data: dict[int, list[dict]] = {int(s.id): [] for s in schedules}
     if schedule_ids:
         try:
-            grade_rows = db.session.execute(
-                text(
-                    '''
-                    SELECT sc.schedule_id, sc.course_number, sc.grade
-                    FROM schedule_courses sc
-                    WHERE sc.schedule_id IN :sids
-                    '''
-                ),
-                {'sids': tuple(schedule_ids)},
-            ).fetchall()
+            grade_rows = (
+                db.session.query(
+                    ScheduleCourse.schedule_id,
+                    ScheduleCourse.course_number,
+                    ScheduleCourse.day_period,
+                    ScheduleCourse.semester,
+                    ScheduleCourse.year,
+                    ScheduleCourse.dataset_name,
+                    ScheduleCourse.source,
+                    ScheduleCourse.grade,
+                )
+                .filter(ScheduleCourse.schedule_id.in_(schedule_ids))
+                .all()
+            )
             for row in grade_rows:
                 sid = int(row.schedule_id)
-                code = _normalize_course_number(row.course_number)
-                meta = metadata_index.get(code, {})
+                meta = _metadata_for_schedule_course(row, metadata_index)
                 credits_val = float(meta.get('credits') or 0.0)
                 schedule_grade_data.setdefault(sid, []).append({
                     'grade': str(row.grade or '').strip(),
@@ -3115,10 +3173,13 @@ def user_dashboard():
         slot_rows = schedule_courses_by_schedule.get(int(sched.id), [])
         sched_courses = schedule_grade_data.get(int(sched.id), [])
         sched_gpa = calculate_gpa(sched_courses) if sched_courses else 0.0
-        sched_credits = sum(
-            c['Credits'] for c in sched_courses
-            if c.get('grade') and c['grade'].upper() != 'F'
-        )
+        if (sched.schedule_type or '').strip().lower() == 'future':
+            sched_credits = sum(c['Credits'] for c in sched_courses)
+        else:
+            sched_credits = sum(
+                c['Credits'] for c in sched_courses
+                if c.get('grade') and c['grade'].upper() != 'F'
+            )
         # Cumulative GPA up to this schedule (chronological, past first)
         if sched.schedule_type == 'past':
             cumulative_courses.extend(sched_courses)
@@ -3145,8 +3206,7 @@ def user_dashboard():
         schedule_type_r = str(row.schedule_type or '').strip().lower()
         if schedule_type_r != 'future':
             continue
-        cnum_r = _normalize_course_number(row.course_number)
-        meta_r = metadata_index.get(cnum_r, {})
+        meta_r = _metadata_for_schedule_course(row, metadata_index)
         area_r = str(meta_r.get('area') or '').strip() or 'Unspecified'
         credits_r = float(meta_r.get('credits') or 0.0)
         in_progress_by_area[area_r] = in_progress_by_area.get(area_r, 0.0) + credits_r
@@ -3154,6 +3214,8 @@ def user_dashboard():
     # Total available credits per area (all courses in catalog)
     total_available_by_area: Dict[str, float] = {}
     for _cnum, _meta in metadata_index.items():
+        if str(_cnum).startswith('__identity__|'):
+            continue
         _area = str(_meta.get('area') or '').strip()
         if _area:
             _cr = float(_meta.get('credits') or 0.0)
@@ -4298,8 +4360,6 @@ def api_recommendations():
         return jsonify({'success': False, 'error': 'Unauthorized', 'message': 'Unauthorized'}), 403
     if (sched.schedule_type or '').strip().lower() != 'future':
         return jsonify({'success': False, 'error': 'Invalid schedule type', 'message': 'AI schedule generation is only available for future schedules.'}), 400
-    if (sched.schedule_type or '').strip().lower() != 'future':
-        return jsonify({'success': True, 'recommendations': [], 'message': 'Suggestions are only available for future schedules.'})
 
     eligible, gate_reason = _student_can_receive_ai_suggestions(current_user.id)
     if not eligible:
