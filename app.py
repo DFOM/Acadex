@@ -8,6 +8,7 @@ import logging
 from collections import defaultdict, deque
 from pathlib import Path
 from datetime import timedelta, datetime
+from urllib.parse import quote_plus
 from werkzeug.security import generate_password_hash
 from sqlalchemy import inspect as sa_inspect, text as sa_text
 from models import db, User, Role, Permission, RegistrationField, Setting, RBAC_PERMISSION_KEYS
@@ -48,8 +49,21 @@ if os.environ.get('FLASK_ENV') == 'production' and app.secret_key == 'dev-secret
 
 app.config['JWT_SECRET_KEY'] = _env_str('JWT_SECRET') or app.secret_key
 
+def _build_postgres_url_from_env() -> str:
+    required = ('PGHOST', 'PGPORT', 'PGUSER', 'PGPASSWORD', 'PGDATABASE')
+    if not all(os.environ.get(name) for name in required):
+        return ''
+
+    user = quote_plus(os.environ['PGUSER'])
+    password = quote_plus(os.environ['PGPASSWORD'])
+    host = os.environ['PGHOST']
+    port = os.environ['PGPORT']
+    database = quote_plus(os.environ['PGDATABASE'])
+    return f'postgresql://{user}:{password}@{host}:{port}/{database}'
+
+
 def _resolve_database_url() -> str:
-    database_url = os.environ.get('DATABASE_URL')
+    database_url = os.environ.get('DATABASE_URL') or _build_postgres_url_from_env()
 
     if database_url and database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
@@ -57,6 +71,12 @@ def _resolve_database_url() -> str:
     if not database_url:
         if os.environ.get('RENDER'):
             raise RuntimeError('DATABASE_URL must be configured on Render for persistent user/session data.')
+        if os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('RAILWAY_ENVIRONMENT_NAME'):
+            app.logger.warning(
+                'DATABASE_URL is not configured on Railway; using ephemeral SQLite at %s. '
+                'Attach PostgreSQL and set DATABASE_URL for persistent data.',
+                Path(app.instance_path) / 'app.db',
+            )
         return f"sqlite:///{Path(app.instance_path) / 'app.db'}"
 
     if database_url.startswith('sqlite:///'):
@@ -65,6 +85,21 @@ def _resolve_database_url() -> str:
             database_url = f"sqlite:///{Path(app.root_path) / sqlite_path}"
 
     return database_url
+
+
+def _ensure_runtime_directories() -> None:
+    paths = [
+        Path(app.instance_path),
+        Path(app.config['UPLOAD_FOLDER']),
+        Path(app.config['PROFILE_UPLOAD_FOLDER']),
+    ]
+    if database_url.startswith('sqlite:///'):
+        sqlite_path = database_url.replace('sqlite:///', '', 1)
+        if sqlite_path != ':memory:':
+            paths.append(Path(sqlite_path).parent)
+
+    for path in paths:
+        path.mkdir(parents=True, exist_ok=True)
 
 
 database_url = _resolve_database_url()
@@ -103,6 +138,8 @@ app.config['REMEMBER_COOKIE_SECURE'] = app.config['SESSION_COOKIE_SECURE']
 app.config['REMEMBER_COOKIE_PATH'] = app.config['SESSION_COOKIE_PATH']
 app.config['REMEMBER_COOKIE_DOMAIN'] = app.config['SESSION_COOKIE_DOMAIN']
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)
+
+_ensure_runtime_directories()
 
 if not app.logger.handlers:
     handler = logging.StreamHandler()
@@ -402,19 +439,23 @@ def health_schema_check():
 
 
 def _bootstrap_database() -> None:
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    os.makedirs(app.config['PROFILE_UPLOAD_FOLDER'], exist_ok=True)
-
-    if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:///'):
-        sqlite_path = app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '', 1)
-        if sqlite_path and sqlite_path != ':memory:':
-            os.makedirs(os.path.dirname(sqlite_path), exist_ok=True)
+    _ensure_runtime_directories()
 
     with app.app_context():
-        db.create_all()
-
         try:
-            upgrade()
+            inspector = sa_inspect(db.engine)
+            table_names = set(inspector.get_table_names())
+            managed_tables = table_names - {'alembic_version', app.config['SESSION_SQLALCHEMY_TABLE']}
+
+            if 'alembic_version' not in table_names and managed_tables:
+                app.logger.warning(
+                    'Existing database schema has no Alembic revision. Stamping to head before runtime healing. tables=%s',
+                    sorted(managed_tables),
+                )
+                stamp(revision='head')
+                db.create_all()
+            else:
+                upgrade()
         except Exception as exc:
             message = str(exc)
             if "Can't locate revision identified by" in message and app.config.get('ALEMBIC_AUTO_STAMP_ON_MISSING_REV', True):
