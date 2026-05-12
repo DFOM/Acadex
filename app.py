@@ -453,6 +453,7 @@ def _bootstrap_database() -> None:
                     sorted(managed_tables),
                 )
                 stamp(revision='head')
+                db.create_all()
             else:
                 upgrade()
         except Exception as exc:
