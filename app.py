@@ -439,19 +439,23 @@ def health_schema_check():
 
 
 def _bootstrap_database() -> None:
-    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-    os.makedirs(app.config['PROFILE_UPLOAD_FOLDER'], exist_ok=True)
-
-    if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:///'):
-        sqlite_path = app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '', 1)
-        if sqlite_path and sqlite_path != ':memory:':
-            os.makedirs(os.path.dirname(sqlite_path), exist_ok=True)
+    _ensure_runtime_directories()
 
     with app.app_context():
-        db.create_all()
-
         try:
-            upgrade()
+            inspector = sa_inspect(db.engine)
+            table_names = set(inspector.get_table_names())
+            managed_tables = table_names - {'alembic_version', app.config['SESSION_SQLALCHEMY_TABLE']}
+
+            if 'alembic_version' not in table_names and managed_tables:
+                app.logger.warning(
+                    'Existing database schema has no Alembic revision. Stamping to head before runtime healing. tables=%s',
+                    sorted(managed_tables),
+                )
+                stamp(revision='head')
+                db.create_all()
+            else:
+                upgrade()
         except Exception as exc:
             message = str(exc)
             if "Can't locate revision identified by" in message and app.config.get('ALEMBIC_AUTO_STAMP_ON_MISSING_REV', True):
