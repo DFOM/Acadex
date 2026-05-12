@@ -1675,8 +1675,9 @@ def upload_dataset():
                     _pick_from_payload(row_payload, 'prerequisite'),
                 )
 
-            current_app.logger.info('Extracted Subject Area: %s', subject_area_text or '')
-            current_app.logger.info('Extracted Day Period: %s', day_period or '')
+            if row_index <= 5:
+                current_app.logger.info('Extracted Subject Area: %s', subject_area_text or '')
+                current_app.logger.info('Extracted Day Period: %s', day_period or '')
 
             if not course_number or not title:
                 skipped_invalid += 1
@@ -1738,7 +1739,8 @@ def upload_dataset():
                 'day_period': day_period,
                 'faculty': '; '.join(parsed_faculty),
             }
-            current_app.logger.info('Row Parsed Payload: %s', row_debug_payload)
+            if row_index <= 5:
+                current_app.logger.info('Row Parsed Payload: %s', row_debug_payload)
             if not subject_area_text or not day_period or not parsed_faculty:
                 current_app.logger.error('Row Parsed Payload has empty critical field(s): %s', row_debug_payload)
 
