@@ -5,6 +5,19 @@
 
 {% block content %}
 
+{% macro ax_progress(done, planned, required, title='', height='8px') -%}
+    {% set req = (required|float) if (required|float) > 0 else 1.0 %}
+    {% set done_pct = ((done|float) / req) * 100 %}
+    {% set planned_pct = ((planned|float) / req) * 100 %}
+    {% set done_w = [done_pct, 100]|min %}
+    {% set planned_w = [planned_pct, 100 - done_w]|min %}
+    <div class="progress" style="height:{{ height }};border-radius:999px;overflow:hidden;background:var(--ax-border);"{% if title %} title="{{ title }}"{% endif %}>
+        <div class="progress-bar bg-success" style="width:{{ [done_w, 0]|max }}%"></div>
+        <div class="progress-bar" style="width:{{ [planned_w, 0]|max }}%;background:#818CF8;opacity:.65;"></div>
+    </div>
+{%- endmacro %}
+
+
 {% if request.args.get('deleted') == '1' %}
 <div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
     Schedule deleted successfully.
@@ -164,6 +177,16 @@
                     {% endif %}
                 </div>
                 <div style="font-size:.76rem;color:var(--ax-muted);margin-left:1.4rem;">{{ item.note }}</div>
+                {% if item.required_units and item.required_units > 0 %}
+                <div style="margin-left:1.4rem;margin-top:.45rem;">
+                    {{ ax_progress(item.completed_units, item.planned_units, item.required_units,
+                        (item.completed_units|string) ~ ' done · ' ~ (item.planned_units|string) ~ ' planned · ' ~ (item.required_units|string) ~ ' ' ~ item.unit_label ~ ' required') }}
+                    <div class="d-flex justify-content-between mt-1" style="font-size:.66rem;color:var(--ax-muted);">
+                        <span><strong style="color:#22C55E;">{{ item.completed_units|round(1) }}</strong> done{% if item.planned_units > 0 %} · <strong style="color:#818CF8;">{{ item.planned_units|round(1) }}</strong> planned{% endif %}</span>
+                        <span>{{ item.required_units|round(1) }} {{ item.unit_label }} required</span>
+                    </div>
+                </div>
+                {% endif %}
                 {% if item.courses %}
                 <div class="d-flex flex-wrap gap-1 mt-1" style="margin-left:1.4rem;">
                     {% for c in item.courses %}
@@ -209,11 +232,13 @@
                 </div>
                 {% endif %}
                 {# Progress bar #}
-                {% set mc_pct_e = ((mc.earned_credits / mc.total_credits) * 100) if mc.total_credits > 0 else 0 %}
-                {% set mc_pct_p = ((mc.planned_credits / mc.total_credits) * 100) if mc.total_credits > 0 else 0 %}
-                <div class="progress mb-2" style="height:8px;border-radius:5px;overflow:hidden;background:var(--ax-border);">
-                    <div class="progress-bar bg-success" style="width:{{ [mc_pct_e, 100]|min }}%"></div>
-                    <div class="progress-bar" style="width:{{ [mc_pct_p, 100 - [mc_pct_e, 100]|min]|min }}%;background:#818CF8;opacity:.6;"></div>
+                <div class="mb-2">
+                    {{ ax_progress(mc.earned_credits, mc.planned_credits, mc.total_credits,
+                        (mc.earned_credits|string) ~ ' earned · ' ~ (mc.planned_credits|string) ~ ' planned · ' ~ (mc.total_credits|string) ~ ' credits required') }}
+                    <div class="d-flex justify-content-between mt-1" style="font-size:.66rem;color:var(--ax-muted);">
+                        <span><strong style="color:#22C55E;">{{ mc.earned_credits }}</strong> earned{% if mc.planned_credits > 0 %} · <strong style="color:#818CF8;">{{ mc.planned_credits }}</strong> planned{% endif %}</span>
+                        <span>{{ mc.total_credits }} credits required</span>
+                    </div>
                 </div>
                 {# Seminar + GRP status (Option 1 only) #}
                 {% if mc.seminar_required %}
@@ -243,9 +268,11 @@
                 {% if mc.designated %}
                 <div class="mb-2">
                     <div style="font-size:.76rem;color:var(--ax-muted);font-weight:600;margin-bottom:.3rem;">
-                        Designated Courses ({{ mc.designated_completed }} / {{ mc.designated_total }})
+                        Designated Courses ({{ mc.designated_completed }}{% if mc.designated_planned > 0 %} + {{ mc.designated_planned }} planned{% endif %} / {{ mc.designated_total }})
                     </div>
-                    <div class="d-flex flex-wrap gap-1">
+                    {{ ax_progress(mc.designated_completed, mc.designated_planned, mc.designated_total,
+                        (mc.designated_completed|string) ~ ' completed · ' ~ (mc.designated_planned|string) ~ ' planned · ' ~ (mc.designated_total|string) ~ ' designated courses', '6px') }}
+                    <div class="d-flex flex-wrap gap-1 mt-2">
                         {% for d in mc.designated %}
                         <span style="font-size:.7rem;padding:.2rem .5rem;border-radius:var(--ax-radius-xs);
                             {% if d.status == 'completed' %}background:rgba(34,197,94,.08);color:#22C55E;border:1px solid rgba(34,197,94,.2);
@@ -276,6 +303,14 @@
                     <span class="badge" style="font-size:.56rem;background:rgba(34,197,94,.12);color:#22C55E;border:1px solid rgba(34,197,94,.25);">Complete</span>
                     {% endif %}
                 </div>
+                <div class="mb-2">
+                    {{ ax_progress(mn.completed_courses, mn.planned_courses, mn.total_courses,
+                        (mn.completed_courses|string) ~ ' completed · ' ~ (mn.planned_courses|string) ~ ' planned · ' ~ (mn.total_courses|string) ~ ' courses required') }}
+                    <div class="d-flex justify-content-between mt-1" style="font-size:.66rem;color:var(--ax-muted);">
+                        <span><strong style="color:#22C55E;">{{ mn.completed_courses }}</strong> completed{% if mn.planned_courses > 0 %} · <strong style="color:#818CF8;">{{ mn.planned_courses }}</strong> planned{% endif %}</span>
+                        <span>{{ mn.total_courses }} courses required</span>
+                    </div>
+                </div>
                 {# Level distribution #}
                 {% for level, ls in mn.level_status.items() %}
                 <div class="d-flex align-items-center gap-2 mb-1" style="font-size:.74rem;">
@@ -284,7 +319,13 @@
                     {% else %}
                     <span style="color:var(--ax-muted);opacity:.5;">{{ hi('minus-circle', 'ax-icon') }}</span>
                     {% endif %}
-                    <span style="color:var(--ax-text);">{{ level }}-level: {{ ls.completed }}{% if ls.planned > 0 %} (+{{ ls.planned }} planned){% endif %} / {{ ls.needed }} needed</span>
+                    <div class="flex-grow-1">
+                        <div class="d-flex justify-content-between">
+                            <span style="color:var(--ax-text);">{{ level }}-level</span>
+                            <span style="color:var(--ax-muted);">{{ ls.completed }}{% if ls.planned > 0 %} + {{ ls.planned }} planned{% endif %} / {{ ls.needed }}</span>
+                        </div>
+                        {{ ax_progress(ls.completed, ls.planned, ls.needed, (level|string) ~ '-level progress', '5px') }}
+                    </div>
                 </div>
                 {% endfor %}
                 {# Grade B requirement – per level group #}
@@ -295,7 +336,13 @@
                     {% else %}
                     <span style="color:var(--ax-muted);opacity:.5;">{{ hi('minus-circle', 'ax-icon') }}</span>
                     {% endif %}
-                    <span style="color:var(--ax-text);">Grade B+ ({{ gb.label }}): {{ gb.count }} / {{ gb.needed }} needed</span>
+                    <div class="flex-grow-1">
+                        <div class="d-flex justify-content-between">
+                            <span style="color:var(--ax-text);">Grade B+ ({{ gb.label }})</span>
+                            <span style="color:var(--ax-muted);">{{ gb.count }} / {{ gb.needed }}</span>
+                        </div>
+                        {{ ax_progress(gb.count, 0, gb.needed, 'Grade B+ requirement progress', '5px') }}
+                    </div>
                 </div>
                 {% endfor %}
                 {# Course chips #}

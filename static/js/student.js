@@ -301,25 +301,63 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     // Keep the UI calm + premium: use the theme primary for blocks.
 
+    const normalizeDayToken = (value) => {
+        const text = String(value || '').trim().toLowerCase();
+        if (/^m(on(day)?)?$/.test(text)) return 'Mon';
+        if (/^tu(e(s(day)?)?)?$/.test(text)) return 'Tue';
+        if (/^w(ed(nesday)?)?$/.test(text)) return 'Wed';
+        if (/^th(u(r(s(day)?)?)?)?$/.test(text)) return 'Thu';
+        if (/^f(ri(day)?)?$/.test(text)) return 'Fri';
+        const match = text.match(/mon|tue|wed|thu|fri/);
+        return match ? match[0].charAt(0).toUpperCase() + match[0].slice(1) : '';
+    };
+
+    const normalizePeriodToken = (value) => {
+        const match = String(value || '').match(/\d+/);
+        return match ? String(Number(match[0])) : String(value || '').trim();
+    };
+
     const parseDayPeriodBlocks = (timeStr) => {
-        // Converts strings like "Mon 1 Wed 2" or "Mon1,Wed2" into [{day:'Mon', period:'1'}, ...]
+        // Converts strings like "Mon 1 Wed 2", "Mon Period 1", or "Mon1,Wed1" into grid blocks.
         if (!timeStr) return [];
         const raw = String(timeStr).trim();
-        if (!raw || raw.toUpperCase() === 'TBA') return [];
+        if (!raw || ['TBA', 'N/A', 'NA', 'NONE'].includes(raw.toUpperCase())) return [];
 
-        const tokens = raw.split(/[\s,]+/).filter(Boolean);
+        const tokens = raw.split(/[\s,;|\/]+/).filter(Boolean);
         let currentDay = '';
         const blocks = [];
+        const seen = new Set();
 
         for (const token of tokens) {
-            const dayMatch = token.match(/(Mon|Tue|Wed|Thu|Fri)/i);
-            const numMatch = token.match(/\d+/);
-            if (dayMatch) currentDay = dayMatch[0].substring(0, 3);
-            if (currentDay && numMatch) {
-                blocks.push({ day: currentDay.charAt(0).toUpperCase() + currentDay.slice(1).toLowerCase(), period: String(numMatch[0]) });
+            const dayMatch = token.match(/(Mon(day)?|Tue(s(day)?)?|Wed(nesday)?|Thu(r(s(day)?)?)?|Fri(day)?)/i)
+                || token.match(/^(M|Tu|W|Th|F)$/i);
+            if (dayMatch) currentDay = normalizeDayToken(dayMatch[0]);
+
+            const rangeMatch = token.match(/(\d+)\s*[-–—]\s*(\d+)/);
+            const nums = rangeMatch
+                ? Array.from({ length: Math.max(0, Number(rangeMatch[2]) - Number(rangeMatch[1]) + 1) }, (_, idx) => Number(rangeMatch[1]) + idx)
+                : (token.match(/\d+/g) || []).map(Number);
+
+            for (const num of nums) {
+                if (!currentDay || !Number.isFinite(num)) continue;
+                const period = String(num);
+                const key = `${currentDay}|${period}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                blocks.push({ day: currentDay, period });
             }
         }
         return blocks;
+    };
+
+    const getScheduleCell = (day, period) => {
+        const exact = document.getElementById(`cell-${day}${period}`);
+        if (exact) return exact;
+        const normalizedPeriod = normalizePeriodToken(period);
+        return Array.from(document.querySelectorAll('.schedule-cell')).find((cell) => {
+            return String(cell.getAttribute('data-day') || '') === day
+                && normalizePeriodToken(cell.getAttribute('data-period-name')) === normalizedPeriod;
+        }) || null;
     };
 
     const parseHHMMToMinutes = (value) => {
@@ -450,7 +488,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const popContent = popoverHtmlForCourse(course).replace(/"/g, '&quot;');
 
             blocks.forEach(({ day, period }) => {
-                const cell = document.getElementById(`cell-${day}${period}`);
+                const cell = getScheduleCell(day, period);
                 if (!cell) return;
 
                 const wrapper = document.createElement('div');
