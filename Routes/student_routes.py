@@ -1883,6 +1883,11 @@ def _graduation_requirements_context(user_id: int, entry_year_override: int | No
             'note': req['note'],
             'status': 'not_started',
             'courses': [],
+            'metric_type': 'courses',
+            'completed_units': 0.0,
+            'planned_units': 0.0,
+            'required_units': 0.0,
+            'unit_label': 'courses',
         }
 
         if key == 'english':
@@ -1892,6 +1897,7 @@ def _graduation_requirements_context(user_id: int, entry_year_override: int | No
                 and (meta.get('area') or '').startswith('English for Academic Excellence')
             ]
             earned_eae = 0.0
+            planned_eae = 0.0
             for cnum, meta in eae_courses:
                 title = (meta.get('title') or '').strip()
                 credits = float(meta.get('credits') or 0.0)
@@ -1899,7 +1905,15 @@ def _graduation_requirements_context(user_id: int, entry_year_override: int | No
                     earned_eae += credits
                     item['courses'].append({'title': title, 'status': 'completed', 'grade': completed[cnum]})
                 elif cnum in planned:
+                    planned_eae += credits
                     item['courses'].append({'title': title, 'status': 'planned', 'grade': None})
+            item.update({
+                'metric_type': 'credits',
+                'completed_units': round(earned_eae, 1),
+                'planned_units': round(planned_eae, 1),
+                'required_units': 15.0,
+                'unit_label': 'credits',
+            })
             if earned_eae >= 15:
                 item['status'] = 'completed'
             elif earned_eae > 0 or any(c['status'] == 'planned' for c in item['courses']):
@@ -2017,6 +2031,31 @@ def _graduation_requirements_context(user_id: int, entry_year_override: int | No
             item['earned'] = round(total_earned, 1)
             item['planned'] = round(total_planned, 1)
             item['required'] = req['credits']
+            item.update({
+                'metric_type': 'credits',
+                'completed_units': round(total_earned, 1),
+                'planned_units': round(total_planned, 1),
+                'required_units': float(req['credits']),
+                'unit_label': 'credits',
+            })
+
+        if item.get('required_units', 0.0) <= 0:
+            completed_count = sum(1 for c in item.get('courses', []) if c.get('status') == 'completed')
+            planned_count = sum(1 for c in item.get('courses', []) if c.get('status') == 'planned')
+            missing_count = sum(1 for c in item.get('courses', []) if c.get('status') == 'missing')
+            required_count = completed_count + planned_count + missing_count
+            if key == 'pathway':
+                required_count = 3
+                completed_count = len(completed_areas) if 'completed_areas' in locals() else completed_count
+                planned_count = len(planned_areas) if 'planned_areas' in locals() else planned_count
+            if required_count > 0:
+                item.update({
+                    'metric_type': 'courses' if key != 'pathway' else 'areas',
+                    'completed_units': float(completed_count),
+                    'planned_units': float(planned_count),
+                    'required_units': float(required_count),
+                    'unit_label': 'areas' if key == 'pathway' else 'courses',
+                })
 
         checklist.append(item)
 
@@ -2050,6 +2089,7 @@ def _graduation_requirements_context(user_id: int, entry_year_override: int | No
                     designated_items.append({'title': title, 'status': 'missing', 'grade': None})
 
             ds_completed = sum(1 for d in designated_items if d['status'] == 'completed')
+            ds_planned = sum(1 for d in designated_items if d['status'] == 'planned')
             ds_total = len(designated_items)
 
             # Seminar + GRP status (Option 1, ≤2024 only)
@@ -2069,6 +2109,7 @@ def _graduation_requirements_context(user_id: int, entry_year_override: int | No
                 'planned_credits': round(planned_major, 1),
                 'designated': designated_items,
                 'designated_completed': ds_completed,
+                'designated_planned': ds_planned,
                 'designated_total': ds_total,
                 'other_credits': major_reqs.get('other_credits', major_reqs['lecture_credits'] - major_reqs.get('designated_credits', 0)),
                 'other_note': major_reqs.get('other_note', ''),
@@ -2086,6 +2127,13 @@ def _graduation_requirements_context(user_id: int, entry_year_override: int | No
                 if item['key'] == 'major':
                     item['note'] = f'{major_name}: {round(earned_major, 1)} earned + {round(planned_major, 1)} planned of {major_reqs["total_credits"]} required.'
                     item['status'] = major_checklist['status']
+                    item.update({
+                        'metric_type': 'credits',
+                        'completed_units': round(earned_major, 1),
+                        'planned_units': round(planned_major, 1),
+                        'required_units': float(major_reqs['total_credits']),
+                        'unit_label': 'credits',
+                    })
 
     # ── Minor-specific requirements ──
     minor_checklist = None
@@ -2211,16 +2259,31 @@ def _load_catalog_for_term(year: int, semester: str) -> tuple[list[Dict[str, Any
     return rows, f"unified_catalog_{year}_{semester}"
 
 
+def _course_level_for_filter(row: Dict[str, Any]) -> int | None:
+    explicit = _parse_schedule_level(row.get('year_level') or row.get('Year_Level'))
+    if explicit is not None:
+        return explicit
+
+    course_number = str(row.get('Course_Number') or row.get('course_number') or '').upper()
+    match = re.search(r'(?<!\d)([0-4])\d{2}(?!\d)', course_number)
+    if not match:
+        return None
+
+    parsed = int(match.group(1))
+    return parsed if 0 <= parsed <= 4 else None
+
+
 def _filter_rows_by_level(catalog_rows: list[Dict[str, Any]], schedule_level: int | None, level_scope: str) -> list[Dict[str, Any]]:
     if level_scope != 'my' or schedule_level not in {1, 2, 3, 4}:
         return catalog_rows
 
-    filtered = [
+    # A level unlocks that course-code band and everything below it:
+    # level 1 => 0xx/1xx, level 2 => 0xx/1xx/2xx, etc.
+    return [
         row
         for row in catalog_rows
-        if _parse_schedule_level(row.get('year_level')) == schedule_level
+        if (level := _course_level_for_filter(row)) is not None and level <= schedule_level
     ]
-    return filtered if filtered else catalog_rows
 
 @student_bp.route('/courses/search')
 def search_courses():
