@@ -96,7 +96,7 @@
                 {% if schedule.schedule_type == 'future' and schedule_level %}
                 <label class="small fw-bold text-muted mb-1">Course Level Scope</label>
                 <select class="form-select form-select-sm mb-3 border-0" id="filterLevelScope">
-                    <option value="my" selected>Show only my level ({{ schedule_level }})</option>
+                    <option value="my" selected>Show up to my level ({{ schedule_level }}00 and below)</option>
                     <option value="all">Show all levels</option>
                 </select>
                 {% endif %}
@@ -180,11 +180,11 @@
                                             <div class="fw-bold" style="font-size: 0.8rem; line-height: 1; color: var(--ax-text);">{{ period.start_time }}</div>
                                             <div class="text-muted" style="font-size: 0.7rem; line-height: 1.5;">{{ period.end_time }}</div>
                                         </th>
-                                        <td id="cell-Mon{{ period.name }}" class="schedule-cell align-middle p-1"></td>
-                                        <td id="cell-Tue{{ period.name }}" class="schedule-cell align-middle p-1"></td>
-                                        <td id="cell-Wed{{ period.name }}" class="schedule-cell align-middle p-1"></td>
-                                        <td id="cell-Thu{{ period.name }}" class="schedule-cell align-middle p-1"></td>
-                                        <td id="cell-Fri{{ period.name }}" class="schedule-cell align-middle p-1"></td>
+                                        <td id="cell-Mon{{ period.name }}" class="schedule-cell align-middle p-1" data-day="Mon" data-period-name="{{ period.name }}"></td>
+                                        <td id="cell-Tue{{ period.name }}" class="schedule-cell align-middle p-1" data-day="Tue" data-period-name="{{ period.name }}"></td>
+                                        <td id="cell-Wed{{ period.name }}" class="schedule-cell align-middle p-1" data-day="Wed" data-period-name="{{ period.name }}"></td>
+                                        <td id="cell-Thu{{ period.name }}" class="schedule-cell align-middle p-1" data-day="Thu" data-period-name="{{ period.name }}"></td>
+                                        <td id="cell-Fri{{ period.name }}" class="schedule-cell align-middle p-1" data-day="Fri" data-period-name="{{ period.name }}"></td>
                                     </tr>
                                     
                                     {% if lunch_start_time and lunch_end_time and period.end_time == lunch_start_time %}
