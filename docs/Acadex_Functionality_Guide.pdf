@@ -1,0 +1,511 @@
+%PDF-1.4
+%
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R 10 0 R 12 0 R 14 0 R 16 0 R 18 0 R 20 0 R 22 0 R] /Count 9 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+endobj
+5 0 obj
+<< /Length 4665 >>
+stream
+BT /F2 18 Tf 1 0 0 1 54 734.0 Tm (Acadex Functionality Guide) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 705.0 Tm (Version covered: Beta 1.8.0 Audience: students, administrators, maintainers, and deployment) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 692.0 Tm (operators Purpose: describe every major capability in Acadex, what each capability does, and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 679.0 Tm (how the application implements it.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 656.0 Tm (1. Product overview) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 636.0 Tm (Acadex is a Flask-based academic planning platform for students and administrators. It) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 623.0 Tm (combines schedule planning, prerequisite-aware course discovery, graduation requirement) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 610.0 Tm (tracking, faculty/course ratings, dataset administration, analytics, announcements, and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 597.0 Tm (operational health tooling in one web application.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 579.0 Tm (The application is organized around Flask blueprints:) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 561.0 Tm (- main: public landing page and public announcement APIs.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 548.0 Tm (- auth: student authentication, registration, logout, and schedule-type selection.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 535.0 Tm (- student: student catalog, schedule planning, dashboard, ratings, notifications, AI) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 522.0 Tm (recommendations, and profile features.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 509.0 Tm (- schedule: compatibility routes for schedule dashboard and deletion.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 496.0 Tm (- admin: administrative dashboard, dataset management, user/role management,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 483.0 Tm (catalog/faculty management, analytics, AI settings, activity logs, and system health.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 467.0 Tm (The data layer uses SQLAlchemy models for users, roles, schedules, courses, faculty, subject) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 454.0 Tm (areas, periods, settings, announcements, datasets, metadata fields, ratings, AI events,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 441.0 Tm (behavior events, and notifications. The runtime can use a configured database URL, derive) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 428.0 Tm (PostgreSQL connection strings from separate PG* environment variables, or fall back to) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 415.0 Tm (SQLite for local development.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 392.0 Tm (2. User roles and permissions) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 369.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 351.0 Tm (Acadex supports normal student users plus administrators. Administrators can be granted) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 338.0 Tm (permissions through roles, while legacy admin flags are still honored for compatibility.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 317.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 299.0 Tm (- User records store identity, authentication details, demographics, selected schedule) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 286.0 Tm (type, optional avatar, AI consent, and role/admin fields.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 273.0 Tm (- Role and Permission records define named access bundles.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 260.0 Tm (- User.has_permission\(\) checks assigned role permissions and falls back to admin status.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 247.0 Tm (- Admin routes use access-control helpers to deny users who are neither admins nor) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 234.0 Tm (holders of the required permission.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 221.0 Tm (- Registration fields are data-driven, allowing admins to control additional profile) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 208.0 Tm (fields collected at sign-up.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 187.0 Tm (3. Authentication and onboarding) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 164.0 Tm (Login) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 146.0 Tm (What it does: lets existing users sign in and redirects them into the appropriate student or) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 133.0 Tm (admin experience.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 115.0 Tm (How it works: the login route validates username/email and password, records login attempts,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 102.0 Tm (applies configurable rate limiting, supports legacy password upgrade behavior, stores the) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 89.0 Tm (authenticated session through Flask-Login, and routes admins to the admin dashboard or) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 76.0 Tm (students to schedule-type selection/dashboard flows.) Tj ET
+BT /F1 8 Tf 1 0 0 1 54 30 Tm (Acadex Functionality Guide) Tj ET
+BT /F1 8 Tf 1 0 0 1 488 30 Tm (Page 1 of 9) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Length 4131 >>
+stream
+BT /F2 11 Tf 1 0 0 1 54 731.0 Tm (Registration) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 713.0 Tm (What it does: lets new students create accounts with required and configurable demographic) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 700.0 Tm (fields.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 682.0 Tm (How it works: registration reads active RegistrationField definitions, validates required) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 669.0 Tm (fields and uniqueness, hashes passwords, creates a User, persists demographic values, and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 656.0 Tm (logs the user in when complete.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 635.0 Tm (Logout and schedule-type selection) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 617.0 Tm (What it does: ends sessions and lets students declare whether they are planning a four-year) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 604.0 Tm (or transfer-style path.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 586.0 Tm (How it works: logout clears the Flask-Login session; schedule-type selection stores the) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 573.0 Tm (chosen path on the user/session so eligibility and recommendation logic can use it later.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 550.0 Tm (4. Public landing page and announcements) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 527.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 509.0 Tm (Acadex includes a public landing page with configurable content sections and announcements.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 496.0 Tm (Visitors can see active announcements, and the app can track which announcement IDs have) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 483.0 Tm (been seen in the current session.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 462.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 444.0 Tm (- Landing sections and announcements are stored in database models.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 431.0 Tm (- Public routes fetch active sections and announcements in display order.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 418.0 Tm (- Announcement APIs return currently active announcements and accept a mark-seen payload) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 405.0 Tm (for session-level dismissal.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 392.0 Tm (- Admin landing-management routes create, edit, toggle, and delete announcements and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 379.0 Tm (update landing-page content.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 358.0 Tm (5. Student course catalog and search) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 335.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 317.0 Tm (Students can browse courses, search by text, filter by academic level, inspect catalog) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 304.0 Tm (details, and view prerequisite/dependency relationships.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 283.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 265.0 Tm (- Course data is read from uploaded datasets plus local course records.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 252.0 Tm (- Dataset context helpers resolve the most relevant dataset for a schedule) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 239.0 Tm (year/semester/source.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 226.0 Tm (- Metadata lookup prefers schedule-course identity \(course number, day/period, semester,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 213.0 Tm (year, dataset/source\) before falling back to normalized course codes.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 200.0 Tm (- Course search normalizes titles, numbers, instructors, semesters, and day/period) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 187.0 Tm (values for tolerant matching.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 174.0 Tm (- Level filtering can use explicit year-level metadata or parse course-number patterns) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 161.0 Tm (when explicit metadata is missing.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 148.0 Tm (- Course detail APIs return catalog metadata, prerequisites, dependency information,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 135.0 Tm (schedule identity, rating summaries, faculty information, and dynamic visible metadata) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 122.0 Tm (fields.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 101.0 Tm (6. Prerequisite and dependency intelligence) Tj ET
+BT /F1 8 Tf 1 0 0 1 54 30 Tm (Acadex Functionality Guide) Tj ET
+BT /F1 8 Tf 1 0 0 1 488 30 Tm (Page 2 of 9) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 7 0 R >>
+endobj
+9 0 obj
+<< /Length 4318 >>
+stream
+BT /F2 11 Tf 1 0 0 1 54 731.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 713.0 Tm (Acadex helps students understand whether a course depends on prior coursework and shows) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 700.0 Tm (courses that depend on a selected course.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 679.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 661.0 Tm (- Prerequisite text and metadata are scanned across available course rows.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 648.0 Tm (- The dependency graph endpoint builds prerequisite and dependent-course nodes for the) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 635.0 Tm (selected course.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 622.0 Tm (- Historical/course metadata fallback logic improves matches when datasets contain) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 609.0 Tm (duplicate course numbers or section-specific rows.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 596.0 Tm (- Requirement and eligibility helpers compare completed/planned coursework and grades) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 583.0 Tm (against prerequisite-like course references.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 562.0 Tm (7. Student schedule planning) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 539.0 Tm (Schedule creation) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 521.0 Tm (What it does: students create schedules for a chosen year and semester.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 503.0 Tm (How it works: create-schedule routes validate the requested term, apply schedule-type/year) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 490.0 Tm (eligibility, resolve the best dataset name for that context, and persist a Schedule row) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 477.0 Tm (owned either by a signed-in user or guest/session identity.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 456.0 Tm (Schedule editing) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 438.0 Tm (What it does: students add and remove section-level courses in a visual schedule grid.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 420.0 Tm (How it works: the editor loads schedule courses through an API. The browser script parses) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 407.0 Tm (day/period strings, understands compact tokens and ranges, normalizes day and period labels,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 394.0 Tm (and finds matching grid cells by data attributes or fallback text comparisons. Adding a) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 381.0 Tm (course validates ownership, resolves course metadata, detects duplicate section identities,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 368.0 Tm (checks time conflicts, and saves a ScheduleCourse row with section identity fields such as) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 355.0 Tm (day/period, semester, year, dataset name, and source.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 334.0 Tm (Course removal, schedule deletion, and grade updates) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 316.0 Tm (What it does: students can remove planned entries, delete entire schedules, and record) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 303.0 Tm (grades for completed courses.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 285.0 Tm (How it works: API routes validate ownership, modify ScheduleCourse/Schedule rows, and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 272.0 Tm (recompute dashboard progress. Grade updates persist grades on schedule-course records and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 259.0 Tm (affect completed-credit calculations.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 236.0 Tm (8. Conflict detection and timetable parsing) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 213.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 195.0 Tm (Acadex prevents or flags schedule conflicts when two courses meet at overlapping times.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 174.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 156.0 Tm (- Period definitions store start/end times.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 143.0 Tm (- Day/period parsing converts course meeting strings into structured day/period blocks.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 130.0 Tm (- Time-window helpers convert those blocks into minute ranges.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 117.0 Tm (- Overlap helpers compare windows on the same day.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 104.0 Tm (- The front-end schedule grid uses normalized day/period tokens and data attributes to) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 91.0 Tm (place courses into the correct timetable cells.) Tj ET
+BT /F1 8 Tf 1 0 0 1 54 30 Tm (Acadex Functionality Guide) Tj ET
+BT /F1 8 Tf 1 0 0 1 488 30 Tm (Page 3 of 9) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 9 0 R >>
+endobj
+11 0 obj
+<< /Length 4146 >>
+stream
+BT /F2 14 Tf 1 0 0 1 54 729.0 Tm (9. Student dashboard and graduation progress) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 706.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 688.0 Tm (The dashboard summarizes total credits, major/minor progress, area-of-study progress,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 675.0 Tm (graduation requirement checklist status, GPA-like completion signals, upcoming/planned work,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 662.0 Tm (and recommendation entry points.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 641.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 623.0 Tm (- The dashboard aggregates schedule courses by grade status, semester/year, subject) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 610.0 Tm (area, and schedule identity.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 597.0 Tm (- Graduation requirement helpers compute completed units, planned units, required units,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 584.0 Tm (metric type, and labels.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 571.0 Tm (- Area progress includes selected major/minor requirement areas, earned credits, in-) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 558.0 Tm (progress credits, total available credits, requirement remaining, and capacity) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 545.0 Tm (remaining.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 532.0 Tm (- Dashboard templates render progress cards and bars for acquired, planned, and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 519.0 Tm (available remaining credits.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 506.0 Tm (- Missing requirement information is surfaced as remaining work or checklist items.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 485.0 Tm (10. Recommendations and schedule generation) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 462.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 444.0 Tm (Acadex can preview recommendation inputs, list recommended courses, and generate suggested) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 431.0 Tm (schedules.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 410.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 392.0 Tm (- Recommendation APIs combine completed/planned courses, prerequisites, current schedule) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 379.0 Tm (type, selected year/semester, available datasets, time conflicts, and course metadata.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 366.0 Tm (- Preview endpoints expose recommendation context for the UI.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 353.0 Tm (- Generation endpoints select candidate courses, filter by eligibility and conflicts,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 340.0 Tm (and return proposed course sets for student review.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 327.0 Tm (- AI and behavior-event logging can capture recommendation usage when collection is) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 314.0 Tm (enabled and the user has consented where required.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 293.0 Tm (11. Student faculty browser) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 270.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 252.0 Tm (Students can browse faculty, filter by department, view faculty profiles, see) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 239.0 Tm (current/historical courses, and rate faculty.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 218.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 200.0 Tm (- Faculty records store names, titles, departments, bios, and linked courses.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 187.0 Tm (- Detail APIs serialize current courses, transferred courses, discontinued courses,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 174.0 Tm (advisor areas, and rating summaries.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 161.0 Tm (- Faculty course status logic distinguishes currently offered, transferred, and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 148.0 Tm (discontinued courses by comparing historical rows to active datasets.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 127.0 Tm (12. Ratings system) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 104.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 86.0 Tm (Students can rate courses and faculty across multiple dimensions, then review their own) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 73.0 Tm (submitted ratings. Administrators can inspect aggregate rating analytics.) Tj ET
+BT /F1 8 Tf 1 0 0 1 54 30 Tm (Acadex Functionality Guide) Tj ET
+BT /F1 8 Tf 1 0 0 1 488 30 Tm (Page 4 of 9) Tj ET
+endstream
+endobj
+12 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 11 0 R >>
+endobj
+13 0 obj
+<< /Length 3665 >>
+stream
+BT /F2 11 Tf 1 0 0 1 54 731.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 713.0 Tm (- Course ratings store overall score, content quality, workload, usefulness, materials) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 700.0 Tm (quality, difficulty, take-again flag, and comments.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 687.0 Tm (- Faculty ratings store overall score, teaching quality, communication, availability,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 674.0 Tm (grading fairness, engagement, difficulty, recommend flag, and comments.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 661.0 Tm (- Rating APIs enforce one rating per user per target through uniqueness rules and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 648.0 Tm (update-or-create behavior.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 635.0 Tm (- Student ratings pages query the current user's submissions.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 622.0 Tm (- Admin analytics aggregate averages, percentages, and correlation-style chart inputs.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 601.0 Tm (13. Notifications) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 578.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 560.0 Tm (Acadex shows student notifications, unread counts, and mark-read controls. Notifications are) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 547.0 Tm (used for system messages such as dataset deletion impacts.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 526.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 508.0 Tm (- Notification records store user, title, message, type, read timestamp, and creation) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 495.0 Tm (timestamp.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 482.0 Tm (- Student routes return paginated/list data, unread counts, single mark-read operations,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 469.0 Tm (and mark-all-read operations.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 456.0 Tm (- Guest/session helpers can track notification visibility for non-authenticated contexts) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 443.0 Tm (where applicable.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 422.0 Tm (14. Student profile and preferences) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 399.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 381.0 Tm (Students can maintain profile information, upload/view profile images, review preferences,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 368.0 Tm (and manage AI consent.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 347.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 329.0 Tm (- Profile routes update user fields and demographic values.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 316.0 Tm (- Profile-image handling validates allowed image extensions and serves the stored avatar) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 303.0 Tm (path or fallback.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 290.0 Tm (- Preferences and AI-consent routes store user-level choices used by recommendation and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 277.0 Tm (telemetry logic.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 256.0 Tm (15. Admin dashboard) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 233.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 215.0 Tm (The admin dashboard gives operators a high-level view of platform state, including users,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 202.0 Tm (courses, schedules, datasets, and health indicators.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 181.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 163.0 Tm (Admin index routes collect counts and summary metrics from the database, then render) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 150.0 Tm (management links and status cards. Access is guarded by admin/permission checks.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 127.0 Tm (16. Dataset management) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 104.0 Tm (What it does) Tj ET
+BT /F1 8 Tf 1 0 0 1 54 30 Tm (Acadex Functionality Guide) Tj ET
+BT /F1 8 Tf 1 0 0 1 488 30 Tm (Page 5 of 9) Tj ET
+endstream
+endobj
+14 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 13 0 R >>
+endobj
+15 0 obj
+<< /Length 4060 >>
+stream
+BT /F1 9.5 Tf 1 0 0 1 54 734.0 Tm (Administrators can upload course datasets, preview mappings, list datasets, refresh dataset) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 721.0 Tm (registry state, delete datasets safely, force-delete problematic datasets, inspect dataset) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 708.0 Tm (columns, and clean orphan/invalid dataset artifacts.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 687.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 669.0 Tm (- Upload routes accept CSV-like datasets, detect/match columns, normalize rows, and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 656.0 Tm (store data in local course tables and registry records.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 643.0 Tm (- Dataset registry rows track dataset names, source, year, semester/type, activity, and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 630.0 Tm (table metadata.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 617.0 Tm (- Preview and mapping APIs help admins align source columns with canonical course) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 604.0 Tm (fields.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 591.0 Tm (- Impact APIs count linked schedules and users before destructive deletion.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 578.0 Tm (- Delete flows remove course rows, linked schedule entries, registry rows, and notify) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 565.0 Tm (affected users.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 552.0 Tm (- Force-delete and cleanup endpoints handle stale registry rows, orphan tables, and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 539.0 Tm (invalid dataset records.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 518.0 Tm (17. Dynamic course metadata schema) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 495.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 477.0 Tm (Acadex can ingest and display arbitrary course metadata fields without requiring a database) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 464.0 Tm (migration for each new source column.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 443.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 425.0 Tm (- Dataset ingestion maps known columns to canonical course fields and stores additional) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 412.0 Tm (fields as metadata extras.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 399.0 Tm (- CourseMetadataField records track discovered metadata keys, labels, visibility,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 386.0 Tm (source, and active state.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 373.0 Tm (- Admin APIs list/create metadata fields and change visibility.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 360.0 Tm (- Student course-detail serializers include only fields marked visible for students,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 347.0 Tm (while admin flows retain full metadata.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 326.0 Tm (18. Course and faculty administration) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 303.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 285.0 Tm (Admins can create, edit, duplicate, delete, and inspect courses and faculty. They can) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 272.0 Tm (reassign placeholder/TBD faculty to real faculty members and manage instructor records.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 251.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 233.0 Tm (- Course APIs merge local and scraped/dataset courses into serializable rows.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 220.0 Tm (- Course refs encode whether an item came from local or scraped data.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 207.0 Tm (- Course mutations update canonical fields, metadata extras, subject areas, faculty) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 194.0 Tm (links, and section identity values.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 181.0 Tm (- Faculty APIs serialize active, transferred, and discontinued course states.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 168.0 Tm (- Faculty reassignment moves selected courses from placeholder faculty to target faculty) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 155.0 Tm (and syncs course instructor text.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 134.0 Tm (19. Subject areas, periods, and settings) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 111.0 Tm (What it does) Tj ET
+BT /F1 8 Tf 1 0 0 1 54 30 Tm (Acadex Functionality Guide) Tj ET
+BT /F1 8 Tf 1 0 0 1 488 30 Tm (Page 6 of 9) Tj ET
+endstream
+endobj
+16 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 15 0 R >>
+endobj
+17 0 obj
+<< /Length 4004 >>
+stream
+BT /F1 9.5 Tf 1 0 0 1 54 734.0 Tm (Admins configure academic subject areas, minimum major/minor credits, timetable periods,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 721.0 Tm (lunch settings, registration fields, and app-wide settings that influence recommendation,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 708.0 Tm (eligibility, analytics, security, and display behavior.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 687.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 669.0 Tm (- Subject-area routes update names, descriptions, active flags, and credit requirements.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 656.0 Tm (- Period routes create/update/delete named timetable periods with start/end times.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 643.0 Tm (- Settings routes persist key/value settings used by student and admin helpers.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 630.0 Tm (- Lunch settings and period times feed schedule conflict detection and grid display.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 609.0 Tm (20. User, role, and registration administration) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 586.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 568.0 Tm (Admins can review users, delete users, assign roles, manage roles/permissions, and control) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 555.0 Tm (registration fields.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 534.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 516.0 Tm (- User management routes query users with roles and demographic fields.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 503.0 Tm (- Role routes create/update permission bundles and assign them to users.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 490.0 Tm (- Registration-field routes control label, field type, required status, option values,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 477.0 Tm (and display order.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 464.0 Tm (- Delete-user APIs remove or deactivate user-owned records according to route logic.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 443.0 Tm (21. Analytics and exports) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 420.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 402.0 Tm (Acadex provides admin analytics dashboards, chart data APIs, override settings, CSV-style) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 389.0 Tm (exports, and ratings overview analytics.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 368.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 350.0 Tm (- Analytics routes aggregate schedules, courses, users, datasets, subject areas,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 337.0 Tm (ratings, and enrollment patterns.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 324.0 Tm (- Data APIs return chart-ready JSON.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 311.0 Tm (- Override APIs allow administrators to tune analytics display values without code) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 298.0 Tm (changes.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 285.0 Tm (- Export routes generate downloadable analytics data.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 272.0 Tm (- Ratings overview aggregates course and faculty dimensions and recommendation/take-) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 259.0 Tm (again percentages.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 238.0 Tm (22. AI settings and telemetry) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 215.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 197.0 Tm (Admins can configure AI/recommendation behavior and export AI or behavior event logs.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 184.0 Tm (Students can consent to AI-related data collection.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 163.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 145.0 Tm (- AI settings are stored in application settings.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 132.0 Tm (- Student AI consent is stored on the user profile.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 119.0 Tm (- Event logging helpers check collection settings and consent before inserting AIEvent) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 106.0 Tm (or BehaviorEvent records.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 93.0 Tm (- Admin export endpoints stream collected events as CSV for audit or analysis.) Tj ET
+BT /F1 8 Tf 1 0 0 1 54 30 Tm (Acadex Functionality Guide) Tj ET
+BT /F1 8 Tf 1 0 0 1 488 30 Tm (Page 7 of 9) Tj ET
+endstream
+endobj
+18 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 17 0 R >>
+endobj
+19 0 obj
+<< /Length 4225 >>
+stream
+BT /F2 14 Tf 1 0 0 1 54 729.0 Tm (23. Activity log and system health) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 706.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 688.0 Tm (Operators can inspect system activity, runtime health, schema status, process metrics,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 675.0 Tm (action logs, and run selected health-fix actions.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 654.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 636.0 Tm (- Request hooks record mutating admin/student/schedule requests into bounded action) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 623.0 Tm (logs.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 610.0 Tm (- Health APIs expose database connectivity, table/schema checks, audit data, version) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 597.0 Tm (information, active session counts, and process metrics.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 584.0 Tm (- Health-fix actions can perform targeted cleanup or repair operations.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 571.0 Tm (- Activity endpoints expose recent activity/action-log data for admin review.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 550.0 Tm (24. Runtime, deployment, and database bootstrap) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 527.0 Tm (What it does) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 509.0 Tm (Acadex can start reliably in local, Render/Railway-style, and PostgreSQL-backed) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 496.0 Tm (environments.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 475.0 Tm (How it works) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 457.0 Tm (- Runtime config resolves DATABASE_URL, translates legacy postgres:// URLs to) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 444.0 Tm (SQLAlchemy-compatible postgresql://, or builds PostgreSQL URLs from PGHOST, PGPORT,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 431.0 Tm (PGUSER, PGPASSWORD, and PGDATABASE.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 418.0 Tm (- Runtime directory helpers create required instance/upload directories and SQLite) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 405.0 Tm (parent directories.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 392.0 Tm (- Database bootstrap checks existing tables, creates missing schema in development-style) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 379.0 Tm (contexts, stamps Alembic when tables exist but migration state is missing, and runs) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 366.0 Tm (migrations when possible.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 353.0 Tm (- Security hooks set CSRF tokens, security headers, basic rate limits, and error) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 340.0 Tm (handlers.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 319.0 Tm (25. Data model summary) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 299.0 Tm (Acadex persists the following main object types:) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 281.0 Tm (- Access and identity: User, Role, Permission, RegistrationField, LoginAttempt.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 268.0 Tm (- Planning: Schedule, ScheduleCourse, SubjectArea, Course, Period.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 255.0 Tm (- Content and catalog: Faculty, Announcement, LandingPageSection, CatalogStatus,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 242.0 Tm (DatasetRegistry, CourseMetadataField, ScrapedDataset, ScrapedCourse.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 229.0 Tm (- Feedback and telemetry: CourseRating, FacultyRating, AIEvent, BehaviorEvent,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 216.0 Tm (Notification.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 203.0 Tm (- Configuration: Setting.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 187.0 Tm (These models are connected through ownership fields, foreign keys, uniqueness constraints,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 174.0 Tm (and helper methods. Schedule-course identity fields preserve section-level provenance so) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 54 161.0 Tm (dashboards, recommendations, and detail screens can resolve the correct catalog metadata.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 138.0 Tm (26. API surface summary) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 115.0 Tm (Public and authentication) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 97.0 Tm (- GET /: landing page.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 84.0 Tm (- GET /api/landing/announcements: active landing announcements.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 71.0 Tm (- POST /api/landing/announcements/mark_seen: mark announcements as seen in session.) Tj ET
+BT /F1 8 Tf 1 0 0 1 54 30 Tm (Acadex Functionality Guide) Tj ET
+BT /F1 8 Tf 1 0 0 1 488 30 Tm (Page 8 of 9) Tj ET
+endstream
+endobj
+20 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 19 0 R >>
+endobj
+21 0 obj
+<< /Length 4656 >>
+stream
+BT /F1 9.5 Tf 1 0 0 1 64 734.0 Tm (- GET|POST /login: authenticate.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 721.0 Tm (- GET|POST /register: create account.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 708.0 Tm (- GET /logout: sign out.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 695.0 Tm (- GET /choose_schedule_type: choose planning path.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 676.0 Tm (Student) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 658.0 Tm (- GET /student/courses, /student/courses/search: browse/search catalog.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 645.0 Tm (- GET /student/api/course_detail, /student/api/catalog_course_detail,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 632.0 Tm (/student/api/course-details/<id>: course detail and dependency graph.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 619.0 Tm (- GET /student/faculty, /student/api/faculty/<id>: faculty browser and detail.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 606.0 Tm (- GET /student/ratings, /student/api/ratings/my: ratings pages and current-user history.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 593.0 Tm (- POST /student/api/rate/course, /student/api/rate/faculty: submit/update ratings.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 580.0 Tm (- GET /student/dashboard: progress dashboard.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 567.0 Tm (- GET|POST /student/profile, GET /student/preferences, GET /student/profile/image:) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 554.0 Tm (profile and preferences.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 541.0 Tm (- Notification APIs under /student/api/notifications...: list, counts, mark one/all) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 528.0 Tm (read.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 515.0 Tm (- POST /student/ai/consent: update AI consent.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 502.0 Tm (- GET|POST /student/schedule/create: create schedules.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 489.0 Tm (- GET /student/schedule/edit/<id>: edit a schedule.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 476.0 Tm (- Schedule APIs under /student/api/...: list schedule courses, add/remove courses,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 463.0 Tm (delete schedule, update grades, preview/get recommendations, and generate schedules.) Tj ET
+BT /F2 11 Tf 1 0 0 1 54 444.0 Tm (Admin) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 426.0 Tm (- GET /admin/: admin dashboard.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 413.0 Tm (- Landing and announcement management under /admin/landing_management and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 400.0 Tm (/admin/announcement/....) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 387.0 Tm (- Dataset management under /admin/datasets... and /admin/api/datasets....) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 374.0 Tm (- Metadata-field APIs under /admin/api/course-metadata-fields....) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 361.0 Tm (- Settings, periods, users, roles, registration fields, subjects, instructors, courses,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 348.0 Tm (and faculty management under their respective /admin/... routes.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 335.0 Tm (- Health and repair under /admin/health, /admin/api/health-metrics, /admin/api/health-) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 322.0 Tm (fix, /admin/api/system-reset, and /admin/api/system/restore.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 309.0 Tm (- Analytics under /admin/analytics, /admin/api/analytics/data,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 296.0 Tm (/admin/api/analytics/overrides, /admin/analytics/export, and) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 283.0 Tm (/admin/api/ratings/overview.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 270.0 Tm (- AI administration under /admin/ai, /admin/ai/settings, /admin/ai/export_events.csv,) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 257.0 Tm (and /admin/ai/export_behavior_events.csv.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 244.0 Tm (- Activity logs under /admin/activity and /admin/api/activity.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54 223.0 Tm (27. Operational notes) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 203.0 Tm (- Run the app through the configured Procfile/gunicorn command in production-like) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 190.0 Tm (hosting.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 177.0 Tm (- Use pytest -q for regression tests.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 164.0 Tm (- Use migrations for schema changes, and rely on bootstrap helpers only for) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 151.0 Tm (compatibility and startup safety.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 138.0 Tm (- Keep dataset identity fields intact when modifying schedule-course logic because) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 76 125.0 Tm (metadata, conflict detection, and recommendations rely on section-level provenance.) Tj ET
+BT /F1 9.5 Tf 1 0 0 1 64 112.0 Tm (- Treat AI and behavior telemetry as configurable and consent-aware data flows.) Tj ET
+BT /F1 8 Tf 1 0 0 1 54 30 Tm (Acadex Functionality Guide) Tj ET
+BT /F1 8 Tf 1 0 0 1 488 30 Tm (Page 9 of 9) Tj ET
+endstream
+endobj
+22 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 21 0 R >>
+endobj
+xref
+0 23
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000176 00000 n 
+0000000246 00000 n 
+0000000321 00000 n 
+0000005038 00000 n 
+0000005174 00000 n 
+0000009357 00000 n 
+0000009493 00000 n 
+0000013863 00000 n 
+0000014000 00000 n 
+0000018199 00000 n 
+0000018337 00000 n 
+0000022055 00000 n 
+0000022193 00000 n 
+0000026306 00000 n 
+0000026444 00000 n 
+0000030501 00000 n 
+0000030639 00000 n 
+0000034917 00000 n 
+0000035055 00000 n 
+0000039764 00000 n 
+trailer
+<< /Size 23 /Root 1 0 R >>
+startxref
+39902
+%%EOF
