@@ -5,6 +5,19 @@
 
 {% block content %}
 
+{% macro ax_progress(done, planned, required, title='', height='8px') -%}
+    {% set req = (required|float) if (required|float) > 0 else 1.0 %}
+    {% set done_pct = ((done|float) / req) * 100 %}
+    {% set planned_pct = ((planned|float) / req) * 100 %}
+    {% set done_w = [done_pct, 100]|min %}
+    {% set planned_w = [planned_pct, 100 - done_w]|min %}
+    <div class="progress" style="height:{{ height }};border-radius:999px;overflow:hidden;background:var(--ax-border);"{% if title %} title="{{ title }}"{% endif %}>
+        <div class="progress-bar bg-success" style="width:{{ [done_w, 0]|max }}%"></div>
+        <div class="progress-bar" style="width:{{ [planned_w, 0]|max }}%;background:#818CF8;opacity:.65;"></div>
+    </div>
+{%- endmacro %}
+
+
 {% if request.args.get('deleted') == '1' %}
 <div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
     Schedule deleted successfully.
@@ -90,38 +103,50 @@
             {% if area_progress %}
                 {% for ap in area_progress %}
                 {% set has_req = ap.required > 0 %}
-                {% set bar_max = [ap.required, ap.earned + ap.in_progress, 1]|max %}
-                {% set pct_e = ((ap.earned / bar_max) * 100) %}
-                {% set pct_i = ((ap.in_progress / bar_max) * 100) %}
-                <div class="mb-3">
-                    <div class="d-flex justify-content-between align-items-baseline mb-1">
-                        <span class="fw-semibold" style="font-size:.85rem;">
+                {% set bar_total = (ap.bar_total|float) if (ap.bar_total|float) > 0 else 1.0 %}
+                {% set pct_e = ((ap.earned|float / bar_total) * 100) %}
+                {% set pct_p = ((ap.in_progress|float / bar_total) * 100) %}
+                {% set pct_avail = ((ap.capacity_remaining|float / bar_total) * 100) %}
+                {% set earned_w = [pct_e, 100]|min %}
+                {% set planned_w = [pct_p, 100 - earned_w]|min %}
+                {% set avail_w = [pct_avail, 100 - earned_w - planned_w]|min %}
+                <div class="mb-3 p-2" style="border:1px solid var(--ax-border);border-radius:var(--ax-radius-xs);background:color-mix(in srgb,var(--ax-surface) 94%,var(--ax-bg));">
+                    <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                        <div class="fw-semibold" style="font-size:.86rem;color:var(--ax-text);">
                             {{ ap.name }}
                             {% if ap.is_major %}
                             <span class="badge" style="font-size:.58rem;background:rgba(34,197,94,.12);color:#22C55E;border:1px solid rgba(34,197,94,.25);margin-left:4px;">Major</span>
                             {% elif ap.is_minor %}
                             <span class="badge" style="font-size:.58rem;background:rgba(129,140,248,.12);color:#818CF8;border:1px solid rgba(129,140,248,.25);margin-left:4px;">Minor</span>
                             {% endif %}
-                        </span>
-                        <span style="font-size:.72rem;color:var(--ax-muted);">
-                            <span style="color:var(--ax-text);font-weight:600;">{{ ap.earned }}</span> earned
-                            {% if ap.in_progress > 0 %} · <span style="color:#818CF8;font-weight:600;">{{ ap.in_progress }}</span> planned{% endif %}
-                            {% if has_req and ap.remaining > 0 %} · <span style="color:var(--ax-muted);">{{ ap.remaining }}</span> left{% endif %}
-                            {% if has_req %} / {{ ap.required }} req{% endif %}
-                            {% if ap.total_available > 0 %} · <span style="opacity:.65;">{{ ap.total_available }} avail</span>{% endif %}
-                        </span>
+                            {% if has_req %}<span class="badge" style="font-size:.56rem;background:rgba(245,158,11,.10);color:#F59E0B;border:1px solid rgba(245,158,11,.22);margin-left:4px;">Req {{ ap.required }}cr</span>{% endif %}
+                        </div>
+                        <div class="text-end" style="font-size:.72rem;color:var(--ax-muted);white-space:nowrap;">
+                            <span style="color:#22C55E;font-weight:700;">{{ ap.earned }}</span> acquired
+                            <span style="color:#818CF8;font-weight:700;">+ {{ ap.in_progress }}</span> planned
+                            <span style="opacity:.75;">/ {{ ap.total_available }} available</span>
+                        </div>
                     </div>
-                    <div class="progress" style="height:8px;border-radius:5px;overflow:hidden;background:var(--ax-border);"
-                         title="Earned: {{ ap.earned }} · In Progress: {{ ap.in_progress }} · Available: {{ ap.total_available }}{% if has_req %} · Remaining: {{ ap.remaining }}{% endif %}">
-                        <div class="progress-bar bg-success" style="width:{{ [pct_e, 100]|min }}%"></div>
-                        <div class="progress-bar" style="width:{{ [pct_i, 100 - [pct_e, 100]|min]|min }}%;background:#818CF8;opacity:.6;"></div>
+                    <div class="progress" style="height:12px;border-radius:999px;overflow:hidden;background:color-mix(in srgb,var(--ax-border) 70%,transparent);"
+                         title="Acquired: {{ ap.earned }} · Planned: {{ ap.in_progress }} · Available remaining: {{ ap.capacity_remaining }} · Total available: {{ ap.total_available }}{% if has_req %} · Requirement left: {{ ap.remaining }}{% endif %}">
+                        <div class="progress-bar bg-success" style="width:{{ [earned_w, 0]|max }}%"></div>
+                        <div class="progress-bar" style="width:{{ [planned_w, 0]|max }}%;background:#818CF8;opacity:.75;"></div>
+                        <div class="progress-bar" style="width:{{ [avail_w, 0]|max }}%;background:rgba(148,163,184,.45);"></div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mt-1" style="font-size:.67rem;color:var(--ax-muted);">
+                        <span>Acquired {{ ap.earned }}cr · Planned {{ ap.in_progress }}cr · Available left {{ ap.capacity_remaining }}cr</span>
+                        {% if has_req %}
+                        <span>{{ ap.remaining }}cr requirement remaining</span>
+                        {% else %}
+                        <span>{{ ap.total_available }}cr total available</span>
+                        {% endif %}
                     </div>
                 </div>
                 {% endfor %}
-                <div class="d-flex gap-3 pt-1" style="font-size:.68rem;color:var(--ax-muted);border-top:1px solid var(--ax-border);padding-top:.5rem;">
-                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22C55E;"></span> Earned</span>
-                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#818CF8;opacity:.6;"></span> Planned / In Progress</span>
-                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ax-border);"></span> Remaining</span>
+                <div class="d-flex flex-wrap gap-3 pt-1" style="font-size:.68rem;color:var(--ax-muted);border-top:1px solid var(--ax-border);padding-top:.5rem;">
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22C55E;"></span> Acquired credits</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#818CF8;opacity:.75;"></span> Planned credits</span>
+                    <span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:rgba(148,163,184,.45);"></span> Available remaining credits</span>
                 </div>
             {% else %}
             <div class="p-4 text-center" style="color:var(--ax-muted);font-size:.88rem;">
@@ -164,6 +189,16 @@
                     {% endif %}
                 </div>
                 <div style="font-size:.76rem;color:var(--ax-muted);margin-left:1.4rem;">{{ item.note }}</div>
+                {% if item.required_units and item.required_units > 0 %}
+                <div style="margin-left:1.4rem;margin-top:.45rem;">
+                    {{ ax_progress(item.completed_units, item.planned_units, item.required_units,
+                        (item.completed_units|string) ~ ' done · ' ~ (item.planned_units|string) ~ ' planned · ' ~ (item.required_units|string) ~ ' ' ~ item.unit_label ~ ' required') }}
+                    <div class="d-flex justify-content-between mt-1" style="font-size:.66rem;color:var(--ax-muted);">
+                        <span><strong style="color:#22C55E;">{{ item.completed_units|round(1) }}</strong> done{% if item.planned_units > 0 %} · <strong style="color:#818CF8;">{{ item.planned_units|round(1) }}</strong> planned{% endif %}</span>
+                        <span>{{ item.required_units|round(1) }} {{ item.unit_label }} required</span>
+                    </div>
+                </div>
+                {% endif %}
                 {% if item.courses %}
                 <div class="d-flex flex-wrap gap-1 mt-1" style="margin-left:1.4rem;">
                     {% for c in item.courses %}
@@ -209,11 +244,13 @@
                 </div>
                 {% endif %}
                 {# Progress bar #}
-                {% set mc_pct_e = ((mc.earned_credits / mc.total_credits) * 100) if mc.total_credits > 0 else 0 %}
-                {% set mc_pct_p = ((mc.planned_credits / mc.total_credits) * 100) if mc.total_credits > 0 else 0 %}
-                <div class="progress mb-2" style="height:8px;border-radius:5px;overflow:hidden;background:var(--ax-border);">
-                    <div class="progress-bar bg-success" style="width:{{ [mc_pct_e, 100]|min }}%"></div>
-                    <div class="progress-bar" style="width:{{ [mc_pct_p, 100 - [mc_pct_e, 100]|min]|min }}%;background:#818CF8;opacity:.6;"></div>
+                <div class="mb-2">
+                    {{ ax_progress(mc.earned_credits, mc.planned_credits, mc.total_credits,
+                        (mc.earned_credits|string) ~ ' earned · ' ~ (mc.planned_credits|string) ~ ' planned · ' ~ (mc.total_credits|string) ~ ' credits required') }}
+                    <div class="d-flex justify-content-between mt-1" style="font-size:.66rem;color:var(--ax-muted);">
+                        <span><strong style="color:#22C55E;">{{ mc.earned_credits }}</strong> earned{% if mc.planned_credits > 0 %} · <strong style="color:#818CF8;">{{ mc.planned_credits }}</strong> planned{% endif %}</span>
+                        <span>{{ mc.total_credits }} credits required</span>
+                    </div>
                 </div>
                 {# Seminar + GRP status (Option 1 only) #}
                 {% if mc.seminar_required %}
@@ -243,9 +280,11 @@
                 {% if mc.designated %}
                 <div class="mb-2">
                     <div style="font-size:.76rem;color:var(--ax-muted);font-weight:600;margin-bottom:.3rem;">
-                        Designated Courses ({{ mc.designated_completed }} / {{ mc.designated_total }})
+                        Designated Courses ({{ mc.designated_completed }}{% if mc.designated_planned > 0 %} + {{ mc.designated_planned }} planned{% endif %} / {{ mc.designated_total }})
                     </div>
-                    <div class="d-flex flex-wrap gap-1">
+                    {{ ax_progress(mc.designated_completed, mc.designated_planned, mc.designated_total,
+                        (mc.designated_completed|string) ~ ' completed · ' ~ (mc.designated_planned|string) ~ ' planned · ' ~ (mc.designated_total|string) ~ ' designated courses', '6px') }}
+                    <div class="d-flex flex-wrap gap-1 mt-2">
                         {% for d in mc.designated %}
                         <span style="font-size:.7rem;padding:.2rem .5rem;border-radius:var(--ax-radius-xs);
                             {% if d.status == 'completed' %}background:rgba(34,197,94,.08);color:#22C55E;border:1px solid rgba(34,197,94,.2);
@@ -276,6 +315,14 @@
                     <span class="badge" style="font-size:.56rem;background:rgba(34,197,94,.12);color:#22C55E;border:1px solid rgba(34,197,94,.25);">Complete</span>
                     {% endif %}
                 </div>
+                <div class="mb-2">
+                    {{ ax_progress(mn.completed_courses, mn.planned_courses, mn.total_courses,
+                        (mn.completed_courses|string) ~ ' completed · ' ~ (mn.planned_courses|string) ~ ' planned · ' ~ (mn.total_courses|string) ~ ' courses required') }}
+                    <div class="d-flex justify-content-between mt-1" style="font-size:.66rem;color:var(--ax-muted);">
+                        <span><strong style="color:#22C55E;">{{ mn.completed_courses }}</strong> completed{% if mn.planned_courses > 0 %} · <strong style="color:#818CF8;">{{ mn.planned_courses }}</strong> planned{% endif %}</span>
+                        <span>{{ mn.total_courses }} courses required</span>
+                    </div>
+                </div>
                 {# Level distribution #}
                 {% for level, ls in mn.level_status.items() %}
                 <div class="d-flex align-items-center gap-2 mb-1" style="font-size:.74rem;">
@@ -284,7 +331,13 @@
                     {% else %}
                     <span style="color:var(--ax-muted);opacity:.5;">{{ hi('minus-circle', 'ax-icon') }}</span>
                     {% endif %}
-                    <span style="color:var(--ax-text);">{{ level }}-level: {{ ls.completed }}{% if ls.planned > 0 %} (+{{ ls.planned }} planned){% endif %} / {{ ls.needed }} needed</span>
+                    <div class="flex-grow-1">
+                        <div class="d-flex justify-content-between">
+                            <span style="color:var(--ax-text);">{{ level }}-level</span>
+                            <span style="color:var(--ax-muted);">{{ ls.completed }}{% if ls.planned > 0 %} + {{ ls.planned }} planned{% endif %} / {{ ls.needed }}</span>
+                        </div>
+                        {{ ax_progress(ls.completed, ls.planned, ls.needed, (level|string) ~ '-level progress', '5px') }}
+                    </div>
                 </div>
                 {% endfor %}
                 {# Grade B requirement – per level group #}
@@ -295,7 +348,13 @@
                     {% else %}
                     <span style="color:var(--ax-muted);opacity:.5;">{{ hi('minus-circle', 'ax-icon') }}</span>
                     {% endif %}
-                    <span style="color:var(--ax-text);">Grade B+ ({{ gb.label }}): {{ gb.count }} / {{ gb.needed }} needed</span>
+                    <div class="flex-grow-1">
+                        <div class="d-flex justify-content-between">
+                            <span style="color:var(--ax-text);">Grade B+ ({{ gb.label }})</span>
+                            <span style="color:var(--ax-muted);">{{ gb.count }} / {{ gb.needed }}</span>
+                        </div>
+                        {{ ax_progress(gb.count, 0, gb.needed, 'Grade B+ requirement progress', '5px') }}
+                    </div>
                 </div>
                 {% endfor %}
                 {# Course chips #}
